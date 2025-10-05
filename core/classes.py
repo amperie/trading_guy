@@ -1,6 +1,7 @@
 """
 Required data passing classes
 """
+import datetime
 from enum import Enum
 from dataclasses import dataclass
 
@@ -14,6 +15,24 @@ class OrderType(Enum):
     STOP_LOSS = 3
     BRACKET = 4
 
+class OrderStatus(Enum):
+    PENDING = 0
+    FILLED = 1
+
+@dataclass
+class PriceData:
+    symbol: str
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    trade_count: int = None
+    vwp: float = None
+    exchange: float = None
+
+
 @dataclass
 class MarketSignal():
     type: OrderType
@@ -23,3 +42,4 @@ class MarketSignal():
 class Order():
     type: OrderType
     ticker: str
+    status: OrderStatus

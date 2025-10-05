@@ -7,14 +7,62 @@ Interfaces:
  - 
 """
 from abc import ABC, abstractmethod
+from typing import Dict, Any, final, List
 
-from core.classes import MarketSignal
+from core.classes import MarketSignal, PriceData
+from collections import defaultdict, deque
 
 
 class Algorithm(ABC):
+
+    default_cfg = {
+        "history_length": 0,
+        "full_history": False,
+    }
+
+    def __init__(self, cfg: Dict[str, Any]=None):
+
+        super().__init__()
+        if cfg is None:
+            cfg = self.default_cfg
+        else:
+            self.cfg = {**self.default_cfg, **cfg}
+
+        if "history_length" in cfg:
+            self.history_length = cfg["history_length"]
+        else:
+            self.history_length = 0
+        self.price_history: Dict[str, deque] = defaultdict(lambda: deque())
+        self.price_data_history: Dict[str, deque] = defaultdict(lambda: deque())
+        self.full_history: List[Dict[str, PriceData]] = []
+
+        if self.history_length > 0:
+            # Initialize deques with maxlen for automatic size management
+            self.price_history = defaultdict(lambda: deque(maxlen=self.history_length))
+            self.price_data_history = defaultdict(lambda: deque(maxlen=self.history_length))
+        else:
+            self.price_history = {}
+
+        self.full_history = []
+
+    def _update_history(self, data: Dict[str, PriceData]):
+        for symbol, price_data in data.items():
+            # Append to limited history
+            if self.history_length > 0:
+                self.price_history[symbol].append(price_data.close)
+                self.price_data_history[symbol].append(price_data)
+            # Append full history if configured to do so
+            if "full_history" in self.cfg and self.cfg["full_history"] is True:
+                self.full_history.append(data)
+
+    @final
+    def on_data(self, data: Dict[str,PriceData]) -> list[MarketSignal]:
+        # Add logic for history and other stuff here
+        self._update_history(data)
+
+        # Run the logic after
+        return self.on_data_logic(data)
+
     @abstractmethod
-    def initialize(self):
-        pass
-    @abstractmethod
-    def on_data(self) -> list[MarketSignal]:
+    def on_data_logic(self, data: Dict[str,PriceData]) -> list[MarketSignal]:
         pass
