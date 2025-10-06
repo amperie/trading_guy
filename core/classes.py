@@ -1,7 +1,7 @@
 """
 Required data passing classes
 """
-import datetime
+from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass
 
@@ -34,12 +34,12 @@ class PriceData:
 
 
 @dataclass
-class MarketSignal():
+class MarketSignal:
     type: OrderType
     ticker: str
 
 @dataclass
-class Order():
+class Order:
     type: OrderType
     ticker: str
     status: OrderStatus

@@ -1,0 +1,11 @@
+data_provider:
+  provider: data_providers.test_data_provider.TestDataProvider
+  path: "../SPXU.csv"
+  truncate: 0
+simulator:
+  data_provider:
+    provider: "data_providers.test_data_provider.TestDataProvider"
+    path: "../data/SPXU.csv"
+    truncate: 20
+  algorithm:
+    algorithm: none
