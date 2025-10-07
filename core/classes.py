@@ -29,8 +29,15 @@ class PriceData:
     close: float
     volume: float
     trade_count: int = None
-    vwp: float = None
+    vwap: float = None
     exchange: float = None
+
+    @classmethod
+    def from_dict(cls, data: dict, timestamp: datetime=None):
+        """Create a PriceData instance from a dictionary."""
+        if timestamp is not None:
+            data['timestamp'] = timestamp
+        return cls(**data)
 
 
 @dataclass
