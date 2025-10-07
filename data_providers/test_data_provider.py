@@ -1,5 +1,5 @@
 """
-Data provider that jsut reads the SPXU data file locally
+Data provider that jsut reads the test data file locally
 """
 import pandas as pd
 

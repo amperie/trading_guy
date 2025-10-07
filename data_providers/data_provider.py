@@ -11,6 +11,8 @@ from utils.config_manager import ConfigManager
 
 class DataProvider(ABC):
 
+    data: pd.DataFrame
+
     def __init__(self, cfg: dict=None):
         cm = ConfigManager()
         if cfg is None:
@@ -26,33 +28,27 @@ class DataProvider(ABC):
     def get_data(self):
         return self.data
 
-    def iterate(self) -> dict[str, PriceData]:
+    def iterate(self) -> list[PriceData]:
         if self.data is None:
             self.load_data()
 
-        # Check how the data is sorted and iterate from older to newer
-        if self.data['timestamp'].iat[0] > self.data['timestamp'].iat[1]:
-            # data is sorted descending (later times at the top
-            # Iterate backwards through the df
-            for row in self.data[::-1].itertuples(index=False):
-              yield PriceData(
-                  symbol=row.symbol,
-                  timestamp=row.timestamp,
-                  open=row.open,
-                  high=row.high,
-                  low=row.low,
-                  close=row.close,
-                  volume=row.volume
-              )
-        else:
-            # Iterate forward
-            for row in self.data.itertuples(index=False):
-              yield PriceData(
-                  symbol=row.symbol,
-                  timestamp=row.timestamp,
-                  open=row.open,
-                  high=row.high,
-                  low=row.low,
-                  close=row.close,
-                  volume=row.volume
-              )
+        # Get the range of date times to iterate through
+        dts = self.data.get_level_values('timestamp').unique().sort_values()
+        # Iterate through all the timestamps in the data
+        for ts in dts:
+            pt = ts.to_pydatetime()
+            # Get the data for the timestamp in a dict
+            ts_data = (self.data.xs(
+                        timestamp, level='timestamp')
+                       .reset_index()
+                       .to_dict(orient='records')
+                       )
+            # turn it into a list of PriceData
+            retval = [
+                # Add the datetime back in
+                PriceData().from_dict(tick, pt)
+                for tick in ts_data
+            ]
+
+            yield retval
+  

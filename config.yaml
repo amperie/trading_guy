@@ -5,7 +5,7 @@ data_provider:
 simulator:
   data_provider:
     provider: "data_providers.test_data_provider.TestDataProvider"
-    path: "../data/SPXU.csv"
+    path: "../data/test_data.csv"
     truncate: 20
   algorithm:
     algorithm: "algorithms.test_algorithm.TestAlgorithm"

@@ -11,4 +11,5 @@ Interfaces:
 """
 
 class Portfolio:
-    pass
+    def __init__(self, cfg: dict=None):
+        pass

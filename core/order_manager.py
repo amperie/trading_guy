@@ -6,4 +6,5 @@ execute_order(s): takes orders as input and executes them (backtesting or real t
 """
 
 class OrderManager:
-    pass
+    def __init__(self, cfg: dict=None):
+        pass

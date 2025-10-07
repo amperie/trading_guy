@@ -4,6 +4,7 @@ Iterates and feeds data through the system as if it were coming from a real time
 """
 from core.classes import PriceData
 from core.algorithm import Algorithm
+from core.portfolio import Portfolio
 from core.order_manager import OrderManager
 from data_providers.data_provider import DataProvider
 from data_providers.test_data_provider import TestDataProvider
@@ -35,7 +36,7 @@ class Simulator:
             # Load from config file
             al_cfg = cfg_dict["algorithm"]
             self.al = instantiate_from_string(
-                al_cfg.algorithm, cfg=al_cfg
+                al_cfg['algorithm'], cfg=al_cfg
             )
         else:
             self.al = al
@@ -43,7 +44,7 @@ class Simulator:
         if om is None:
             om_cfg = cfg_dict["order_manager"]
             self.om = instantiate_from_string(
-                om_cfg.order_manager, cfg=om_cfg
+                om_cfg['order_manager'], cfg=om_cfg
             )
         else:
             self.om = om
@@ -51,7 +52,7 @@ class Simulator:
         if pf is None:
             pf_cfg = cfg_dict["portfolio"]
             self.pf = instantiate_from_string(
-                pf_cfg.portfolio, cfg=pf_cfg
+                pf_cfg['portfolio'], cfg=pf_cfg
             )
         else:
             self.pf = pf
@@ -62,4 +63,5 @@ class Simulator:
         Portfolio outputs a list of orders, feed those to the OrderManager
         """
 
-        for tick in self.dp.iterate()
+        for tick in self.dp.iterate():
+            pass
