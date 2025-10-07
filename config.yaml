@@ -8,4 +8,14 @@ simulator:
     path: "../data/SPXU.csv"
     truncate: 20
   algorithm:
-    algorithm: none
+    algorithm: "algorithms.test_algorithm.TestAlgorithm"
+    # Algorithm specific configs go here
+  order_manager:
+    order_manager: "core.order_manager.OrderManager"
+    # OM specific config goes here
+  portfolio:
+    portfolio: "core.portfolio.Portfolio"
+    # PF specific config here
+  alpaca:
+    api_key: ""
+    secret_key: ""
