@@ -9,3 +9,6 @@ Interfaces:
     - Keeps a history of orders and signals
     - Has an OrderManager member to handle the orders
 """
+
+class Portfolio:
+    pass

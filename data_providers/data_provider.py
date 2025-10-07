@@ -26,7 +26,7 @@ class DataProvider(ABC):
     def get_data(self):
         return self.data
 
-    def iterate(self):
+    def iterate(self) -> dict[str, PriceData]:
         if self.data is None:
             self.load_data()
 

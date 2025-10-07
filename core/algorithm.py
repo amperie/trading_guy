@@ -37,7 +37,7 @@ class Algorithm(ABC):
         self.full_history: List[Dict[str, PriceData]] = []
 
         if self.history_length > 0:
-            # Initialize deques with maxlen for automatic size management
+            # Initialize dequeues with maxlen for automatic size management
             self.price_history = defaultdict(lambda: deque(maxlen=self.history_length))
             self.price_data_history = defaultdict(lambda: deque(maxlen=self.history_length))
         else:

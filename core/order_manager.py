@@ -4,3 +4,6 @@ Interfaces:
 get_orders_status: get status of orders that may take cycles to execute
 execute_order(s): takes orders as input and executes them (backtesting or real time)
 """
+
+class OrderManager:
+    pass
