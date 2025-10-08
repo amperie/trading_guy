@@ -1,3 +1,10 @@
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  console: true
+  folder: "logs"  # Folder for log files
+  filename: "trading.log"  # Set to null to disable file logging
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
 data_provider:
   provider: data_providers.test_data_provider.TestDataProvider
   path: "../SPXU.csv"
