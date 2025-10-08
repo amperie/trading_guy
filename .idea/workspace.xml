@@ -6,16 +6,12 @@
   <component name="ChangeListManager">
     <list default="true" id="11800fda-e562-458a-8c29-9868f989205a" name="Changes" comment="gitignore">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/algorithms/test_algorithm.py" beforeDir="false" afterPath="$PROJECT_DIR$/algorithms/test_algorithm.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/config.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/core/classes.py" beforeDir="false" afterPath="$PROJECT_DIR$/core/classes.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/core/order_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/core/order_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/algorithm.py" beforeDir="false" afterPath="$PROJECT_DIR$/core/algorithm.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/core/portfolio.py" beforeDir="false" afterPath="$PROJECT_DIR$/core/portfolio.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/data/alpaca_downloader.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/data/alpaca_downloader.ipynb" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/data_providers/data_provider.py" beforeDir="false" afterPath="$PROJECT_DIR$/data_providers/data_provider.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/data_providers/test_data_provider.py" beforeDir="false" afterPath="$PROJECT_DIR$/data_providers/test_data_provider.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/engines/simulator.py" beforeDir="false" afterPath="$PROJECT_DIR$/engines/simulator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/testing.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/testing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/scratch.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/tests/scratch.ipynb" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -65,6 +61,7 @@
   "keyToString": {
     "ASKED_MARK_IGNORED_FILES_AS_EXCLUDED": "true",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.simulator.executor": "Debug",
     "Python.testing.executor": "Debug",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
@@ -72,6 +69,7 @@
     "git-widget-placeholder": "main",
     "ignore.virus.scanning.warn.message": "true",
     "last_opened_file_path": "E:/Programming/trading_guy",
+    "node.js.selected.package.tslint": "(autodetect)",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
   }
 }]]></component>
@@ -159,21 +157,22 @@
           <option name="timeStamp" value="1" />
         </line-breakpoint>
         <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/tests/testing.py</url>
-          <line>7</line>
-          <option name="timeStamp" value="3" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/engines/simulator.py</url>
-          <line>66</line>
-          <option name="timeStamp" value="5" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
           <url>file://$PROJECT_DIR$/data_providers/data_provider.py</url>
-          <line>31</line>
-          <option name="timeStamp" value="6" />
+          <line>59</line>
+          <option name="timeStamp" value="12" />
         </line-breakpoint>
       </breakpoints>
+      <default-breakpoints>
+        <breakpoint type="python-exception">
+          <properties notifyOnTerminate="true" exception="BaseException">
+            <option name="notifyOnTerminate" value="true" />
+          </properties>
+        </breakpoint>
+      </default-breakpoints>
     </breakpoint-manager>
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/trading_guy$testing.coverage" NAME="testing Coverage Results" MODIFIED="1759876765778" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tests" />
+    <SUITE FILE_PATH="coverage/trading_guy$simulator.coverage" NAME="simulator Coverage Results" MODIFIED="1759874890921" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/engines" />
   </component>
 </project>

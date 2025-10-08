@@ -5,7 +5,9 @@ Inherited classes will provide test data, backtesting data or real time data
 
 import pandas as pd
 from abc import ABC, abstractmethod
+from datetime import datetime
 
+from IPython.utils.terminal import set_term_title
 from core.classes import PriceData
 from utils.config_manager import ConfigManager
 
@@ -21,6 +23,7 @@ class DataProvider(ABC):
             self.cfg = {**cm.get("data_provider"), **cfg}
         self.data = None
 
+
     @abstractmethod
     def load_data(self):
         pass
@@ -32,21 +35,25 @@ class DataProvider(ABC):
         if self.data is None:
             self.load_data()
 
+        tmp_data = self.data.set_index(['symbol',"timestamp"])
         # Get the range of date times to iterate through
-        dts = self.data.get_level_values('timestamp').unique().sort_values()
+        dts = self.data['timestamp'].unique()
+        sdts = sorted(
+            dts, key=lambda x: datetime.strptime(x, '%Y-%m-%d %H:%M:%S%z'))
         # Iterate through all the timestamps in the data
-        for ts in dts:
-            pt = ts.to_pydatetime()
+        for ts in sdts:
+            # TODO: fix all these conversions back and forth
+            pt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S%z')
             # Get the data for the timestamp in a dict
-            ts_data = (self.data.xs(
-                        timestamp, level='timestamp')
+            ts_data = (tmp_data.xs(
+                        ts, level='timestamp')
                        .reset_index()
                        .to_dict(orient='records')
                        )
             # turn it into a list of PriceData
             retval = [
                 # Add the datetime back in
-                PriceData().from_dict(tick, pt)
+                PriceData.from_dict(tick, pt)
                 for tick in ts_data
             ]
 

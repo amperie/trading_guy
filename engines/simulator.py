@@ -8,6 +8,7 @@ from core.portfolio import Portfolio
 from core.order_manager import OrderManager
 from data_providers.data_provider import DataProvider
 from data_providers.test_data_provider import TestDataProvider
+from core.classes import MarketSignal
 from utils.utils import instantiate_from_string
 from utils.config_manager import ConfigManager
 
@@ -51,11 +52,9 @@ class Simulator:
 
         if pf is None:
             pf_cfg = cfg_dict["portfolio"]
-            self.pf = instantiate_from_string(
-                pf_cfg['portfolio'], cfg=pf_cfg
-            )
-        else:
-            self.pf = pf
+            pf = Portfolio(pf_cfg)
+        pf.set_order_manager(self.om)
+        self.pf = pf
 
     def run(self):
         """Run through the data, feed it into the algorithm
@@ -64,4 +63,9 @@ class Simulator:
         """
 
         for tick in self.dp.iterate():
-            pass
+            process_tick(tick)
+
+    def process_tick(self, tick: list[PriceData]):
+
+        market_signals = self.al.on_data(tick)
+        orders = self.pf.process_market_signals(market_signals)

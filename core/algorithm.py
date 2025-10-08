@@ -56,7 +56,7 @@ class Algorithm(ABC):
                 self.full_history.append(data)
 
     @final
-    def on_data(self, data: Dict[str,PriceData]) -> list[MarketSignal]:
+    def on_data(self, data: list[PriceData]) -> list[MarketSignal]:
         # Add logic for history and other stuff here
         self._update_history(data)
 
@@ -64,5 +64,5 @@ class Algorithm(ABC):
         return self.on_data_logic(data)
 
     @abstractmethod
-    def on_data_logic(self, data: Dict[str,PriceData]) -> list[MarketSignal]:
+    def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
         pass
