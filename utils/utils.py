@@ -1,6 +1,8 @@
 import importlib
 from typing import Any
 
+from core.classes import PriceData, MarketSignal
+
 
 def instantiate_from_string(full_path: str, *args, **kwargs) -> Any:
     """
@@ -24,3 +26,10 @@ def instantiate_from_string(full_path: str, *args, **kwargs) -> Any:
     module = importlib.import_module(module_path)
     cls = getattr(module, class_name)
     return cls(*args, **kwargs)
+
+
+def find_pricedata_in_list(symbol: str, pds: list[PriceData]) -> PriceData:
+    retval = next(x for x in pds if x['symbol'] == symbol)
+
+def find_marketsignal_in_list(symbol: str, pds: list[MarketSignal]) -> MarketSignal:
+    retval = next(x for x in pds if x['symbol'] == symbol)

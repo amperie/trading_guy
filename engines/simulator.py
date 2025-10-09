@@ -68,4 +68,4 @@ class Simulator:
     def process_tick(self, tick: list[PriceData]):
 
         market_signals = self.al.on_data(tick)
-        orders = self.pf.process_market_signals(market_signals)
+        orders = self.pf.process_market_signals(market_signals, tick)
