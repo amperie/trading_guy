@@ -63,9 +63,9 @@ class Simulator:
         """
 
         for tick in self.dp.iterate():
-            process_tick(tick)
+            self.process_tick(tick)
 
     def process_tick(self, tick: list[PriceData]):
 
         market_signals = self.al.on_data(tick)
-        orders = self.pf.process_market_signals(market_signals, tick)
+        orders = self.pf.process_tick_market_signals(market_signals, tick)

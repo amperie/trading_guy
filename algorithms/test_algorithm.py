@@ -1,11 +1,17 @@
 from typing import Dict
-
+import random
 from core.algorithm import Algorithm
-from core.classes import PriceData, MarketSignal
+from core.classes import PriceData, MarketSignal, SignalType
 
 
 class TestAlgorithm(Algorithm):
-    pass
 
     def on_data_logic(self, data: Dict[str,PriceData]) -> list[MarketSignal]:
-        pass
+        r = random.randint(0,100)
+        if r > 50:
+            signal = SignalType.BUY
+        else:
+            signal = SignalType.SELL
+
+        retval = [MarketSignal(signal, x.symbol, 100) for x in data]
+        return retval

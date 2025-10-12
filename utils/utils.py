@@ -29,7 +29,15 @@ def instantiate_from_string(full_path: str, *args, **kwargs) -> Any:
 
 
 def find_pricedata_in_list(symbol: str, pds: list[PriceData]) -> PriceData:
-    retval = next(x for x in pds if x['symbol'] == symbol)
+    try:
+        retval = next(x for x in pds if x.symbol == symbol)
+    except StopIteration:
+        retval = None
+    return retval
 
 def find_marketsignal_in_list(symbol: str, pds: list[MarketSignal]) -> MarketSignal:
-    retval = next(x for x in pds if x['symbol'] == symbol)
+    try:
+        retval = next(x for x in pds if x.symbol == symbol)
+    except StopIteration:
+        retval = None
+    return retval

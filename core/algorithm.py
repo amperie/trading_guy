@@ -26,8 +26,9 @@ class Algorithm(ABC):
         if cfg is None:
             cfg = self.default_cfg
         else:
-            self.cfg = {**self.default_cfg, **cfg}
+            cfg = {**self.default_cfg, **cfg}
 
+        self.cfg = cfg
         if "history_length" in cfg:
             self.history_length = cfg["history_length"]
         else:
@@ -45,12 +46,13 @@ class Algorithm(ABC):
 
         self.full_history = []
 
-    def _update_history(self, data: Dict[str, PriceData]):
-        for symbol, price_data in data.items():
+    def _update_history(self, data: list[PriceData]):
+        for pd in data:
+            symbol = pd.symbol
             # Append to limited history
             if self.history_length > 0:
-                self.price_history[symbol].append(price_data.close)
-                self.price_data_history[symbol].append(price_data)
+                self.price_history[symbol].append(pd.close)
+                self.price_data_history[symbol].append(pd)
             # Append full history if configured to do so
             if "full_history" in self.cfg and self.cfg["full_history"] is True:
                 self.full_history.append(data)

@@ -27,6 +27,8 @@ share/python-wheels/
 MANIFEST
 workspace.xml
 .idea/
+.venv1/
+
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

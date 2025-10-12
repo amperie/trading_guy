@@ -9,9 +9,10 @@ Interfaces:
     - Keeps a history of orders and signals
     - Has an OrderManager member to handle the orders
 """
-from core.classes import MarketSignal, Order, PriceData, Position, OrderStatus, OrderAction
+from core.classes import MarketSignal, Order, PriceData, Position, OrderStatus, OrderAction, OrderType
 from core.order_manager import OrderManager
-from abc import ABC, abstractmethod, final
+from abc import ABC, abstractmethod
+from typing import final
 from datetime import datetime
 
 from utils.utils import find_pricedata_in_list
@@ -24,7 +25,7 @@ class Portfolio(ABC):
         self.order_manager = None
         self.signals: list[MarketSignal] = []
         self.orders:list[Order] = []
-        self.cash: float = 0.0
+        self.cash: float = cfg["cash"]
         self.positions: dict[str, Position] = {}
         self.total_value: float = 0.0
         self.keep_history = cfg['keep_history']
@@ -48,43 +49,54 @@ class Portfolio(ABC):
             if order.action == OrderAction.BUY:
                 cash_change = order.cash + order.tx_cost
                 # update positions
-                self.positions[order.symbol].quantity += order.quantity
+                if order.symbol in self.positions:
+                    self.positions[order.symbol].quantity += order.quantity
+                else:
+                    self.positions[order.symbol] = Position(order.symbol, order.quantity)
                 self.cash -= cash_change
                 order.processed_by_portfolio = True
-                self.orders_by_id[order.id] = order
+                self.orders_by_id[order.order_id] = order
             # TODO: logic to catch if an order needs to be adjusted to a smaller quantity
             if order.action == OrderAction.SELL:
                 cash_change = order.cash - order.tx_cost
                 self.positions[order.symbol].quantity -= order.quantity
                 self.cash += cash_change
                 order.processed_by_portfolio = True
-                self.orders_by_id[order.id] = order
+                self.orders_by_id[order.order_id] = order
 
 
     @final
     def _store_orders(self, orders: list[Order]):
         self.orders.extend(orders)
         for order in orders:
-            self.orders_by_id[order.id] = order
+            self.orders_by_id[order.order_id] = order
             if order.status == OrderStatus.FILLED:
                 # Remove it from pending orders dict if it's there
-                if order.id in self.pending_orders_by_id:
+                if order.order_id in self.pending_orders_by_id:
                     self._close_pending_order(order)
             else:
                 # If it's not filled store it in pending orders dict
-                self.pending_orders_by_id[order.id] = order
+                self.pending_orders_by_id[order.order_id] = order
 
 
     @final
     def _close_pending_order(self, order: Order):
-        if order.id in self.pending_orders_by_id:
-            del self.pending_orders_by_id[order.id]
-            self.orders_by_id[order.id] = order
+        if order.order_id in self.pending_orders_by_id:
+            del self.pending_orders_by_id[order.order_id]
+            self.orders_by_id[order.order_id] = order
 
     @final
     def _process_pending_order(self, order: Order, current_tick: list[PriceData]) -> Order:
-        # TODO: Logic to process orders based on their type
-        pass
+        # Process orders based on their type
+        if order.status == OrderStatus.FILLED:
+            return order
+        # Check if there's an updated status from the OrderManager
+        order = self.order_manager.get_order_status(order)
+        if order.status == OrderStatus.FILLED:
+            return order
+
+
+
 
     @final
     def _process_pending_orders(self, current_tick: list[PriceData]):
@@ -106,7 +118,7 @@ class Portfolio(ABC):
 
 
     @final
-    def process_market_signals(
+    def process_tick_market_signals(
             self, signals: list[MarketSignal],
             tick: list[PriceData])-> list[Order]:
         """
@@ -119,9 +131,11 @@ class Portfolio(ABC):
         self._process_pending_orders(tick)
 
         # Process new signals, process and store the orders
-        orders = self.process_market_signals_logic(
+        all_orders = self.process_tick_market_signals_logic(
             signals, tick
         )
+        # Remove 0 quantity orders
+        orders = [o for o in all_orders if o.quantity > 0]
         # Store all the orders that came back
         self._store_orders(orders)
         # Process the filled orders immediately
@@ -140,7 +154,7 @@ class Portfolio(ABC):
         return orders
 
     @abstractmethod
-    def process_market_signals_logic(
+    def process_tick_market_signals_logic(
             self, signals: list[MarketSignal],
             tick: list[PriceData])-> list[Order]:
         raise NotImplementedError("process_market_signals_logic needs to be overriden")

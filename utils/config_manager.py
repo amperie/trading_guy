@@ -18,16 +18,22 @@ class ConfigManager:
         if self._config is None:
             self._load_config()
 
-    def _load_config(self, config_path: str = "../config.yaml"):
+    def _load_config(self, config_path: str = None):
         """Load configuration from YAML file."""
-        path = Path(config_path)
-        if not path.exists():
+        if config_path is None:
+            # Default to config.yaml in project root (parent of utils directory)
+            config_path = Path(__file__).parent.parent / "config.yaml"
+        else:
+            config_path = Path(config_path)
+
+        if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
-        with open(path, 'r') as f:
+        with open(config_path, 'r') as f:
             self._config = yaml.safe_load(f)
 
-    def reload(self, config_path: str = "../config.yaml"):
+    def reload(self, config_path: str = None):
+        """Reload configuration from YAML file."""
         self._load_config(config_path)
 
     def get(self, key: str, default: Any = None) -> Any:

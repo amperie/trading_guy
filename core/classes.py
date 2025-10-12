@@ -58,9 +58,6 @@ class MarketSignal:
 
 @dataclass
 class Order:
-    id: str = field(default_factory=lambda: f"local-{str(uuid.uuid4())}")
-    parent_id: str = None
-    child_orders: list[str] = []
     placed_datetime: datetime
     executed_datetime: datetime
     action: OrderAction
@@ -69,6 +66,9 @@ class Order:
     price: float
     quantity: int
     cash: float
-    tx_cost: float = 0.0
     status: OrderStatus
+    order_id: str = field(default_factory=lambda: f"local-{str(uuid.uuid4())}")
+    tx_cost: float = 0.0
+    parent_id: str = None
+    child_orders: list[str] = field(default_factory=lambda: [])
     processed_by_portfolio: bool = False

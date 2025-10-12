@@ -7,12 +7,12 @@ logging:
 
 data_provider:
   provider: data_providers.test_data_provider.TestDataProvider
-  path: "../SPXU.csv"
+  path: "data/SPXU.csv"
   truncate: 0
 simulator:
   data_provider:
     provider: "data_providers.test_data_provider.TestDataProvider"
-    path: "../data/test_data.csv"
+    path: "data/test_data.csv"
     truncate: 20
   algorithm:
     algorithm: "algorithms.test_algorithm.TestAlgorithm"

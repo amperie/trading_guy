@@ -7,7 +7,7 @@ import pandas as pd
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from IPython.utils.terminal import set_term_title
+# from IPython.utils.terminal import set_term_title
 from core.classes import PriceData
 from utils.config_manager import ConfigManager
 

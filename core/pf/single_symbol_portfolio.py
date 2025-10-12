@@ -9,11 +9,11 @@ from utils.utils import find_marketsignal_in_list, find_pricedata_in_list
 
 class SingleSymbolPortfolio(Portfolio):
 
-    def process_market_signals(
+    def process_tick_market_signals_logic(
             self, signals: list[MarketSignal],
             tick: list[PriceData]) -> list[Order]:
 
-        symbol = self.config['symbol']
+        symbol = self.cfg['symbol']
         signal = find_marketsignal_in_list(symbol, signals)
 
         price = find_pricedata_in_list(symbol, tick).close
@@ -26,8 +26,13 @@ class SingleSymbolPortfolio(Portfolio):
                     symbol, quantity, tick
                 )
             # Sell everything
-            elif signal.type == SignalType.SELL:
+            elif signal.type == SignalType.SELL and symbol in self.positions:
                 order = self.order_manager.sell(
-                    symbol, self.positions[symbol],
+                    symbol, self.positions[symbol].quantity,
                     tick
                 )
+            else:
+                return []
+            return [order]
+        else:
+            return []

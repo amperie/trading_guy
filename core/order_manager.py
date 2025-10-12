@@ -7,7 +7,7 @@ Interfaces:
 get_orders_status: get status of orders that may take cycles to execute
 execute_order(s): takes orders as input and executes them (backtesting or real time)
 """
-from trading_guy.core import Order, PriceData
+from core.classes import Order, PriceData
 from abc import ABC, abstractmethod
 
 
@@ -42,6 +42,18 @@ class OrderManager(ABC):
         Updates all orders in orders list
         Returns:
             returns the orders that were updated from the backend (alpaca, etc...)
+        """
+        pass
+
+    @abstractmethod
+    def get_order_status(self, order: Order) -> Order:
+        """
+        Looks up the order status for the order and returns an updated version of it
+        Args:
+            order: order to get status for
+
+        Returns:
+            Order: order that was updated
         """
         pass
 
