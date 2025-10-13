@@ -7,7 +7,7 @@ from core.order_manager import OrderManager
 from core.classes import Order, OrderStatus, OrderType, OrderAction, PriceData
 from utils.utils import find_pricedata_in_list
 
-class PerfectOm(OrderManager):
+class BacktestingOM(OrderManager):
 
     def buy(self, symbol: str, quantity: int, tick: list[PriceData]) -> Order:
         pd = find_pricedata_in_list(symbol, tick)

@@ -18,11 +18,11 @@ class OrderManager(ABC):
 
     @abstractmethod
     def buy(self, ticker: str, shares: int, tick: list[PriceData]) -> Order:
-        pass
+        raise(NotImplementedError())
 
     @abstractmethod
     def sell(self, ticker:str, shares: int, tick: list[PriceData]) -> Order:
-        pass
+        raise(NotImplementedError())
 
     @abstractmethod
     def update_order_statuses(self, orders: list[Order]):
@@ -34,7 +34,7 @@ class OrderManager(ABC):
         Returns:
             list of orders that were updated
         """
-        pass
+        raise(NotImplementedError())
 
     @abstractmethod
     def update_all_orders(self) -> list[Order]:
@@ -43,7 +43,7 @@ class OrderManager(ABC):
         Returns:
             returns the orders that were updated from the backend (alpaca, etc...)
         """
-        pass
+        raise(NotImplementedError())
 
     @abstractmethod
     def get_order_status(self, order: Order) -> Order:
@@ -55,5 +55,5 @@ class OrderManager(ABC):
         Returns:
             Order: order that was updated
         """
-        pass
+        raise(NotImplementedError())
 
