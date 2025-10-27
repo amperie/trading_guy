@@ -70,7 +70,7 @@ class Portfolio(ABC):
         self.orders.extend(orders)
         for order in orders:
             self.orders_by_id[order.order_id] = order
-            if order.status == OrderStatus.FILLED:
+            if order.status == OrderStatus.FILLED or order.status == OrderStatus.CANCELED:
                 # Remove it from pending orders dict if it's there
                 if order.order_id in self.pending_orders_by_id:
                     self._close_pending_order(order)
@@ -90,13 +90,12 @@ class Portfolio(ABC):
         # Process orders based on their type
         if order.status == OrderStatus.FILLED:
             return order
-        # Check if there's an updated status from the OrderManager
-        order = self.order_manager.get_order_status(order)
-        if order.status == OrderStatus.FILLED:
-            return order
-
-
-
+        # Retrieve the status from the OrderManager
+        original_status = order.status
+        updated_order = self.order_manager.get_order_status(order)
+        if updated_order.status != original_status:
+            pass
+            # TODO: If status changed, update the portfolio
 
     @final
     def _process_pending_orders(self, current_tick: list[PriceData]):
@@ -157,4 +156,4 @@ class Portfolio(ABC):
     def process_tick_market_signals_logic(
             self, signals: list[MarketSignal],
             tick: list[PriceData])-> list[Order]:
-        raise NotImplementedError("process_market_signals_logic needs to be overriden")
+        raise NotImplementedError("process_market_signals_logic needs to be overridden")

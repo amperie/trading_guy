@@ -23,6 +23,8 @@ class Simulator:
             al: Algorithm=None, om: OrderManager=None,
             pf: Portfolio=None
         ):
+        #TODO: Get rid of all this dynamic typing stuff
+
         if cfg is None:
             cfg = {}
         cfg_dict = {**ConfigManager().get(cfg_section_to_use), **cfg}

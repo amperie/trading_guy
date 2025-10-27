@@ -1,12 +1,12 @@
 """
 Required data passing classes
 """
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass, field
 import uuid
-
-from tests.scratch import Order
 
 
 class SignalType(Enum):
@@ -27,6 +27,7 @@ class OrderStatus(Enum):
     PENDING = 0
     FILLED = 1
     CANCELED = 2
+    PENDING_SALE = 3
 
 @dataclass
 class PriceData:
@@ -74,6 +75,7 @@ class Order:
     tx_cost: float = 0.0
     parent_id: str = None
     child_orders: list[str] = field(default_factory=lambda: [])
+    child_orders_dict: dict[str, Order] = field(default_factory=lambda: {})
     processed_by_portfolio: bool = False
 
     @staticmethod
@@ -97,7 +99,7 @@ class Order:
             low_sell_price:
 
         Returns:
-
+            List of orders starting with the main order, stop and profit take
         """
         main_order = Order(
             action=OrderAction.BUY,
@@ -141,4 +143,8 @@ class Order:
         )
 
         main_order.child_orders = [stop_loss_order.order_id, profit_order.order_id]
+        main_order.child_orders_dict = {
+            "STOP": stop_loss_order,
+            "PROFIT_TAKER": profit_order,
+        }
         return [main_order, stop_loss_order, profit_order]
