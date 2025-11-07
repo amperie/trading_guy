@@ -67,4 +67,4 @@ class Algorithm(ABC):
 
     @abstractmethod
     def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
-        pass
+        raise NotImplementedError("on_data_logic needs to be overriden")

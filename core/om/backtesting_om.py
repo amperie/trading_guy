@@ -43,7 +43,7 @@ class BacktestingOM(OrderManager):
         return retval
 
     def get_order_status(self, order: Order, tick: list[PriceData]) -> Order:
-        if order.status == OrderStatus.FILLED or OrderStatus.CANCELED:
+        if order.status in (OrderStatus.FILLED, OrderStatus.CANCELED):
             return order # Nothing to do
 
         # Get price data

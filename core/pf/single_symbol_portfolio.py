@@ -17,11 +17,11 @@ class SingleSymbolPortfolio(Portfolio):
         signal = find_marketsignal_in_list(symbol, signals)
 
         price = find_pricedata_in_list(symbol, tick).close
-        quantity = int(self.cash/price)
 
         if signal is not None:
             # Buy as much as we can with the available cash
             if signal.type == SignalType.BUY:
+                quantity = int(self.cash/price)
                 order = self.order_manager.buy(
                     symbol, quantity, tick
                 )
