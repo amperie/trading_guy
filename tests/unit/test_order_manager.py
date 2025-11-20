@@ -165,26 +165,26 @@ class TestOrderManagerInterface:
         """Test that complete implementation works"""
 
         class CompleteOM(OrderManager):
-            def buy(self, ticker: str, shares: int, tick: list[PriceData]) -> Order:
+            def buy(self, symbol: str, shares: int, tick: list[PriceData]) -> Order:
                 return Order(
                     placed_datetime=datetime.now(),
                     executed_datetime=datetime.now(),
                     action=OrderAction.BUY,
                     type=OrderType.MARKET,
-                    symbol=ticker,
+                    symbol=symbol,
                     price=100.0,
                     quantity=shares,
                     cash=100.0 * shares,
                     status=OrderStatus.FILLED
                 )
 
-            def sell(self, ticker: str, shares: int, tick: list[PriceData]) -> Order:
+            def sell(self, symbol: str, shares: int, tick: list[PriceData]) -> Order:
                 return Order(
                     placed_datetime=datetime.now(),
                     executed_datetime=datetime.now(),
                     action=OrderAction.SELL,
                     type=OrderType.MARKET,
-                    symbol=ticker,
+                    symbol=symbol,
                     price=100.0,
                     quantity=shares,
                     cash=100.0 * shares,

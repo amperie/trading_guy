@@ -18,11 +18,17 @@ class OrderManager(ABC):
         self.cfg = cfg or {}
 
     @abstractmethod
-    def buy(self, ticker: str, shares: int, tick: list[PriceData]) -> Order:
+    def buy(self, symbol: str, shares: int, tick: list[PriceData]) -> Order:
         raise(NotImplementedError())
 
     @abstractmethod
-    def sell(self, ticker:str, shares: int, tick: list[PriceData]) -> Order:
+    def sell(self, symbol:str, shares: int, tick: list[PriceData]) -> Order:
+        raise(NotImplementedError())
+
+    @abstractmethod
+    def bracket_order(
+            self, symbol:str, shares: int, profit_price: float, stop_price: float,
+            tick: list[PriceData]) -> Order:
         raise(NotImplementedError())
 
     @final

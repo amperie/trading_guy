@@ -1,7 +1,7 @@
 """
 Portfolio class
 - Stores configuration about the portfolio strategy and priorities for each security
-- Tracks what the portfolio is comprised of
+- Tracks what the portfolio comprises
 - Takes signals as input and adjusts the portfolio
 Interfaces:
 - Initialize
@@ -11,6 +11,7 @@ Interfaces:
 """
 from core.classes import MarketSignal, Order, PriceData, Position, OrderStatus, OrderAction, OrderType
 from core.order_manager import OrderManager
+from utils.logger import Logger
 from abc import ABC, abstractmethod
 from typing import final
 from datetime import datetime
@@ -34,6 +35,7 @@ class Portfolio(ABC):
         self.cash_history: dict[datetime, float] = {}
         self.orders_by_id: dict[str, Order] = {}
         self.pending_orders_by_id: dict[str, Order] = {}
+        self.logger = Logger().get_logger(__name__)
 
     @final
     def set_order_manager(self, order_manager: OrderManager):
@@ -43,7 +45,7 @@ class Portfolio(ABC):
     def _process_filled_orders(self, orders: list[Order]):
         for order in orders:
             # Only process filled orders that haven't been processed already
-            if order.status != OrderStatus.FILLED or order.processed_by_portfolio:
+            if order.status not in {OrderStatus.PENDING_SALE, OrderStatus.FILLED} or order.processed_by_portfolio:
                 continue
             # TODO: logic to catch if an order can't be executed because of low cash
             if order.action == OrderAction.BUY:
@@ -89,18 +91,47 @@ class Portfolio(ABC):
     def _process_pending_order(self, order: Order, current_tick: list[PriceData]) -> Order:
         # Process orders based on their type
         if order.status == OrderStatus.FILLED:
+            self._store_orders([order])
             return order
         # Retrieve the status from the OrderManager
         original_status = order.status
-        updated_order = self.order_manager.get_order_status(order)
+        updated_order = self.order_manager.get_order_status(order, current_tick)
         if updated_order.status != original_status:
-            pass
-            # TODO: If status changed, update the portfolio
+            # If order changed status reflect any needed changes in the portfolio
+            self.logger.info(f"{current_tick[0].timestamp}: Order {order.order_id} changed status from {original_status} to {updated_order.status}")
+
+            if original_status == OrderStatus.PENDING and updated_order.status == OrderStatus.PENDING_SALE:
+                # Order is a bracket order or delayed sale order so update the portfolio
+                # with the new positions that were bought and lower the cash
+                self.logger.info(f"{current_tick[0].timestamp}: Order {order.order_id} bracket bought {order.quantity} for {order.cash}")
+                cash_change = order.cash + order.tx_cost
+                # update positions
+                if order.symbol in self.positions:
+                    self.positions[order.symbol].quantity += order.quantity
+                else:
+                    self.positions[order.symbol] = Position(order.symbol, order.quantity)
+                self.cash -= cash_change
+                self.orders_by_id[order.order_id] = order
+            if order.type == OrderType.BRACKET and updated_order.status == OrderStatus.FILLED:
+                # Bracket order just sold. Update the portfolio accordingly
+                so = order._child_orders_dict["SALE_ORDER"]
+                self.logger.info(f"{current_tick[0].timestamp}: Order {order.order_id} bracket sold {so.quantity} for {so.cash}")
+                cash_change = so.cash - so.tx_cost
+                self.positions[order.symbol].quantity -= so.quantity
+                self.cash += cash_change
+                order.processed_by_portfolio = True
+                so.processed_by_portfolio = True
+                self._store_orders([order])
+        return updated_order
 
     @final
     def _process_pending_orders(self, current_tick: list[PriceData]):
         """See if any pending orders require processing"""
-        for order in self.pending_orders_by_id.values():
+        pending_orders = len(self.pending_orders_by_id.keys())
+        if pending_orders > 0:
+            self.logger.info(f"{current_tick[0].timestamp}: {pending_orders} pending orders being processed")
+        for order_id in self.pending_orders_by_id.keys():
+            order = self.pending_orders_by_id[order_id]
             self._process_pending_order(order, current_tick)
 
     @final
@@ -126,6 +157,9 @@ class Portfolio(ABC):
         :param tick:
         :return:
         """
+        if len(signals) > 0:
+            self.logger.info(f"{tick[0].timestamp}: Processing {len(signals)} signals")
+
         # Before processing new signals, update all pending orders
         self._process_pending_orders(tick)
 

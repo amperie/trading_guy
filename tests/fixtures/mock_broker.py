@@ -28,18 +28,18 @@ class MockBroker(OrderManager):
         self.fill_probability = cfg.get('fill_probability', 1.0) if cfg else 1.0
         self.tick_count = 0
 
-    def buy(self, ticker: str, shares: int, tick: list[PriceData]) -> Order:
+    def buy(self, symbol: str, shares: int, tick: list[PriceData]) -> Order:
         """Create a buy order (starts as PENDING)"""
         from utils.utils import find_pricedata_in_list
 
-        pd = find_pricedata_in_list(ticker, tick)
+        pd = find_pricedata_in_list(symbol, tick)
 
         order = Order(
             placed_datetime=datetime.now(),
             executed_datetime=None,
             action=OrderAction.BUY,
             type=OrderType.MARKET,
-            symbol=ticker,
+            symbol=symbol,
             price=pd.close,
             quantity=shares,
             cash=pd.close * shares,
@@ -52,18 +52,18 @@ class MockBroker(OrderManager):
 
         return order
 
-    def sell(self, ticker: str, shares: int, tick: list[PriceData]) -> Order:
+    def sell(self, symbol: str, shares: int, tick: list[PriceData]) -> Order:
         """Create a sell order (starts as PENDING)"""
         from utils.utils import find_pricedata_in_list
 
-        pd = find_pricedata_in_list(ticker, tick)
+        pd = find_pricedata_in_list(symbol, tick)
 
         order = Order(
             placed_datetime=datetime.now(),
             executed_datetime=None,
             action=OrderAction.SELL,
             type=OrderType.MARKET,
-            symbol=ticker,
+            symbol=symbol,
             price=pd.close,
             quantity=shares,
             cash=pd.close * shares,

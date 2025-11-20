@@ -13,7 +13,7 @@ simulator:
   data_provider:
     provider: "data_providers.test_data_provider.TestDataProvider"
     path: "data/test_data.csv"
-    truncate: 20
+    truncate: 200
   algorithm:
     algorithm: "algorithms.test_algorithm.TestAlgorithm"
     # Algorithm specific configs go here

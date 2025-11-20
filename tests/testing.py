@@ -24,6 +24,7 @@ pf.set_order_manager(om)
 s = Simulator(om=om, al=al, pf=pf)
 s.run()
 
+error_out_here
 
 dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
 # al_cfg = {"algorithm":"override"}

@@ -74,10 +74,25 @@ class Order:
     order_id: str = field(default_factory=lambda: f"local-{str(uuid.uuid4())}")
     tx_cost: float = 0.0
     parent_id: str = None
-    child_orders: list[str] = field(default_factory=lambda: [])
-    child_orders_dict: dict[str, Order] = field(default_factory=lambda: {})
+    _child_orders: list[str] = field(default_factory=lambda: [])
+    _child_orders_dict: dict[str, Order] = field(default_factory=lambda: {})
     processed_by_portfolio: bool = False
 
+    def add_child_order(self, name: str, order: Order):
+        if name not in self._child_orders:
+            self._child_orders.append(name)
+        self._child_orders_dict[name] = order
+
+    def get_child_order_names(self) -> list[str]:
+        return list(self._child_orders_dict.keys())
+
+    def get_child_order(self, name: str) -> Order:
+        return self._child_orders_dict[name]
+
+class TrailingBracketOrder(Order):
+    # TODO: Create a trailing bracket order
+
+class BracketOrder(Order):
     @staticmethod
     def create_bracket_order(
             symbol: str,
@@ -85,8 +100,8 @@ class Order:
             high_sell_price: float,
             low_sell_price: float,
             quantity: int,
-            tx_cost: float=0,
-            ) -> list[Order]:
+            tx_cost: float=0.0,
+            ) -> BracketOrder:
         """
         Helper function to create a bracket order. It creates three orders
         the main buy order and two orders to take profit or stop loss
@@ -142,9 +157,11 @@ class Order:
             parent_id=main_order.order_id,
         )
 
-        main_order.child_orders = [stop_loss_order.order_id, profit_order.order_id]
-        main_order.child_orders_dict = {
+        main_order.child_orders = [stop_loss_order.order_id, profit_order.order_id, "MANUAL_ORDER"]
+        main_order._child_orders_dict = {
             "STOP": stop_loss_order,
             "PROFIT_TAKER": profit_order,
+            "MANUAL_SALE": False,
+            "MANUAL_ORDER": None,
         }
-        return [main_order, stop_loss_order, profit_order]
+        return main_order
