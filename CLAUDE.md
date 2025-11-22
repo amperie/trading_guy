@@ -58,10 +58,16 @@ Each component is designed to be swappable via configuration, enabling easy test
 
 **OrderManager Base Class:**
 - All order managers inherit from `core.order_manager.OrderManager` (abstract base class)
-- Must implement `buy()`, `sell()`, and `get_order_status()` methods
+- Uses backend abstraction pattern with three required methods:
+  - `_submit_order_to_backend(order, tick, positions, pf_cash)` → Submit order for execution
+  - `_update_order_status_from_backend(order, tick, positions, pf_cash)` → Update single order status
+  - `_update_orders_statuses_from_backend(orders, tick, positions, pf_cash)` → Batch update order statuses
+- Public API: `submit_order()`, `update_order_status()`, `update_pending_orders()`
+- Tracks orders in three dicts: `_all_orders`, `_pending_orders_by_id`, `_filled_orders_by_id`
 - Handles order execution logic (backtesting vs. live broker APIs)
 - **Implementations:**
   - `BacktestingOM` (core/om/): Instantly fills market orders, handles bracket orders with stop-loss/profit-taker logic
+  - `BacktestingOM_old` (core/om/): Legacy implementation preserved for reference
 
 ### Directory Structure
 
@@ -93,11 +99,16 @@ utils/                     # Shared utilities
   logger.py                # Singleton logger (configured via config.yaml)
   utils.py                 # Helper functions (instantiate_from_string, find_pricedata_in_list, etc.)
 
-tests/                     # Test suite (110/116 passing, 95% coverage)
+tests/                     # Test suite
   unit/                    # Unit tests for individual components
-  integration/             # End-to-end simulation tests
-  fixtures/                # Test helpers (MockBroker, etc.)
-  conftest.py              # Shared pytest fixtures
+    test_bracket_order_progression.py  # Comprehensive bracket order lifecycle tests
+
+scratch/                   # Development notebooks and experiments
+  data_ingest.ipynb        # Data ingestion experiments
+  plots.ipynb              # Visualization experiments
+  scratch.ipynb            # General scratch notebook
+  testing.ipynb            # Interactive testing notebook
+  om/                      # Order manager experiments
 
 data/                      # Sample CSV data files
 ```
@@ -117,12 +128,18 @@ data/                      # Sample CSV data files
 4. `CANCELED`: Order canceled (e.g., profit-taker canceled when stop-loss triggers)
 
 **Bracket Orders:**
-- Create using `Order.create_bracket_order(symbol, price, high_sell_price, low_sell_price, quantity, tx_cost)`
-- Returns list of 3 orders: `[main_order, stop_loss_order, profit_order]`
-- Main order has `child_orders` list and `child_orders_dict` with keys "STOP" and "PROFIT_TAKER"
+- Create using `BracketOrder.create_bracket_order(symbol, price, high_sell_price, low_sell_price, quantity, tx_cost, current_tick=None)`
+- Returns a single `BracketOrder` object (not a list)
+- Main order has child orders accessible via `get_child_order(name)` method:
+  - `"STOP"` - Stop-loss order (triggers when price <= stop_price)
+  - `"PROFIT"` - Profit-taker order (triggers when price >= profit_price)
+  - `"MANUAL_ORDER"` - Manual exit order (created when MANUAL_SALE flag is set)
+- BracketOrder properties:
+  - `MANUAL_SALE` (bool) - Flag to trigger manual exit at market price
+  - `SOLD_ORDER` (Order) - Reference to the child order that completed the sale
 - Child orders have `parent_id` pointing to main order's `order_id`
 - When one child triggers, the other is automatically canceled
-- BacktestingOM handles bracket order logic in `get_order_status()` method
+- BacktestingOM handles bracket order logic in `_update_order_status_from_backend()` method
 
 **Order Actions (OrderAction enum):**
 - `BUY`: Purchase shares
@@ -157,11 +174,10 @@ pytest tests/
 pytest tests/ -v  # Verbose output
 ```
 
-**Run specific test categories:**
+**Run specific test files:**
 ```bash
-pytest tests/unit/              # Unit tests only
-pytest tests/integration/       # Integration tests only
-pytest tests/unit/test_portfolio.py  # Specific file
+pytest tests/unit/test_bracket_order_progression.py -v  # Bracket order tests
+pytest tests/unit/                                       # All unit tests
 ```
 
 **With coverage:**
@@ -170,9 +186,26 @@ pytest tests/ --cov=core --cov=data_providers --cov=engines --cov-report=html
 # View report: open htmlcov/index.html
 ```
 
-**Test Status:** 110/116 tests passing (95% pass rate). See `tests/TEST_SUMMARY.md` for details.
+**Test Status:** 6/6 bracket order progression tests passing (100%). Test suite has been refactored to focus on core functionality.
+
+**Key Test Coverage:**
+- `test_bracket_order_progression.py`: Comprehensive bracket order lifecycle tests
+  - Stop-loss trigger (price drops below threshold)
+  - Profit-taker trigger (price rises above threshold)
+  - Manual sale (forced exit at market price)
+  - Price oscillation (no premature triggers)
+  - Boundary conditions (exact threshold prices)
 
 ### Important Implementation Details
+
+**Avoiding Circular Imports:**
+- `core/classes.py` contains only dataclasses and enums - NO imports from other core modules
+- Utility functions that reference core classes should go in `utils/utils.py`
+- If you need to find a PriceData in a list within classes.py, inline the logic:
+  ```python
+  pd = next((x for x in tick if x.symbol == symbol), None)
+  ```
+- This prevents circular dependencies: `core.classes` ← `utils.utils` ← `core.classes` ❌
 
 **Timestamp Handling:**
 - Use `pd.to_datetime()` for parsing timestamps
