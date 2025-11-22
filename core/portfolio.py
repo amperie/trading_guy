@@ -60,7 +60,7 @@ class Portfolio(ABC):
         if order.symbol in self.positions:
             self.positions[order.symbol].quantity += order.quantity
         else:
-            self.positions[order.symbol].quantity = order.quantity
+            self.positions[order.symbol] = Position(order.symbol, order.quantity)
         order.processed_by_portfolio = True
 
     @final
@@ -100,6 +100,8 @@ class Portfolio(ABC):
             if status == OrderStatus.PENDING_SALE:
                 # Initial buy is done, adjust the portfolio
                 self._update_pf_buy(order)
+                # Set the processed_by_portfolio flag back to False since it's still pending
+                order.processed_by_portfolio = False
                 return order
             elif status == OrderStatus.FILLED:
                 # Sale happened, update from the SOLD_ORDER
@@ -155,7 +157,7 @@ class Portfolio(ABC):
         submitted_orders = self.om.submit_orders(orders, tick, self.positions, self.cash)
 
         # Process any new orders that were filled immediately
-        filled_orders = [o.order_id for o in all_orders if o.status == OrderStatus.FILLED]
+        filled_orders = [o.order_id for o in all_orders if o.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}]
         self._update_pf_from_changed_orders(filled_orders)
 
         # Update portfolio value based on current tick, positions and cash

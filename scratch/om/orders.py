@@ -2,7 +2,8 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-from core.classes import OrderType, OrderStatus, OrderAction, Order, PriceData, BracketOrder, Position
+from core.classes import OrderType, OrderStatus, OrderAction, Order, PriceData, BracketOrder, Position, MarketSignal, \
+    SignalType
 
 # For Jupyter notebooks, use current working directory
 project_root = Path.cwd()
@@ -18,7 +19,7 @@ from data_providers.test_data_provider import TestDataProvider
 project_root = Path.cwd()
 data_path = str(project_root / "data" / "test_data.csv")
 
-def test_market_orders():
+def market_orders():
     om = BacktestingOM()
     o = Order(
             action=OrderAction.BUY,
@@ -51,7 +52,7 @@ def test_market_orders():
 
     pass
 
-def test_bracket_orders():
+def bracket_orders():
     om = BacktestingOM()
     bo = BracketOrder.create_bracket_order(
         symbol="SPY",
@@ -70,4 +71,38 @@ def test_bracket_orders():
 
     pass
 
-test_bracket_orders()
+def portfolio_orders():
+    # Get absolute path to data file relative to project root
+    project_root = Path(__file__).parent.parent.parent
+    data_path = str(project_root / "data" / "test_data.csv")
+
+    om = BacktestingOM()
+    al = TestAlgorithm({"history_length": 10, "full_history": True})
+    dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
+    dp = TestDataProvider(dp_cfg)
+    pf = SingleSymbolPortfolio({'symbol': 'AAPL'}, om, 1000.0, {}, True)
+
+    # BracketOrder test - first buy
+    tick = [PriceData("AAPL", datetime.now(),0.0,0.0,0.0,10.0,0,0,0,0)]
+    signal = MarketSignal(SignalType.BUY, "AAPL", 100)
+    pf.process_market_signals_for_tick([signal], tick)
+    # Trigger a profit taker sale
+    tick = [PriceData("AAPL", datetime.now(),0.0,0.0,0.0,12.0,0,0,0,0)]
+    pf.process_market_signals_for_tick([], tick)
+
+    # buy again
+    tick = [PriceData("AAPL", datetime.now(),0.0,0.0,0.0,13.0,0,0,0,0)]
+    signal = MarketSignal(SignalType.BUY, "AAPL", 100)
+    pf.process_market_signals_for_tick([signal], tick)
+
+    # this should have no effect since there's no money left to buy
+    tick = [PriceData("AAPL", datetime.now(),0.0,0.0,0.0,6.0,0,0,0,0)]
+    pf.process_market_signals_for_tick([signal], tick)
+
+    # trigger stop loss
+    tick = [PriceData("AAPL", datetime.now(),0.0,0.0,0.0,3.0,0,0,0,0)]
+    pf.process_market_signals_for_tick([], tick)
+
+    pass
+
+portfolio_orders()

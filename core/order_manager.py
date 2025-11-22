@@ -7,7 +7,7 @@ Interfaces:
 get_orders_status: get status of orders that may take cycles to execute
 execute_order(s): takes orders as input and executes them (backtesting or real time)
 """
-from core.classes import Order, PriceData, OrderStatus, Position, BracketOrder
+from core.classes import Order, PriceData, OrderStatus, Position, BracketOrder, OrderType
 from utils.utils import trim_dictionary
 from abc import ABC, abstractmethod
 from typing import final, Union
@@ -17,9 +17,9 @@ class OrderManager(ABC):
 
     def __init__(self, cfg: dict=None):
         self.cfg = cfg or {}
-        self._filled_orders_by_id: dict[str, Order] = {}
-        self._pending_orders_by_id: dict[str, Order] = {}
-        self._all_orders: dict[str, Order] = {}
+        self._filled_orders_by_id: dict[str, Union[BracketOrder, Order]] = {}
+        self._pending_orders_by_id: dict[str, Union[BracketOrder, Order]] = {}
+        self._all_orders: dict[str, Union[BracketOrder, Order]] = {}
 
     @property
     def filled_orders_by_id(self) -> dict[str, Union[BracketOrder, Order]]:
@@ -63,11 +63,18 @@ class OrderManager(ABC):
 
 
     @final
-    def _update_order_lists(self, order: Order):
+    def _update_order_lists(self, order: Union[BracketOrder, Order]):
         if (order.status in {OrderStatus.FILLED, OrderStatus.CANCELED}
                 and order.order_id in self._pending_orders_by_id):
             self._filled_orders_by_id[order.order_id] = order
             del self._pending_orders_by_id[order.order_id]
+
+            # If order is a FILLED BRACKET also break off the SOLD child order
+            # and register it as its own order for later analysis reasons
+            if order.type == OrderType.BRACKET and order.status == OrderStatus.FILLED:
+                so = order.SOLD_ORDER
+                self._filled_orders_by_id[so.order_id] = so
+                self._all_orders[so.order_id] = so
 
     @final
     def _update_all_order_lists(self):
@@ -76,6 +83,14 @@ class OrderManager(ABC):
             if order.status in {OrderStatus.FILLED, OrderStatus.CANCELED}:
                 orders.append(order.order_id)
                 self._filled_orders_by_id[order.order_id] = order
+
+                # If order is a FILLED BRACKET also break off the SOLD child order
+                # and register it as its own order for later analysis reasons
+                if order.type == OrderType.BRACKET and order.status == OrderStatus.FILLED:
+                    so = order.SOLD_ORDER
+                    self._filled_orders_by_id[so.order_id] = so
+                    self._all_orders[so.order_id] = so
+
         return trim_dictionary(self._pending_orders_by_id, orders)
 
     @final
