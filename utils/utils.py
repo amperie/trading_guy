@@ -41,3 +41,10 @@ def find_marketsignal_in_list(symbol: str, pds: list[MarketSignal]) -> MarketSig
     except StopIteration:
         retval = None
     return retval
+
+def trim_dictionary(dictionary: dict, keys_to_delete: list[str]) -> dict:
+    for key in keys_to_delete:
+        if key in dictionary:
+            del dictionary[key]
+
+    return dictionary

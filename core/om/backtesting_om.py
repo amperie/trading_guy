@@ -1,159 +1,153 @@
-"""
-Used for backtesting. Fulfills all orders instantly
-"""
-from datetime import datetime
+from argparse import Action
+from typing import Union
 
+from core.classes import Order, PriceData, OrderType, OrderStatus, Position, OrderAction, BracketOrder
 from core.order_manager import OrderManager
-from core.classes import Order, OrderStatus, OrderType, OrderAction, PriceData
 from utils.utils import find_pricedata_in_list
+
+
+def _process_market_order(order: Order, pd: PriceData, pf_cash: float, quantity: int) -> Order:
+
+    if order.action == OrderAction.SELL:
+        tx_quantity = min(order.quantity, quantity)
+    else:
+        tx_quantity = min(order.quantity, int(pf_cash / pd.close))
+
+    order.quantity = tx_quantity
+    if tx_quantity <= 0:
+        order.status = OrderStatus.CANCELED
+    else:
+        order.status = OrderStatus.FILLED
+    order.price = pd.close
+    order.cash = pd.close * order.quantity
+    order.placed_datetime = pd.timestamp
+    order.executed_datetime = pd.timestamp
+
+    return order
+
 
 class BacktestingOM(OrderManager):
 
-    def buy(
-            self, symbol: str, quantity: int,
-            tick: list[PriceData], tx_cost: float = 0.0) -> Order:
-        pd = find_pricedata_in_list(symbol, tick)
-        retval = Order(
-            action=OrderAction.BUY,
-            type=OrderType.MARKET,
-            symbol=symbol,
-            price=pd.close,
-            quantity=quantity,
-            cash=pd.close * quantity,
-            tx_cost=tx_cost,
-            status=OrderStatus.FILLED,
-            placed_datetime=datetime.now(),
-            executed_datetime=datetime.now(),
-        )
-        return retval
+    def _update_order_status_from_backend(
+            self, order: Union[BracketOrder, Order], current_tick: list[PriceData] = None,
+            positions: dict[str,Position]=None, pf_cash: float = 0.0) -> Order:
+        """
+        Checks whether orders can fill and returns the order
+        """
+        if current_tick is None:
+            raise ValueError("Backtesting OM requires current_tick to be set")
+        if order.status == OrderStatus.FILLED:
+            # Nothing to do
+            return order
 
-    def sell(
-            self, symbol: str, quantity: int,
-            tick: list[PriceData], tx_cost: float = 0.0) -> Order:
+        pd = find_pricedata_in_list(order.symbol, current_tick)
 
-        pd = find_pricedata_in_list(symbol, tick)
-        retval = Order(
-            action=OrderAction.SELL,
-            type=OrderType.MARKET,
-            symbol=symbol,
-            price=pd.close,
-            quantity=quantity,
-            cash=pd.close * quantity,
-            tx_cost=tx_cost,
-            status=OrderStatus.FILLED,
-            placed_datetime=pd.timestamp,
-            executed_datetime=pd.timestamp,
-        )
-        return retval
-
-    def bracket_order(
-            self, symbol: str, quantity: int, profit_price_pct: float, stop_price_pct: float,
-            tick: list[PriceData], tx_cost: float = 0.0) -> Order:
-
-        pd = find_pricedata_in_list(symbol, tick)
-        price = pd.close
-        profit_price = price * (1.0 + profit_price_pct)
-        stop_price = price * (1.0 - stop_price_pct)
-        retval = Order.create_bracket_order(
-            symbol, price, profit_price, stop_price, quantity, tx_cost
-        )
-        # Process the buy in this order before returning
-        return self.get_order_status(retval, tick)
-
-    def get_order_status(self, order: Order, tick: list[PriceData]) -> Order:
-        if order.status in (OrderStatus.FILLED, OrderStatus.CANCELED):
-            return order # Nothing to do
-
-        # Get price data
-        pd = find_pricedata_in_list(order.symbol, tick)
-        # Handle different order types
         if order.type == OrderType.MARKET:
-            if order.status == OrderStatus.PENDING:
-                # This should never run since market orders always get filled instantly
-                order.status = OrderStatus.FILLED
-                order.price = pd.close
-                order.executed_datetime = pd.timestamp
-                order.processed_by_portfolio = False
-                return order
+            return _process_market_order(order, pd, pf_cash, order.quantity)
 
-        if order.type == OrderType.BRACKET:
+        elif order.type == OrderType.BRACKET:
+            # Process all options for a bracket order
             if order.status == OrderStatus.PENDING:
-                # Bracket order is pending the initial buy
-                order.status = OrderStatus.PENDING_SALE
-                order.price = pd.close
-                order.cash = pd.close * order.quantity
-                order.executed_datetime = pd.timestamp
-                order.processed_by_portfolio = False
-                return order
-            if order.status == OrderStatus.PENDING_SALE:
-                # Check if any child orders need to trigger
-                so = order._child_orders_dict["STOP"]
-                po = order._child_orders_dict["PROFIT_TAKER"]
-                manual_sale = order._child_orders_dict["MANUAL_SALE"]
-                manual_order = order._child_orders_dict["MANUAL_ORDER"]
-                price = pd.close
+                # This should not happen as they should never be in PENDING state
+                raise ValueError("BRACKET order should not be in PENDING state")
+            elif order.status == OrderStatus.PENDING_SALE:
+                # Order has been bought but sale hasn't triggered yet
+                # Check to see if a sale should trigger now
+                curr_price = pd.close
+                so = order.get_child_order("STOP")
+                po = order.get_child_order("PROFIT")
+                manual_sale = order.MANUAL_SALE
+                manual_order = order.get_child_order("MANUAL_ORDER")
 
+                # If user triggered a manual sale, make a market order and fill it
                 if manual_sale and manual_order is None:
-                    # If there is a manual order to sell at market
-                    # create and execute that order
-                    mo = Order(
-                        action=OrderAction.SELL,
-                        type=OrderType.MARKET,
-                        symbol=order.symbol,
-                        price=pd.close,
-                        quantity=order.quantity,
-                        cash=0,
-                        tx_cost=order.tx_cost,
-                        status=OrderStatus.PENDING,
-                        placed_datetime=pd.timestamp,
-                        executed_datetime=datetime.now(),
-                        parent_id=order.order_id,
+                    # Create a manual order to sell right away
+                    mo = Order.create_market_order(
+                        order.symbol, OrderAction.SELL, order.quantity, order.tx_cost,
+                        current_tick
                     )
-                    # Add this manual order
-                    order._child_orders_dict["MANUAL_ORDER"] = mo
-
-                if manual_sale and manual_order is not None:
-                    # Process any manual orders that are registered
-                    mo = order._child_orders_dict["MANUAL_ORDER"]
-                    mo = self.get_order_status(mo, tick)
-                    if mo.status == OrderStatus.FILLED:
-                        # If it got filled, process all the other orders
-                        order.status = OrderStatus.FILLED
-                        so.status = OrderStatus.CANCELED
-                        po.status = OrderStatus.CANCELED
-                        order.executed_datetime = pd.timestamp
-                        order.processed_by_portfolio = False
-                        order._child_orders_dict['SALE_ORDER'] = mo
-                        return order
-
-                if price <= so.price:
-                    # If current price is lower than stop order price, need to sell
+                    mo = self._submit_order_to_backend(mo, current_tick, positions, pf_cash)
+                    order.add_child_order("MANUAL_ORDER", mo)
+                    order.SOLD_ORDER = mo
+                    order.status = OrderStatus.FILLED
+                    so.status = OrderStatus.CANCELED
+                    po.status = OrderStatus.CANCELED
+                    return order
+                elif curr_price <= so.price:
+                    # Trigger stop loss order. Sell
                     order.status = OrderStatus.FILLED
                     so.status = OrderStatus.FILLED
                     po.status = OrderStatus.CANCELED
-                    order.executed_datetime = pd.timestamp
-                    order.processed_by_portfolio = False
-                    so.price = price
-                    so.cash = price * so.quantity
+                    order.MANUAL_SALE = False
                     so.executed_datetime = pd.timestamp
-                    so.processed_by_portfolio = False
-                    order._child_orders_dict["SALE_ORDER"] = so
+                    so.price = curr_price
+                    so.cash = curr_price * so.quantity
+                    order.SOLD_ORDER = so
                     return order
-                if price >= po.price:
-                    # If current price is higher than profit taking order, trigger the order
+                elif curr_price >= po.price:
+                    # Trigger profit taking order. Sell high
                     order.status = OrderStatus.FILLED
-                    so.status = OrderStatus.CANCELED
                     po.status = OrderStatus.FILLED
-                    order.executed_datetime = pd.timestamp
-                    order.processed_by_portfolio = False
-                    po.price = price
-                    po.cash = price * po.quantity
+                    so.status = OrderStatus.CANCELED
+                    order.MANUAL_SALE = False
                     po.executed_datetime = pd.timestamp
-                    po.processed_by_portfolio = False
-                    order._child_orders_dict["SALE_ORDER"] = po
+                    po.price = curr_price
+                    po.cash = curr_price * po.quantity
+                    order.SOLD_ORDER = po
                     return order
+                else:
+                    # No sale has gotten triggered, nothing to do
+                    return order
+            else:
+                raise ValueError(f"Invalid order state: {order.status}")
 
-            # Sale didn't happen, return the original bracket order
+        raise NotImplementedError(f"{order.type} type not implemented")
+
+    def _update_orders_statuses_from_backend(
+            self, orders: dict[str, Order],
+            current_tick: list[PriceData] = None,
+            positions: dict[str,Position]=None, pf_cash: float = 0.0) -> list[str]:
+        if current_tick is None:
+            raise ValueError("Backtesting OM requires current_tick to be set")
+        # Process all orders and create a return value list of just the ones that changed
+        ret_val = []
+        for order in orders.values():
+            original_status = order.status
+            order = self._update_order_status_from_backend(order, current_tick, positions, pf_cash)
+            if order.status != original_status:
+                ret_val.append(order.order_id)
+        return ret_val
+
+
+    def _submit_order_to_backend(
+            self, order: Order, current_tick: list[PriceData] = None,
+            positions: dict[str,Position]=None, pf_cash: float = 0.0) -> Order:
+
+        if current_tick is None:
+            raise ValueError("Backtesting OM requires current_tick to be set")
+        if order.status in {OrderStatus.FILLED, OrderStatus.CANCELED}:
+            # nothing to do
             return order
 
-        raise Exception(f"Order type {order.type} not implemented")
+        pd = find_pricedata_in_list(order.symbol, current_tick)
+        if order.symbol in positions:
+            position = positions[order.symbol]
+        else:
+            position = Position(order.symbol, 0)
+
+        # Go through all supported order types and process them
+        if order.type == OrderType.MARKET:
+            _process_market_order(order, pd, pf_cash, position.quantity)
+
+        elif order.type == OrderType.BRACKET:
+            order.status = OrderStatus.PENDING_SALE
+            order.quantity = min(order.quantity, int(pf_cash/pd.close))
+            order.price = pd.close
+            order.cash = pd.close * order.quantity
+            order.executed_datetime = pd.timestamp
+
+        else:
+            raise ValueError(f"Unknown order type {order.type}")
+
+        return order
+

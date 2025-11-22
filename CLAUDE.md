@@ -258,10 +258,11 @@ class MyAlgorithm(Algorithm):
 ```
 
 **Running a Backtest:**
+
 ```python
 from engines.simulator import Simulator
 from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from core.om.backtesting_om import BacktestingOM
+from core.om.backtesting_om_old import BacktestingOM
 
 # Option 1: Use config.yaml settings
 sim = Simulator(cfg_section_to_use="simulator")

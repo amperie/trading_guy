@@ -4,10 +4,10 @@ Required data passing classes
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Union
 from enum import Enum
 from dataclasses import dataclass, field
 import uuid
-
 
 class SignalType(Enum):
     BUY = 1
@@ -63,14 +63,14 @@ class MarketSignal:
 @dataclass
 class Order:
     placed_datetime: datetime
-    executed_datetime: datetime
     action: OrderAction
     type: OrderType
     symbol: str
     price: float
     quantity: int
     cash: float
-    status: OrderStatus
+    executed_datetime: Union[None, datetime] = None
+    status: OrderStatus = OrderStatus.PENDING
     order_id: str = field(default_factory=lambda: f"local-{str(uuid.uuid4())}")
     tx_cost: float = 0.0
     parent_id: str = None
@@ -78,7 +78,13 @@ class Order:
     _child_orders_dict: dict[str, Order] = field(default_factory=lambda: {})
     processed_by_portfolio: bool = False
 
-    def add_child_order(self, name: str, order: Order):
+    def __str__(self):
+        return (f"Order {self.order_id}: status: {self.status} {self.symbol}: {self.type} "
+                f"quantity: {self.quantity} price: {self.price} "
+                f"placed: {self.placed_datetime} executed: {self.executed_datetime} "
+                f"processed by portfolio: {self.processed_by_portfolio}")
+
+    def add_child_order(self, name: str, order: Union[None, Order]):
         if name not in self._child_orders:
             self._child_orders.append(name)
         self._child_orders_dict[name] = order
@@ -89,44 +95,86 @@ class Order:
     def get_child_order(self, name: str) -> Order:
         return self._child_orders_dict[name]
 
+    @staticmethod
+    def create_market_order(
+            symbol: str,
+            order_action: OrderAction,
+            quantity: int,
+            tx_cost: float=0.0,
+            current_tick:list[PriceData]=None,
+    ) -> Order:
+        """Create a MarketOrder instance."""
+        if current_tick is not None:
+            # Find the PriceData for this symbol
+            pd = next((x for x in current_tick if x.symbol == symbol), None)
+            placed_ts = pd.timestamp if pd else datetime.now()
+        else:
+            placed_ts = datetime.now()
+
+        ret_val = Order(
+            action=order_action,
+            status=OrderStatus.PENDING,
+            type=OrderType.MARKET,
+            symbol=symbol,
+            price=0.0,
+            quantity=quantity,
+            cash=0.0,
+            tx_cost=tx_cost,
+            placed_datetime=placed_ts,
+        )
+        return ret_val
+
+
+
 class TrailingBracketOrder(Order):
     # TODO: Create a trailing bracket order
+    pass
 
 class BracketOrder(Order):
+
+    MANUAL_SALE: bool = False
+    SOLD_ORDER: Order = None
+
     @staticmethod
     def create_bracket_order(
             symbol: str,
-            price: float,
             high_sell_price: float,
             low_sell_price: float,
             quantity: int,
             tx_cost: float=0.0,
+            current_tick:list[PriceData]=None,
             ) -> BracketOrder:
         """
         Helper function to create a bracket order. It creates three orders
         the main buy order and two orders to take profit or stop loss
         Args:
             symbol:
-            price:
             quantity:
             tx_cost:
             high_sell_price:
             low_sell_price:
-
+            current_tick:
         Returns:
             List of orders starting with the main order, stop and profit take
         """
-        main_order = Order(
+
+        if current_tick is not None:
+            # Find the PriceData for this symbol
+            pd = next((x for x in current_tick if x.symbol == symbol), None)
+            placed_ts = pd.timestamp if pd else datetime.now()
+        else:
+            placed_ts = datetime.now()
+
+        main_order = BracketOrder(
             action=OrderAction.BUY,
             type=OrderType.BRACKET,
             symbol=symbol,
-            price=price,
+            price=0.0,
             quantity=quantity,
-            cash=price * quantity,
+            cash=0.0,
             tx_cost=tx_cost,
             status=OrderStatus.PENDING,
-            placed_datetime=datetime.now(),
-            executed_datetime=datetime.now(),
+            placed_datetime=placed_ts,
         )
 
         stop_loss_order = Order(
@@ -138,8 +186,7 @@ class BracketOrder(Order):
             cash=0,
             tx_cost=tx_cost,
             status=OrderStatus.PENDING,
-            placed_datetime=datetime.now(),
-            executed_datetime=datetime.now(),
+            placed_datetime=placed_ts,
             parent_id=main_order.order_id,
         )
 
@@ -152,16 +199,12 @@ class BracketOrder(Order):
             cash=0,
             tx_cost=tx_cost,
             status=OrderStatus.PENDING,
-            placed_datetime=datetime.now(),
-            executed_datetime=datetime.now(),
+            placed_datetime=placed_ts,
             parent_id=main_order.order_id,
         )
 
-        main_order.child_orders = [stop_loss_order.order_id, profit_order.order_id, "MANUAL_ORDER"]
-        main_order._child_orders_dict = {
-            "STOP": stop_loss_order,
-            "PROFIT_TAKER": profit_order,
-            "MANUAL_SALE": False,
-            "MANUAL_ORDER": None,
-        }
+        main_order.add_child_order("STOP", stop_loss_order)
+        main_order.add_child_order("PROFIT", profit_order)
+        main_order.add_child_order("MANUAL_ORDER", None)
+        main_order.MANUAL_SALE = False
         return main_order
