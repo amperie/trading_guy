@@ -73,6 +73,7 @@ class OrderManager(ABC):
             # and register it as its own order for later analysis reasons
             if order.type == OrderType.BRACKET and order.status == OrderStatus.FILLED:
                 so = order.SOLD_ORDER
+                # TODO: so could be None - need a check for this
                 self._filled_orders_by_id[so.order_id] = so
                 self._all_orders[so.order_id] = so
 
@@ -88,6 +89,7 @@ class OrderManager(ABC):
                 # and register it as its own order for later analysis reasons
                 if order.type == OrderType.BRACKET and order.status == OrderStatus.FILLED:
                     so = order.SOLD_ORDER
+                    # TODO: so could be None. Need to do a check
                     self._filled_orders_by_id[so.order_id] = so
                     self._all_orders[so.order_id] = so
 

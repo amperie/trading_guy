@@ -9,7 +9,7 @@ from utils.utils import find_marketsignal_in_list, find_pricedata_in_list
 
 class SingleSymbolPortfolio(Portfolio):
 
-    def process_tick_market_signals_logic_market(
+    def process_tick_market_signals_logic__for_market_order(
             self, signals: list[MarketSignal],
             tick: list[PriceData]) -> list[Order]:
         # Testing just buying and selling everything

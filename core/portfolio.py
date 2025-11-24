@@ -66,6 +66,7 @@ class Portfolio(ABC):
     @final
     def _update_pf_sell(self, order: Order):
         self.cash = self.cash + order.cash - order.tx_cost
+        # TODO: should check whether positions has the key
         self.positions[order.symbol].quantity -= order.quantity
         order.processed_by_portfolio = True
 
@@ -157,7 +158,7 @@ class Portfolio(ABC):
         submitted_orders = self.om.submit_orders(orders, tick, self.positions, self.cash)
 
         # Process any new orders that were filled immediately
-        filled_orders = [o.order_id for o in all_orders if o.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}]
+        filled_orders = [o.order_id for o in submitted_orders if o.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}]
         self._update_pf_from_changed_orders(filled_orders)
 
         # Update portfolio value based on current tick, positions and cash
