@@ -36,12 +36,10 @@ class TestBracketOrderStatusProgression:
         )]
 
         # Create bracket order manually
-        price = 100.0
-        profit_price = price * 1.10  # 10% profit = $110
-        stop_price = price * 0.95     # 5% stop = $95
+        profit_price = 110.0  # 10% profit
+        stop_price = 95.0     # 5% stop
         bracket_order = BracketOrder.create_bracket_order(
             symbol=symbol,
-            price=price,
             high_sell_price=profit_price,
             low_sell_price=stop_price,
             quantity=10,
@@ -128,12 +126,10 @@ class TestBracketOrderStatusProgression:
         )]
 
         # Create bracket order
-        price = 100.0
-        profit_price = price * 1.10
-        stop_price = price * 0.95
+        profit_price = 110.0
+        stop_price = 95.0
         bracket_order = BracketOrder.create_bracket_order(
             symbol=symbol,
-            price=price,
             high_sell_price=profit_price,
             low_sell_price=stop_price,
             quantity=20,
@@ -200,12 +196,10 @@ class TestBracketOrderStatusProgression:
             open=100.0, high=100.0, low=100.0, close=100.0, volume=1000
         )]
 
-        price = 100.0
-        profit_price = price * 1.10
-        stop_price = price * 0.95
+        profit_price = 110.0
+        stop_price = 95.0
         bracket_order = BracketOrder.create_bracket_order(
             symbol=symbol,
-            price=price,
             high_sell_price=profit_price,
             low_sell_price=stop_price,
             quantity=15,
@@ -278,12 +272,10 @@ class TestBracketOrderStatusProgression:
             open=100.0, high=100.0, low=100.0, close=100.0, volume=1000
         )]
 
-        price = 100.0
-        profit_price = price * 1.10
-        stop_price = price * 0.95
+        profit_price = 110.0
+        stop_price = 95.0
         bracket_order = BracketOrder.create_bracket_order(
             symbol=symbol,
-            price=price,
             high_sell_price=profit_price,
             low_sell_price=stop_price,
             quantity=10,
@@ -332,12 +324,10 @@ class TestBracketOrderStatusProgression:
             open=100.0, high=100.0, low=100.0, close=100.0, volume=1000
         )]
 
-        price = 100.0
-        profit_price = price * 1.10
-        stop_price = price * 0.95
+        profit_price = 110.0
+        stop_price = 95.0
         bracket_order = BracketOrder.create_bracket_order(
             symbol=symbol,
-            price=price,
             high_sell_price=profit_price,
             low_sell_price=stop_price,
             quantity=10,
@@ -379,12 +369,10 @@ class TestBracketOrderStatusProgression:
             open=100.0, high=100.0, low=100.0, close=100.0, volume=1000
         )]
 
-        price = 100.0
-        profit_price = price * 1.10
-        stop_price = price * 0.95
+        profit_price = 110.01  # Slightly above to avoid float precision
+        stop_price = 95.0
         bracket_order = BracketOrder.create_bracket_order(
             symbol=symbol,
-            price=price,
             high_sell_price=profit_price,
             low_sell_price=stop_price,
             quantity=10,
