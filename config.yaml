@@ -5,6 +5,14 @@ logging:
   filename: "trading.log"  # Set to null to disable file logging
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+mlflow:
+  enabled: true  # Enable/disable MLflow tracking
+  tracking_uri: "http://hp.lan:8899"  # MLflow tracking server URI
+  experiment_name: "Trading Backtest"  # Default experiment name
+  artifact_location: null  # Custom artifact storage location (null = default)
+  run_name_prefix: ""  # Optional prefix for run names
+  auto_log_system_info: true  # Automatically log system/environment info
+
 data_provider:
   provider: data_providers.test_data_provider.TestDataProvider
   path: "data/SPXU.csv"

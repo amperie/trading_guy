@@ -6,7 +6,7 @@ from core.classes import OrderType, OrderStatus, OrderAction, Order, PriceData
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engines.simulator import Simulator
+from engines.backtest_engine import BacktestingEngine
 from core.om.backtesting_om import BacktestingOM
 from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from algorithms.test_algorithm import TestAlgorithm
@@ -23,7 +23,7 @@ def test_simulator():
     pf = SingleSymbolPortfolio({'symbol':'AAPL', 'keep_history': True, "cash": 1000})
     pf.set_order_manager(om)
 
-    s = Simulator(om=om, al=al, pf=pf)
+    s = BacktestingEngine(om=om, al=al, pf=pf)
     s.run()
 
 def test_om():

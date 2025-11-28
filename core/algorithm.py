@@ -20,7 +20,7 @@ class Algorithm(ABC):
         "full_history": False,
     }
 
-    def __init__(self, cfg: Dict[str, Any]=None):
+    def __init__(self, cfg: Dict[str, Any]=None, history_length: int=0):
 
         super().__init__()
         if cfg is None:
@@ -29,10 +29,7 @@ class Algorithm(ABC):
             cfg = {**self.default_cfg, **cfg}
 
         self.cfg = cfg
-        if "history_length" in cfg:
-            self.history_length = cfg["history_length"]
-        else:
-            self.history_length = 0
+        self.history_length = history_length
         self.price_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.price_data_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.full_history: List[Dict[str, PriceData]] = []
@@ -54,8 +51,8 @@ class Algorithm(ABC):
                 self.price_history[symbol].append(pd.close)
                 self.price_data_history[symbol].append(pd)
             # Append full history if configured to do so
-            if "full_history" in self.cfg and self.cfg["full_history"] is True:
-                self.full_history.append(data)
+        if "full_history" in self.cfg and self.cfg["full_history"] is True:
+            self.full_history.append(data)
 
     @final
     def on_data(self, data: list[PriceData]) -> list[MarketSignal]:

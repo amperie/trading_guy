@@ -2,6 +2,7 @@
 DataProvider base class
 Inherited classes will provide test data, backtesting data or real time data
 """
+from typing import final, Generator
 
 import pandas as pd
 from abc import ABC, abstractmethod
@@ -28,10 +29,16 @@ class DataProvider(ABC):
     def load_data(self):
         pass
 
+    @final
     def get_data(self):
         return self.data
 
-    def iterate(self) -> list[PriceData]:
+    def iterate(self) -> Generator[list[PriceData], None, None]:
+        """
+        Yields lists of PriceData, one list per timestamp.
+        Each yielded list contains PriceData for all symbols at that timestamp.
+        """
+
         if self.data is None:
             self.load_data()
 

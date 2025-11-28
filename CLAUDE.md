@@ -69,6 +69,172 @@ Each component is designed to be swappable via configuration, enabling easy test
   - `BacktestingOM` (core/om/): Instantly fills market orders, handles bracket orders with stop-loss/profit-taker logic
   - `BacktestingOM_old` (core/om/): Legacy implementation preserved for reference
 
+**AnalysisEngine:**
+- Located in `engines/analysis_engine.py`
+- Provides comprehensive analysis of backtesting results
+- Requires Portfolio with `keep_history=True` to access tick/value/cash history
+- **Core Features:**
+  - **Trade Extraction:** Pairs buy/sell orders using FIFO matching, handles bracket orders
+  - **Performance Metrics:** Calculates 30+ metrics (returns, Sharpe, Sortino, drawdown, win rate, etc.)
+  - **Returns Analysis:** Get returns at tick, daily, or monthly granularity
+  - **Bracket Analysis:** Analyze effectiveness of stop-loss vs profit-taker exits
+  - **Visualizations:** Equity curve, drawdown, trade P&L, returns distribution, comprehensive dashboard
+  - **Reports:** Generate detailed text reports with all metrics
+- **Key Methods:**
+  - `extract_trades()` → Returns list of `Trade` objects (entry/exit pairs)
+  - `calculate_metrics()` → Returns `PerformanceMetrics` dataclass with 30+ metrics
+  - `get_tick_returns()` → Returns pandas Series of tick-level returns
+  - `get_daily_returns()` → Returns pandas Series of daily returns (resampled)
+  - `get_monthly_returns()` → Returns pandas Series of monthly returns (resampled)
+  - `analyze_bracket_effectiveness()` → Returns dict with bracket order statistics
+  - `plot_equity_curve()` → Plot portfolio value over time
+  - `plot_portfolio_with_trades()` → Plot portfolio value with green X (BUY) and red X (SELL) markers (shows only filled orders with quantity > 0)
+  - `plot_drawdown()` → Plot drawdown chart
+  - `plot_trade_pnl()` → Plot individual trade P&L
+  - `plot_returns_distribution()` → Plot histogram of returns
+  - `plot_stock_performance()` → Plot individual stock prices and returns (normalized to 100)
+  - `plot_interactive_portfolio()` → **NEW** Interactive Plotly chart with portfolio value, cash, trades, and stock prices (zoomable, clickable legend, shows only quantity > 0)
+  - `plot_comprehensive_dashboard()` → Multi-panel dashboard with key metrics
+  - `generate_report()` → Returns formatted text report string
+  - `log_to_mlflow(run_name, description, tags, parameters, ...)` → Log all analysis results to MLflow (includes interactive chart)
+  - `run_full_analysis(log_to_mlflow=True, ...)` → Run complete analysis and optionally log to MLflow (includes interactive chart)
+- **Example Usage:**
+  ```python
+  from engines.analysis_engine import AnalysisEngine
+
+  # Option 1: Manual analysis steps
+  engine = AnalysisEngine(portfolio, order_manager)
+  trades = engine.extract_trades()
+  metrics = engine.calculate_metrics()
+  tick_returns = engine.get_tick_returns()
+  daily_returns = engine.get_daily_returns()
+  report = engine.generate_report()
+
+  # Generate visualizations
+  engine.plot_equity_curve(save_path="equity_curve.png")
+  engine.plot_portfolio_with_trades(save_path="portfolio_trades.png")
+  engine.plot_comprehensive_dashboard(save_path="dashboard.png")
+
+  # Option 2: Complete analysis with MLflow (recommended)
+  engine = AnalysisEngine(portfolio, order_manager)
+  results = engine.run_full_analysis(
+      run_name="SMA Crossover Strategy",
+      description="Testing 5/20 SMA crossover on AAPL",
+      parameters={"sma_short": 5, "sma_long": 20, "symbol": "AAPL"},
+      log_to_mlflow=True,  # Logs 7 PNG charts + 1 interactive HTML chart + metrics + trades
+      save_charts_locally=True,
+      save_report_locally=True
+  )
+  # Results dict contains: trades, metrics, tick_returns, daily_returns, monthly_returns, bracket_analysis, report
+  # MLflow artifacts: 7 static charts, interactive_portfolio.html, trades.json, reports
+
+  # Option 3: Manual MLflow logging for fine-grained control
+  engine = AnalysisEngine(portfolio, order_manager)
+  engine.extract_trades()
+  engine.calculate_metrics()
+  engine.log_to_mlflow(
+      run_name="Custom Run",
+      parameters={"custom_param": "value"},
+      log_charts=True,  # Includes interactive_portfolio.html + 7 static charts
+      log_trades=True,
+      chart_dpi=200
+  )
+  # View interactive chart in MLflow UI: http://hp.lan:8899
+  ```
+
+**MLflowClient:**
+- Located in `utils/mlflow_client.py`
+- Provides experiment tracking and logging for trading backtests
+- Reads configuration from `config.yaml` under `mlflow` section
+- **Core Features:**
+  - **Run Management:** Start/stop runs with context manager support
+  - **Parameter Logging:** Log algorithm and strategy parameters
+  - **Metric Logging:** Log performance metrics (returns, Sharpe, win rate, etc.)
+  - **Artifact Logging:** Save charts, reports, JSON data, HTML, markdown, and text files
+  - **System Info:** Automatically log system and environment details
+  - **Remote Tracking:** Connect to remote MLflow server (configured at hp.lan:8899)
+- **Configuration (config.yaml):**
+  ```yaml
+  mlflow:
+    enabled: true
+    tracking_uri: "http://hp.lan:8899"
+    experiment_name: "Trading Backtest"
+    artifact_location: null
+    run_name_prefix: ""
+    auto_log_system_info: true
+  ```
+- **Key Methods:**
+  - `from_config()` → Create client from config.yaml settings
+  - `start_run(run_name, description, tags)` → Start new run
+  - `end_run(status)` → End current run
+  - `log_param(key, value)` / `log_params(dict)` → Log parameters
+  - `log_metric(key, value, step)` / `log_metrics(dict, step)` → Log metrics
+  - `log_text(text, filename)` → Log text artifact
+  - `log_json(data, filename)` → Log JSON artifact
+  - `log_markdown(markdown, filename)` → Log markdown artifact
+  - `log_html(html, filename)` → Log HTML artifact
+  - `log_chart(figure, filename, format, dpi)` → Log matplotlib/plotly chart
+  - `log_artifact(local_path)` → Log existing file
+  - `set_tag(key, value)` / `set_tags(dict)` → Set run tags
+  - `log_model_info(dict)` → Log model/strategy metadata
+  - `get_run_url()` → Get MLflow UI URL for current run
+- **Example Usage:**
+  ```python
+  from utils.mlflow_client import MLflowClient
+  from engines.analysis_engine import AnalysisEngine
+
+  # Create client from config
+  mlflow = MLflowClient.from_config()
+
+  # Use context manager for automatic run management
+  with mlflow.start_run(
+      run_name="SMA Crossover Strategy",
+      description="Testing 5/20 SMA crossover on AAPL"
+  ):
+      # Log algorithm parameters
+      mlflow.log_params({
+          "symbol": "AAPL",
+          "sma_short": 5,
+          "sma_long": 20,
+          "initial_capital": 100000
+      })
+
+      # Run backtest
+      sim.run()
+
+      # Calculate metrics
+      engine = AnalysisEngine(portfolio, order_manager)
+      metrics = engine.calculate_metrics()
+
+      # Log performance metrics
+      mlflow.log_metrics({
+          "total_return_pct": metrics.total_return_pct,
+          "sharpe_ratio": metrics.sharpe_ratio,
+          "max_drawdown_pct": metrics.max_drawdown_pct,
+          "win_rate": metrics.win_rate,
+          "total_trades": metrics.total_trades
+      })
+
+      # Log visualizations
+      fig = engine.plot_equity_curve(show=False)
+      mlflow.log_chart(fig, "equity_curve", format="png")
+
+      fig = engine.plot_portfolio_with_trades(show=False)
+      mlflow.log_chart(fig, "portfolio_trades", format="png")
+
+      # Log text report
+      report = engine.generate_report()
+      mlflow.log_text(report, "performance_report.txt")
+
+      # Log trades as JSON
+      trades = engine.extract_trades()
+      trades_data = [{"symbol": t.symbol, "pnl": t.pnl, "pnl_pct": t.pnl_pct} for t in trades]
+      mlflow.log_json(trades_data, "trades.json")
+
+      # View run in MLflow UI
+      print(f"View run: {mlflow.get_run_url()}")
+  ```
+
 ### Directory Structure
 
 ```
@@ -77,7 +243,6 @@ core/                      # Core domain objects and base classes
   algorithm.py             # Algorithm base class with history management
   portfolio.py             # Portfolio base class (signals → orders)
   order_manager.py         # OrderManager base class (order execution interface)
-  analysis_engine.py       # Analysis engine (stub for future features)
   pf/                      # Portfolio implementations
     single_symbol_portfolio.py  # Single-symbol portfolio strategy
   om/                      # OrderManager implementations
@@ -90,6 +255,7 @@ data_providers/            # Data source implementations
 engines/                   # Execution engines
   simulator.py             # Backtesting engine (orchestrates data → algo → portfolio → OM)
   real_time.py             # Live trading engine (for production deployment)
+  analysis_engine.py       # Comprehensive backtesting analysis engine (30+ metrics, visualizations, reports)
 
 algorithms/                # Trading algorithm implementations
   test_algorithm.py        # Example algorithm (random buy/sell signals)
@@ -97,6 +263,7 @@ algorithms/                # Trading algorithm implementations
 utils/                     # Shared utilities
   config_manager.py        # Singleton config loader (reads config.yaml)
   logger.py                # Singleton logger (configured via config.yaml)
+  mlflow_client.py         # MLflow experiment tracking client (logs runs, metrics, artifacts)
   utils.py                 # Helper functions (instantiate_from_string, find_pricedata_in_list, etc.)
 
 tests/                     # Test suite
@@ -186,10 +353,12 @@ pytest tests/ --cov=core --cov=data_providers --cov=engines --cov-report=html
 # View report: open htmlcov/index.html
 ```
 
-**Test Status:** 6/6 bracket order progression tests passing (100%). Test suite has been refactored to focus on core functionality.
+**Test Status:** 39/39 tests passing (100%). Comprehensive test coverage across all core components.
 
 **Key Test Coverage:**
-- `test_bracket_order_progression.py`: Comprehensive bracket order lifecycle tests
+- `test_analysis_engine.py`: 10 tests for trade extraction, metrics calculation, returns analysis, and visualizations
+- `test_bracket_order_progression.py`: 6 tests for bracket order lifecycle (stop-loss, profit-taker, manual exit)
+- `test_portfolio.py`: 23 tests for portfolio management (market orders, bracket orders, history tracking, positions)
   - Stop-loss trigger (price drops below threshold)
   - Profit-taker trigger (price rises above threshold)
   - Manual sale (forced exit at market price)
@@ -225,6 +394,14 @@ logging:
   folder: "logs"
   filename: "trading.log"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+mlflow:
+  enabled: true
+  tracking_uri: "http://hp.lan:8899"
+  experiment_name: "Trading Backtest"
+  artifact_location: null
+  run_name_prefix: ""
+  auto_log_system_info: true
 
 data_provider:
   provider: data_providers.test_data_provider.TestDataProvider
