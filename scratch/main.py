@@ -46,4 +46,19 @@ def test_om():
 
     pass
 
-test_om()
+def test_indicators():
+    from core.ta.analyzer import TechnicalAnalyzer
+
+    data = [
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 12.0,
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 12.0,
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 12.0,
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 12.0,
+        1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 12.0,
+    ]
+
+    a = TechnicalAnalyzer.calculate_ema(data, 2)
+    a = TechnicalAnalyzer.calculate_macd(data, 15, 9, 3, True)
+    print(a)
+
+test_indicators()
