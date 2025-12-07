@@ -5,6 +5,7 @@ ticker is configured through the config {'symbol':'SPXU'}
 from core.portfolio import Portfolio
 from core.order_manager import OrderManager
 from core.classes import Order, MarketSignal, PriceData, SignalType, OrderAction, BracketOrder
+from core.classes import TickResults
 from utils.utils import find_marketsignal_in_list, find_pricedata_in_list
 
 class SingleSymbolPortfolio(Portfolio):
@@ -40,7 +41,7 @@ class SingleSymbolPortfolio(Portfolio):
 
     def process_tick_market_signals_logic(
             self, signals: list[MarketSignal],
-            tick: list[PriceData]) -> list[Order]:
+            tick: list[PriceData]) -> TickResults:
         # Testing buying and selling with bracket orders
 
         symbol = self.cfg['symbol']
@@ -50,7 +51,7 @@ class SingleSymbolPortfolio(Portfolio):
         signal = find_marketsignal_in_list(symbol, signals)
         pd = find_pricedata_in_list(symbol, tick)
         if pd is None:
-            return []
+            return TickResults(orders=[])
         price = pd.close
 
         if signal is not None and signal.type == SignalType.BUY:
@@ -60,6 +61,7 @@ class SingleSymbolPortfolio(Portfolio):
                 symbol, price * (1.0 + profit_pct/100), price * (1.0 - stop_pct/100.0),
                 quantity, 0.0, tick
             )
-            return [bo]
+            ret_val = TickResults(orders=[bo])
+            return ret_val
         else:
-            return []
+            return TickResults(orders=[])

@@ -7,7 +7,7 @@ from core.algorithm import Algorithm
 from core.portfolio import Portfolio
 from core.order_manager import OrderManager
 from data_providers.data_provider import DataProvider
-from core.classes import PriceData, Order
+from core.classes import PriceData, Order, TickResults
 from engines.base_engine import BaseEngine
 
 class BacktestingEngine(BaseEngine):
@@ -28,8 +28,8 @@ class BacktestingEngine(BaseEngine):
         for tick in self.dp.iterate():
             self.on_tick(tick)
 
-    def on_tick(self, tick: list[PriceData]) -> list[Order]:
+    def on_tick(self, tick: list[PriceData]) -> TickResults:
 
         market_signals = self.al.on_data(tick)
-        orders = self.pf.process_market_signals_for_tick(market_signals, tick)
-        return orders
+        ret_val = self.pf.process_market_signals_for_tick(market_signals, tick)
+        return ret_val

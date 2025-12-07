@@ -10,6 +10,7 @@ Interfaces:
     - Has an OrderManager member to handle the orders
 """
 from core.classes import MarketSignal, Order, PriceData, Position, OrderStatus, OrderAction, OrderType
+from core.classes import TickResults
 from core.order_manager import OrderManager
 from utils.logger import Logger
 from abc import ABC, abstractmethod
@@ -43,8 +44,11 @@ class Portfolio(ABC):
         self.cash_history: dict[datetime, float] = {}
         self.signals_history: dict[datetime, list[MarketSignal]] = {}
 
+        logger.info(f"Portfolio initialized - Cash: ${self.cash:,.2f}, Positions: {len(starting_positions or {})}, History: {keep_history}")
+
     @final
     def _update_pf_value(self, current_tick: list[PriceData]) -> float:
+        logger.debug(f"Updating portfolio value - Cash: ${self.cash:,.2f}, Positions: {len(self.positions)}")
         retval = self.cash
         for p in self.positions.keys():
             sp = find_pricedata_in_list(p, current_tick)
@@ -60,10 +64,14 @@ class Portfolio(ABC):
             self.previous_price[p] = price
             retval += self.positions[p].quantity * price
         self.total_value = retval
+        logger.debug(f"Portfolio value updated - Total: ${retval:,.2f}")
         return retval
 
     @final
     def _update_pf_buy(self, order: Order):
+        if self.cash - order.cash - order.tx_cost < 0:
+            logger.error(f"Insufficient funds for BUY - Cash: ${self.cash:,.2f}, Required: ${order.cash + order.tx_cost:,.2f}")
+
         self.cash = self.cash - order.cash - order.tx_cost
         if order.symbol in self.positions:
             self.positions[order.symbol].quantity += order.quantity
@@ -71,18 +79,31 @@ class Portfolio(ABC):
             self.positions[order.symbol] = Position(order.symbol, order.quantity)
         order.processed_by_portfolio = True
 
+        logger.info(f"BUY executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} (Cost: ${order.cash + order.tx_cost:,.2f})")
+        logger.debug(f"Cash after BUY: ${self.cash:,.2f}, Position: {self.positions[order.symbol].quantity}")
+
     @final
     def _update_pf_sell(self, order: Order):
+        if order.symbol not in self.positions:
+            logger.error(f"Cannot SELL {order.symbol} - No position exists")
+            raise ValueError(f"No position for {order.symbol}")
+        if self.positions[order.symbol].quantity < order.quantity:
+            logger.error(f"Cannot SELL {order.symbol} - Insufficient quantity (Have: {self.positions[order.symbol].quantity}, Need: {order.quantity})")
+
         self.cash = self.cash + order.cash - order.tx_cost
-        # TODO: should check whether positions has the key
         self.positions[order.symbol].quantity -= order.quantity
         order.processed_by_portfolio = True
+
+        logger.info(f"SELL executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} (Proceeds: ${order.cash - order.tx_cost:,.2f})")
+        logger.debug(f"Cash after SELL: ${self.cash:,.2f}, Remaining position: {self.positions[order.symbol].quantity}")
 
     @final
     def _update_pf_from_order(self, order_id: str) -> Order:
         # go through all the types of Orders and OrderStatus to see what to do
         order = self.om.all_orders[order_id]
         status = order.status
+
+        logger.debug(f"Processing order {order_id[:8]}... - Type: {order.type}, Status: {status}, Action: {order.action if hasattr(order, 'action') else 'N/A'}")
 
         if order.processed_by_portfolio:
             # Order has already been processed, do nothing
@@ -111,11 +132,20 @@ class Portfolio(ABC):
                 self._update_pf_buy(order)
                 # Set the processed_by_portfolio flag back to False since it's still pending
                 order.processed_by_portfolio = False
+                logger.info(
+                    f"BRACKET order {order.symbol} - Initial BUY filled, awaiting STOP/PROFIT trigger "
+                    f"at ${order.get_child_order("STOP").price:.2f}///${order.get_child_order("PROFIT").price:.2f}"
+                )
                 return order
             elif status == OrderStatus.FILLED:
                 # Sale happened, update from the SOLD_ORDER
                 so = order.SOLD_ORDER
                 self._update_pf_sell(so)
+                exit_type = "STOP-LOSS" if so.type == OrderType.STOP_LOSS else "PROFIT-TAKER" if so.type == OrderType.PROFIT_TAKER else "MANUAL"
+                logger.info(
+                    f"BRACKET order {order.symbol} - Exited via {exit_type} @ ${so.price:.2f}///"
+                    f"${(so.price - order.price) * so.quantity:.2f} net"
+                )
                 return order
             else:
                 raise NotImplementedError(f"BRACKET order with unimplemented status {status}: {order}")
@@ -138,7 +168,7 @@ class Portfolio(ABC):
     @final
     def process_market_signals_for_tick(
             self, signals: list[MarketSignal],
-            tick: list[PriceData]) -> list[Order]:
+            tick: list[PriceData]) -> TickResults:
         """
         Rebalance portfolio based on signals
         :param signals:
@@ -146,25 +176,35 @@ class Portfolio(ABC):
         :return:
         """
         if len(signals) > 0:
-            # logger.info(f"{tick[0].timestamp}: Processing {len(signals)} signals")
-            pass
+            logger.debug(f"Tick {tick[0].timestamp}: Processing {len(signals)} signals - Symbols: {[s.symbol for s in signals]}")
 
         # Before processing new signals, update all pending orders, portfolio value and positions
         # get the list of order IDs that changed status since last tick
         changed_orders = self.om.update_pending_orders(tick, self.positions, self.cash)
 
+        if len(changed_orders) > 0:
+            logger.debug(f"Pending orders updated: {len(changed_orders)} orders changed status")
+
         # Update the portfolio to reflect orders that changed status
         processed_orders = self._update_pf_from_changed_orders(changed_orders)
 
         # Call the market signals processing logic and get list of new orders
-        all_orders = self.process_tick_market_signals_logic(
+        all_orders_tr = self.process_tick_market_signals_logic(
             signals, tick
         )
+        all_orders = all_orders_tr.orders
+
         # Remove 0 quantity orders
         orders = [o for o in all_orders if o.quantity > 0]
 
+        if len(all_orders) - len(orders) > 0:
+            logger.debug(f"Filtered out {len(all_orders) - len(orders)} zero-quantity orders")
+
         # Submit orders to Order Manager
         submitted_orders = self.om.submit_orders(orders, tick, self.positions, self.cash)
+
+        if len(submitted_orders) > 0:
+            logger.debug(f"Submitted {len(submitted_orders)} new orders to OrderManager")
 
         # Process any new orders that were filled immediately
         filled_orders = [o.order_id for o in submitted_orders if o.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}]
@@ -172,6 +212,13 @@ class Portfolio(ABC):
 
         # Update portfolio value based on current tick, positions and cash
         self._update_pf_value(tick)
+
+        # Log when an order is happening
+        if len(orders) > 0:
+            logger.info(
+                f"Tick {tick[0].timestamp} - Value: ${self.total_value:,.2f}, "
+                f"Cash: ${self.cash:,.2f}, Positions: {len(self.positions)}, "
+                f"Orders: {len(orders)}")
 
         # Store the history
         if self.keep_history:
@@ -181,10 +228,11 @@ class Portfolio(ABC):
             self.signals_history[tick[0].timestamp] = signals
 
         # Return the new orders that were created
-        return orders
+        ret_val = TickResults(orders=orders)
+        return ret_val
 
     @abstractmethod
     def process_tick_market_signals_logic(
             self, signals: list[MarketSignal],
-            tick: list[PriceData]) -> list[Order]:
+            tick: list[PriceData]) -> TickResults:
         raise NotImplementedError("process_market_signals_logic needs to be overridden")

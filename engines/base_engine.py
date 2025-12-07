@@ -1,15 +1,9 @@
-from core.classes import PriceData, Order
+from core.classes import PriceData, Order, TickResults
 from core.algorithm import Algorithm
 from core.portfolio import Portfolio
 from core.order_manager import OrderManager
 from data_providers.data_provider import DataProvider
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-
-
-@dataclass
-class OnTickResult:
-    orders: list[Order]
 
 
 class BaseEngine(ABC):
@@ -36,5 +30,5 @@ class BaseEngine(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def on_tick(self, tick: list[PriceData]) -> list[Order]:
+    def on_tick(self, tick: list[PriceData]) -> TickResults:
         raise NotImplementedError()

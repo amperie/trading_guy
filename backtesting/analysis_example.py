@@ -23,18 +23,18 @@ def main():
     om = BacktestingOM()
 
     alg_cfg = {
-        "macd_fastperiod": 1200,
-        "macd_slowperiod": 2600,
-        "macd_signalperiod": 900,
-        "rsi_period": 1400,
+        "macd_fastperiod": 120,
+        "macd_slowperiod": 260,
+        "macd_signalperiod": 90,
+        "rsi_period": 140,
     }
 
-    al = MacdRsiAlgorithm(alg_cfg, history_length=100)
+    al = MacdRsiAlgorithm(alg_cfg, history_length=360)
 
 
-    dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
+    dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider", "truncate": 5000}
     dp = TestDataProvider(dp_cfg)
-    pf = SingleSymbolPortfolio({"symbol": "UPRO", "stop_pct": 5, "profit_pct": 5}, om, 1000.0, {}, True)
+    pf = SingleSymbolPortfolio({"symbol": "GDXU", "stop_pct": 5, "profit_pct": 5}, om, 1000.0, {}, True)
 
     sim = BacktestingEngine({}, dp, al, om, pf)
     sim.run()
