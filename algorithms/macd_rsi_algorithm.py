@@ -2,6 +2,7 @@ from typing import Dict, Any
 from core.algorithm import Algorithm
 from core.classes import PriceData, MarketSignal, SignalType
 from core.ta.analyzer import TechnicalAnalyzer
+from utils.utils import get_symbols_in_list
 
 
 momentum_default_params = {
@@ -32,19 +33,22 @@ class MacdRsiAlgorithm(Algorithm):
         self.rsi_period = cfg["rsi_period"]
         self.ta = TechnicalAnalyzer()
 
-    def on_data_logic(self, data: Dict[str,PriceData]) -> list[MarketSignal]:
+    def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
         """
         Iterates through all symbols in the data and generates a market signal for each
         if appropriate
         """
         ret_val = []
-        for symbol in data.keys():
-            pd = data[symbol]
+        for pd in data:
+            symbol = pd.symbol
             macd = self.ta.calculate_macd(
                 self.price_history[symbol], self.macd_slowperiod, self.macd_fastperiod,
                 self.macd_signalperiod, True
             )
             rsi = self.ta.calculate_rsi(self.price_history[symbol], self.rsi_period)
+            if rsi is None or macd is None or macd.last_macd is None:
+                # Not enough data yet
+                continue
             if rsi.rsi > 40 and macd.histogram * macd.last_macd.histogram < 0:
                 if macd.histogram > 0:
                     ret = MarketSignal(

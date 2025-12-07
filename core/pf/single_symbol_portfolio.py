@@ -15,6 +15,7 @@ class SingleSymbolPortfolio(Portfolio):
         # Testing just buying and selling everything
 
         symbol = self.cfg['symbol']
+
         signal = find_marketsignal_in_list(symbol, signals)
 
         price = find_pricedata_in_list(symbol, tick).close
@@ -43,14 +44,21 @@ class SingleSymbolPortfolio(Portfolio):
         # Testing buying and selling with bracket orders
 
         symbol = self.cfg['symbol']
+        stop_pct = self.cfg['stop_pct']
+        profit_pct = self.cfg['profit_pct']
+
         signal = find_marketsignal_in_list(symbol, signals)
-        price = find_pricedata_in_list(symbol, tick).close
+        pd = find_pricedata_in_list(symbol, tick)
+        if pd is None:
+            return []
+        price = pd.close
 
         if signal is not None and signal.type == SignalType.BUY:
             # Buy as much as we can with the available cash
             quantity = int(self.cash / price)
             bo = BracketOrder.create_bracket_order(
-                symbol, price+2.0, price-2.0, quantity, 0.0, tick
+                symbol, price * (1.0 + profit_pct/100), price * (1.0 - stop_pct/100.0),
+                quantity, 0.0, tick
             )
             return [bo]
         else:

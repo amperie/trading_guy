@@ -4,6 +4,13 @@ from core.portfolio import Portfolio
 from core.order_manager import OrderManager
 from data_providers.data_provider import DataProvider
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+
+@dataclass
+class OnTickResult:
+    orders: list[Order]
+
 
 class BaseEngine(ABC):
     dp = DataProvider

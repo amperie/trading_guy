@@ -1,5 +1,5 @@
 import importlib
-from typing import Any
+from typing import Any, Union
 
 from core.classes import PriceData, MarketSignal
 
@@ -34,6 +34,14 @@ def find_pricedata_in_list(symbol: str, pds: list[PriceData]) -> PriceData:
     except StopIteration:
         retval = None
     return retval
+
+def get_symbols_in_list(data: list[Union[MarketSignal, PriceData]]) -> list[str]:
+    ret_val = []
+    for item in data:
+        symbol = item.symbol
+        if not symbol in ret_val:
+            ret_val.append(symbol)
+    return ret_val
 
 def find_marketsignal_in_list(symbol: str, pds: list[MarketSignal]) -> MarketSignal:
     try:

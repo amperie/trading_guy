@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from collections import deque
 from dataclasses import dataclass
 from typing import Union, Optional
 
@@ -30,25 +32,27 @@ class TechnicalAnalyzer:
 
 
     @staticmethod
-    def calculate_ema_series(prices: list, period: int) -> Union[list[None], list[float]]:
+    def calculate_ema_series(prices: deque[float], period: int) -> Union[list[None], list[float]]:
         """Calculate EMA series"""
         if len(prices) < period:
             return [None] * len(prices)
 
+        price_list = list(prices)
+
         multiplier = 2 / (period + 1)
         ema_values = [None] * (period - 1)
 
-        ema = sum(prices[:period]) / period
+        ema = sum(price_list[:period]) / period
         ema_values.append(ema)
 
-        for price in prices[period:]:
+        for price in price_list[period:]:
             ema = (price - ema) * multiplier + ema
             ema_values.append(ema)
 
         return ema_values
 
     @staticmethod
-    def calculate_ema(prices: list[float], period: int) -> Union[None, float]:
+    def calculate_ema(prices: deque[float], period: int) -> Union[None, float]:
         """
         Calculate EMA for a list of prices.
         Returns the current EMA value.
@@ -56,20 +60,21 @@ class TechnicalAnalyzer:
         if len(prices) < period:
             return None  # Not enough data
 
+        price_list = list(prices)
         # Calculate multiplier
         multiplier = 2 / (period + 1)
 
         # Start with SMA for first value
-        ema = sum(prices[:period]) / period
+        ema = sum(price_list[:period]) / period
 
         # Apply EMA formula for remaining prices
-        for price in prices[period:]:
+        for price in price_list[period:]:
             ema = (price - ema) * multiplier + ema
 
         return ema
 
     @staticmethod
-    def calculate_macd(prices: list[float], slow_period: int=26, fast_period: int=12,
+    def calculate_macd(prices: deque[float], slow_period: int=26, fast_period: int=12,
                        signal_period: int=9, calculate_prev_macd: bool = False) -> Union[None, MACD]:
 
         """Calculate MACD, Signal, Histogram"""
@@ -101,7 +106,8 @@ class TechnicalAnalyzer:
         histogram = macd_line - signal_line if signal_line is not None else None
 
         if calculate_prev_macd:
-            prev_macd = TechnicalAnalyzer.calculate_macd(prices[0:-1], slow_period, fast_period, signal_period, False)
+            price_list = list(prices)
+            prev_macd = TechnicalAnalyzer.calculate_macd(price_list[0:-1], slow_period, fast_period, signal_period, False)
         else:
             prev_macd = None
 
@@ -119,7 +125,7 @@ class TechnicalAnalyzer:
         return ret_val
 
     @staticmethod
-    def calculate_rsi(prices: list[float], period: int = 14) -> Union[None, RSI]:
+    def calculate_rsi(prices: deque[float], period: int = 14) -> Union[None, RSI]:
         """
         Calculate RSI (Relative Strength Index).
 

@@ -4,10 +4,14 @@ from typing import Union
 from core.classes import Order, PriceData, OrderType, OrderStatus, Position, OrderAction, BracketOrder
 from core.order_manager import OrderManager
 from utils.utils import find_pricedata_in_list
+from utils.logger import Logger
 
+logger = Logger().get_logger(__name__)
 
 def _process_market_order(order: Order, pd: PriceData, pf_cash: float, quantity: int) -> Order:
 
+    if pd is None:
+        return order
     if order.action == OrderAction.SELL:
         tx_quantity = min(order.quantity, quantity)
     else:
@@ -41,6 +45,9 @@ class BacktestingOM(OrderManager):
             return order
 
         pd = find_pricedata_in_list(order.symbol, current_tick)
+        if pd is None:
+            logger.debug(f"No price data found for {order.symbol}")
+            return order
 
         if order.type == OrderType.MARKET:
             return _process_market_order(order, pd, pf_cash, order.quantity)

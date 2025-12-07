@@ -23,10 +23,10 @@ def main():
     om = BacktestingOM()
 
     alg_cfg = {
-        "macd_fastperiod": 12,
-        "macd_slowperiod": 26,
-        "macd_signalperiod": 9,
-        "rsi_period": 14,
+        "macd_fastperiod": 1200,
+        "macd_slowperiod": 2600,
+        "macd_signalperiod": 900,
+        "rsi_period": 1400,
     }
 
     al = MacdRsiAlgorithm(alg_cfg, history_length=100)
@@ -34,7 +34,7 @@ def main():
 
     dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
-    pf = SingleSymbolPortfolio({"symbol": "UPRO"}, om, 1000.0, {}, True)
+    pf = SingleSymbolPortfolio({"symbol": "UPRO", "stop_pct": 5, "profit_pct": 5}, om, 1000.0, {}, True)
 
     sim = BacktestingEngine({}, dp, al, om, pf)
     sim.run()
@@ -123,7 +123,7 @@ def main():
     report = engine.generate_report()
 
     # Save report to file
-    with open("backtest_report.txt", "w") as f:
+    with open("../examples/backtest_report.txt", "w") as f:
         f.write(report)
     print("\n" + "="*80)
     print("Full report saved to: backtest_report.txt")
@@ -132,25 +132,25 @@ def main():
     # Generate visualizations (requires matplotlib)
     try:
         print("\nGenerating visualizations...")
-        engine.plot_equity_curve(show=False, save_path="equity_curve.png")
+        engine.plot_equity_curve(show=False, save_path="../examples/equity_curve.png")
         print("  - Equity curve saved to: equity_curve.png")
 
-        engine.plot_portfolio_with_trades(show=False, save_path="portfolio_with_trades.png")
+        engine.plot_portfolio_with_trades(show=False, save_path="../examples/portfolio_with_trades.png")
         print("  - Portfolio with trade markers saved to: portfolio_with_trades.png")
 
-        engine.plot_drawdown(show=False, save_path="drawdown.png")
+        engine.plot_drawdown(show=False, save_path="../examples/drawdown.png")
         print("  - Drawdown chart saved to: drawdown.png")
 
-        engine.plot_trade_pnl(show=False, save_path="trade_pnl.png")
+        engine.plot_trade_pnl(show=False, save_path="../examples/trade_pnl.png")
         print("  - Trade P&L chart saved to: trade_pnl.png")
 
-        engine.plot_returns_distribution(show=False, save_path="returns_dist.png")
+        engine.plot_returns_distribution(show=False, save_path="../examples/returns_dist.png")
         print("  - Returns distribution saved to: returns_dist.png")
 
-        engine.plot_stock_performance(show=False, save_path="stock_performance.png")
+        engine.plot_stock_performance(show=False, save_path="../examples/stock_performance.png")
         print("  - Stock performance (prices & returns) saved to: stock_performance.png")
 
-        engine.plot_comprehensive_dashboard(save_path="dashboard.png")
+        engine.plot_comprehensive_dashboard(save_path="../examples/dashboard.png")
         print("  - Comprehensive dashboard saved to: dashboard.png")
 
     except ImportError:

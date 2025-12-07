@@ -6,7 +6,7 @@ from core.classes import PriceData, MarketSignal, SignalType
 
 class TestAlgorithm(Algorithm):
 
-    def on_data_logic(self, data: Dict[str,PriceData]) -> list[MarketSignal]:
+    def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
         r = random.randint(0,100)
         if r > 50:
             signal = SignalType.BUY

@@ -36,6 +36,7 @@ class Portfolio(ABC):
         self.positions: dict[str, Position] = {} if starting_positions is None else starting_positions
         self.total_value: float = 0.0
         self.keep_history = cfg['keep_history'] if 'keep_history' in cfg else keep_history
+        self.previous_price = {}
         # History data structures
         self.tick_history: dict[datetime, list[PriceData]] = {}
         self.value_history: dict[datetime, float] = {}
@@ -47,10 +48,17 @@ class Portfolio(ABC):
         retval = self.cash
         for p in self.positions.keys():
             sp = find_pricedata_in_list(p, current_tick)
-            if sp is None:
+            if sp is None and p not in self.previous_price:
                 # TODO: what to do if a position doesn't have price data?
+                logger.error(f"No price data found for {p}")
                 raise ValueError(f"Price data for position {p} not found")
-            retval += self.positions[p].quantity * sp.close
+            if sp is None:
+                price = self.previous_price[p]
+            else:
+                price = sp.close
+            # Store price for next time in case tick doesn't contain it
+            self.previous_price[p] = price
+            retval += self.positions[p].quantity * price
         self.total_value = retval
         return retval
 
@@ -138,7 +146,8 @@ class Portfolio(ABC):
         :return:
         """
         if len(signals) > 0:
-            logger.info(f"{tick[0].timestamp}: Processing {len(signals)} signals")
+            # logger.info(f"{tick[0].timestamp}: Processing {len(signals)} signals")
+            pass
 
         # Before processing new signals, update all pending orders, portfolio value and positions
         # get the list of order IDs that changed status since last tick

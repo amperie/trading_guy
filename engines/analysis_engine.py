@@ -126,9 +126,11 @@ class AnalysisEngine:
         # Track open positions for each symbol (FIFO matching)
         open_positions: dict[str, list[Order]] = defaultdict(list)
 
-        # Get all filled orders sorted by executed_datetime
+        # Get all orders (filled and pending) sorted by executed_datetime
+        # Include pending orders because bracket BUY orders stay in pending state
+        all_orders_dict = {**self.order_manager.filled_orders_by_id, **self.order_manager.pending_orders_by_id}
         filled_orders = sorted(
-            self.order_manager.filled_orders_by_id.values(),
+            all_orders_dict.values(),
             key=lambda o: o.executed_datetime if o.executed_datetime else o.placed_datetime
         )
 
@@ -620,18 +622,17 @@ class AnalysisEngine:
         buy_orders = []
         sell_orders = []
 
+        # Collect all orders (both filled and pending, since bracket orders stay pending)
+        all_orders = {**self.order_manager.filled_orders_by_id, **self.order_manager.pending_orders_by_id}
+
         # First pass: identify all bracket parent IDs
         bracket_parent_ids = set()
-        for order in self.order_manager.filled_orders_by_id.values():
+        for order in all_orders.values():
             if order.type == OrderType.BRACKET and order.action == OrderAction.BUY:
                 bracket_parent_ids.add(order.order_id)
 
         # Second pass: categorize orders
-        for order in self.order_manager.filled_orders_by_id.values():
-            # Only show FILLED orders (exclude CANCELED, PENDING, etc.)
-            if order.status != OrderStatus.FILLED:
-                continue
-
+        for order in all_orders.values():
             # Skip orders with zero or negative quantity
             if order.quantity <= 0:
                 continue
@@ -639,8 +640,15 @@ class AnalysisEngine:
             order_time = order.executed_datetime or order.placed_datetime
 
             # Handle BRACKET orders (these are the BUY entries)
+            # Note: Bracket orders have status PENDING_SALE after execution, not FILLED
             if order.type == OrderType.BRACKET and order.action == OrderAction.BUY:
-                buy_orders.append((order_time, order))
+                if order.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}:
+                    buy_orders.append((order_time, order))
+                continue
+
+            # Only show FILLED orders for non-bracket orders
+            if order.status != OrderStatus.FILLED:
+                continue
             # Handle regular orders (but skip child orders of bracket orders)
             elif order.type != OrderType.BRACKET:
                 # Skip if this is a child order of a bracket order
@@ -867,17 +875,17 @@ class AnalysisEngine:
         buy_orders = []
         sell_orders = []
 
+        # Collect all orders (both filled and pending, since bracket orders stay pending)
+        all_orders = {**self.order_manager.filled_orders_by_id, **self.order_manager.pending_orders_by_id}
+
         # First pass: identify all bracket parent IDs
         bracket_parent_ids = set()
-        for order in self.order_manager.filled_orders_by_id.values():
+        for order in all_orders.values():
             if order.type == OrderType.BRACKET and order.action == OrderAction.BUY:
                 bracket_parent_ids.add(order.order_id)
 
         # Second pass: categorize orders
-        for order in self.order_manager.filled_orders_by_id.values():
-            if order.status != OrderStatus.FILLED:
-                continue
-
+        for order in all_orders.values():
             # Skip orders with zero or negative quantity
             if order.quantity <= 0:
                 continue
@@ -885,8 +893,15 @@ class AnalysisEngine:
             order_time = order.executed_datetime or order.placed_datetime
 
             # Handle BRACKET orders (BUY entries)
+            # Note: Bracket orders have status PENDING_SALE after execution, not FILLED
             if order.type == OrderType.BRACKET and order.action == OrderAction.BUY:
-                buy_orders.append((order_time, order))
+                if order.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}:
+                    buy_orders.append((order_time, order))
+                continue
+
+            # Only show FILLED orders for non-bracket orders
+            if order.status != OrderStatus.FILLED:
+                continue
             # Handle regular orders
             elif order.type != OrderType.BRACKET:
                 # Skip if this is a child order of a bracket order
