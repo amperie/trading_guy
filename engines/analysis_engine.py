@@ -637,20 +637,25 @@ class AnalysisEngine:
             if order.quantity <= 0:
                 continue
 
-            order_time = order.executed_datetime or order.placed_datetime
+            # Get order timestamp - use executed_datetime if available, otherwise placed_datetime
+            order_time = order.executed_datetime if order.executed_datetime else order.placed_datetime
 
             # Handle BRACKET orders (these are the BUY entries)
-            # Note: Bracket orders have status PENDING_SALE after execution, not FILLED
+            # Note: Bracket orders have status PENDING or PENDING_SALE after execution, not FILLED
+            # When a bracket order is executed, it goes from PENDING → PENDING_SALE
             if order.type == OrderType.BRACKET and order.action == OrderAction.BUY:
-                if order.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}:
+                # Show bracket orders that have been executed (status is PENDING_SALE or FILLED)
+                # Also show if status is PENDING but has executed_datetime set
+                if order.status in {OrderStatus.PENDING_SALE, OrderStatus.FILLED} or order.executed_datetime:
                     buy_orders.append((order_time, order))
                 continue
 
             # Only show FILLED orders for non-bracket orders
             if order.status != OrderStatus.FILLED:
                 continue
+
             # Handle regular orders (but skip child orders of bracket orders)
-            elif order.type != OrderType.BRACKET:
+            if order.type != OrderType.BRACKET:
                 # Skip if this is a child order of a bracket order
                 if hasattr(order, 'parent_id') and order.parent_id in bracket_parent_ids:
                     # Only add the actual exit order (skip the canceled sibling)
@@ -890,20 +895,25 @@ class AnalysisEngine:
             if order.quantity <= 0:
                 continue
 
-            order_time = order.executed_datetime or order.placed_datetime
+            # Get order timestamp - use executed_datetime if available, otherwise placed_datetime
+            order_time = order.executed_datetime if order.executed_datetime else order.placed_datetime
 
             # Handle BRACKET orders (BUY entries)
-            # Note: Bracket orders have status PENDING_SALE after execution, not FILLED
+            # Note: Bracket orders have status PENDING or PENDING_SALE after execution, not FILLED
+            # When a bracket order is executed, it goes from PENDING → PENDING_SALE
             if order.type == OrderType.BRACKET and order.action == OrderAction.BUY:
-                if order.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}:
+                # Show bracket orders that have been executed (status is PENDING_SALE or FILLED)
+                # Also show if status is PENDING but has executed_datetime set
+                if order.status in {OrderStatus.PENDING_SALE, OrderStatus.FILLED} or order.executed_datetime:
                     buy_orders.append((order_time, order))
                 continue
 
             # Only show FILLED orders for non-bracket orders
             if order.status != OrderStatus.FILLED:
                 continue
+
             # Handle regular orders
-            elif order.type != OrderType.BRACKET:
+            if order.type != OrderType.BRACKET:
                 # Skip if this is a child order of a bracket order
                 if hasattr(order, 'parent_id') and order.parent_id in bracket_parent_ids:
                     if order.action == OrderAction.SELL:
@@ -1215,6 +1225,7 @@ Trading Days:           {self._metrics.trading_days}
 
     def log_to_mlflow(
         self,
+        experiment_name: Optional[str] = None,
         run_name: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[Dict[str, Any]] = None,
@@ -1228,6 +1239,7 @@ Trading Days:           {self._metrics.trading_days}
         Log all analysis results to MLflow
 
         Args:
+            experiment_name: Name for the MLflow experiment
             run_name: Name for the MLflow run
             description: Description of the run
             tags: Additional tags to attach to the run
@@ -1251,8 +1263,8 @@ Trading Days:           {self._metrics.trading_days}
             logger.error("MLflow not available. Install with: pip install mlflow")
             return
 
-        # Initialize MLflow client
-        mlflow = MLflowClient.from_config()
+        # Initialize MLflow client with experiment name
+        mlflow = MLflowClient.from_config(experiment_name=experiment_name)
 
         if not mlflow.enabled:
             logger.info("MLflow tracking is disabled in config")
@@ -1483,6 +1495,7 @@ Trading Days:           {self._metrics.trading_days}
     def run_full_analysis(
         self,
         log_to_mlflow: bool = True,
+        experiment_name: Optional[str] = None,
         run_name: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[Dict[str, Any]] = None,
@@ -1506,6 +1519,7 @@ Trading Days:           {self._metrics.trading_days}
 
         Args:
             log_to_mlflow: Whether to log results to MLflow (default: True)
+            experiment_name: Name for MLflow experiment
             run_name: Name for MLflow run
             description: Description for MLflow run
             tags: Tags for MLflow run
@@ -1618,12 +1632,21 @@ Trading Days:           {self._metrics.trading_days}
         # Log to MLflow if requested
         if log_to_mlflow:
             logger.info("Logging results to MLflow...")
-            self.log_to_mlflow(
-                run_name=run_name,
-                description=description,
-                tags=tags,
-                parameters=parameters
-            )
+            if experiment_name is None:
+                self.log_to_mlflow(
+                    run_name=run_name,
+                    description=description,
+                    tags=tags,
+                    parameters=parameters
+                )
+            else:
+                self.log_to_mlflow(
+                    experiment_name=experiment_name,
+                    run_name=run_name,
+                    description=description,
+                    tags=tags,
+                    parameters=parameters
+                )
 
         # Return all results
         return {

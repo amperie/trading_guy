@@ -67,7 +67,6 @@ Each component is designed to be swappable via configuration, enabling easy test
 - Handles order execution logic (backtesting vs. live broker APIs)
 - **Implementations:**
   - `BacktestingOM` (core/om/): Instantly fills market orders, handles bracket orders with stop-loss/profit-taker logic
-  - `BacktestingOM_old` (core/om/): Legacy implementation preserved for reference
 
 **AnalysisEngine:**
 - Located in `engines/analysis_engine.py`
@@ -96,8 +95,8 @@ Each component is designed to be swappable via configuration, enabling easy test
   - `plot_interactive_portfolio()` → **NEW** Interactive Plotly chart with portfolio value, cash, trades, and stock prices (zoomable, clickable legend, shows only quantity > 0)
   - `plot_comprehensive_dashboard()` → Multi-panel dashboard with key metrics
   - `generate_report()` → Returns formatted text report string
-  - `log_to_mlflow(run_name, description, tags, parameters, ...)` → Log all analysis results to MLflow (includes interactive chart)
-  - `run_full_analysis(log_to_mlflow=True, ...)` → Run complete analysis and optionally log to MLflow (includes interactive chart)
+  - `log_to_mlflow(experiment_name, run_name, description, tags, parameters, ...)` → Log all analysis results to MLflow with optional experiment name override (includes interactive chart)
+  - `run_full_analysis(log_to_mlflow=True, experiment_name, ...)` → Run complete analysis and optionally log to MLflow with custom experiment (includes interactive chart)
 - **Example Usage:**
   ```python
   from engines.analysis_engine import AnalysisEngine
@@ -118,6 +117,7 @@ Each component is designed to be swappable via configuration, enabling easy test
   # Option 2: Complete analysis with MLflow (recommended)
   engine = AnalysisEngine(portfolio, order_manager)
   results = engine.run_full_analysis(
+      experiment_name="SMA Strategy Tests",  # Optional: override config experiment name
       run_name="SMA Crossover Strategy",
       description="Testing 5/20 SMA crossover on AAPL",
       parameters={"sma_short": 5, "sma_long": 20, "symbol": "AAPL"},
@@ -133,6 +133,7 @@ Each component is designed to be swappable via configuration, enabling easy test
   engine.extract_trades()
   engine.calculate_metrics()
   engine.log_to_mlflow(
+      experiment_name="Custom Experiments",  # Optional: override config experiment name
       run_name="Custom Run",
       parameters={"custom_param": "value"},
       log_charts=True,  # Includes interactive_portfolio.html + 7 static charts
@@ -264,11 +265,17 @@ utils/                     # Shared utilities
   config_manager.py        # Singleton config loader (reads config.yaml)
   logger.py                # Singleton logger (configured via config.yaml)
   mlflow_client.py         # MLflow experiment tracking client (logs runs, metrics, artifacts)
-  utils.py                 # Helper functions (instantiate_from_string, find_pricedata_in_list, etc.)
+  utils.py                 # Helper functions (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, etc.)
 
-tests/                     # Test suite
+tests/                     # Test suite (123 tests, 91 passing)
+  README.md                # Comprehensive test suite documentation
   unit/                    # Unit tests for individual components
-    test_bracket_order_progression.py  # Comprehensive bracket order lifecycle tests
+    test_aggregate_stock_data.py          # Data aggregation tests (18/18 passing)
+    test_indicators.py                    # Technical indicators (66/66 passing)
+    test_technical_analyzer.py            # Analyzer API (20/20 passing)
+    test_bracket_order_progression.py     # Bracket orders (6/6 passing)
+    test_portfolio.py                     # Portfolio management (needs fixtures)
+    test_analysis_engine.py               # Analysis engine (needs fixtures)
 
 scratch/                   # Development notebooks and experiments
   data_ingest.ipynb        # Data ingestion experiments
@@ -337,33 +344,40 @@ logger.error("Order failed", exc_info=True)
 
 **Run all tests:**
 ```bash
-pytest tests/
-pytest tests/ -v  # Verbose output
+pytest tests/                    # All tests
+pytest tests/ -v                 # Verbose output
+pytest tests/unit/               # Unit tests only
 ```
 
 **Run specific test files:**
 ```bash
-pytest tests/unit/test_bracket_order_progression.py -v  # Bracket order tests
-pytest tests/unit/                                       # All unit tests
+pytest tests/unit/test_aggregate_stock_data.py -v     # Data aggregation (18 tests)
+pytest tests/unit/test_indicators.py -v               # Technical indicators (66 tests)
+pytest tests/unit/test_bracket_order_progression.py -v  # Bracket orders (6 tests)
+```
+
+**Run only passing tests:**
+```bash
+pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py -v
 ```
 
 **With coverage:**
 ```bash
-pytest tests/ --cov=core --cov=data_providers --cov=engines --cov-report=html
+pytest tests/ --cov=core --cov=utils --cov-report=html
 # View report: open htmlcov/index.html
 ```
 
-**Test Status:** 39/39 tests passing (100%). Comprehensive test coverage across all core components.
+**Test Status:** 91/123 tests passing (74%). See `tests/README.md` for detailed test documentation.
 
-**Key Test Coverage:**
-- `test_analysis_engine.py`: 10 tests for trade extraction, metrics calculation, returns analysis, and visualizations
-- `test_bracket_order_progression.py`: 6 tests for bracket order lifecycle (stop-loss, profit-taker, manual exit)
-- `test_portfolio.py`: 23 tests for portfolio management (market orders, bracket orders, history tracking, positions)
-  - Stop-loss trigger (price drops below threshold)
-  - Profit-taker trigger (price rises above threshold)
-  - Manual sale (forced exit at market price)
-  - Price oscillation (no premature triggers)
-  - Boundary conditions (exact threshold prices)
+**Passing Test Suites:**
+- `test_aggregate_stock_data.py`: 18/18 - Multi-symbol OHLCV aggregation, timestamp handling, volume preservation
+- `test_indicators.py`: 66/66 - EMA, MACD, RSI calculations with real data validation
+- `test_technical_analyzer.py`: 20/20 - High-level API wrapper, backward compatibility
+- `test_bracket_order_progression.py`: 6/6 - Order lifecycle, stop-loss/profit-taker triggers
+
+**Needs Fixtures:**
+- `test_portfolio.py`: 0/23 - Portfolio and order management
+- `test_analysis_engine.py`: 1/10 - Backtesting performance analysis
 
 ### Important Implementation Details
 
@@ -586,3 +600,61 @@ signal = find_marketsignal_in_list("AAPL", signals)
 - Required columns: `timestamp`, `symbol`, `open`, `high`, `low`, `close`, `volume`
 - Optional columns: `trade_count`, `vwap`, `exchange`
 - Timestamps will be parsed and sorted automatically
+
+### Data Aggregation Utilities
+
+**Stock Data Aggregation (`utils.utils.aggregate_stock_data`):**
+- Aggregates multi-symbol OHLCV data to different time granularities
+- Keeps symbols separated (no data mixing across symbols)
+- Timestamps represent the END of the interval (right edge)
+  - Example: 5-minute interval from 9:26-9:30 has timestamp 9:30
+- Proper OHLCV handling:
+  - Open: first value in interval
+  - High: max value in interval
+  - Low: min value in interval
+  - Close: last value in interval
+  - Volume: sum of all values in interval
+- Automatically removes empty intervals (gaps in data)
+- **Usage:**
+```python
+from utils.utils import aggregate_stock_data
+
+# Load 1-minute data
+df_1min = pd.read_csv('data/SPXU_GDXU_UPRO_1min.csv')
+
+# Aggregate to different timeframes
+df_5min = aggregate_stock_data(df_1min, interval='5min')
+df_15min = aggregate_stock_data(df_1min, interval='15min')
+df_hourly = aggregate_stock_data(df_1min, interval='1h')
+df_daily = aggregate_stock_data(df_1min, interval='1D')
+
+# With custom aggregation rules
+custom_rules = {
+    'open': 'first',
+    'high': 'max',
+    'low': 'min',
+    'close': 'last',
+    'volume': 'sum',
+    'vwap': 'mean'  # Custom field aggregation
+}
+df_custom = aggregate_stock_data_custom(df_1min, interval='5min', agg_rules=custom_rules)
+```
+
+- **Supported intervals:** Any pandas resample frequency string
+  - Minutes: `'5min'`, `'15min'`, `'30min'`
+  - Hours: `'1h'`, `'4h'`
+  - Days: `'1D'`
+  - Weeks: `'1W'`
+  - Months: `'1M'`
+
+- **Data preservation:**
+  - 100% volume preservation (no data loss)
+  - All OHLC relationships maintained (High ≥ Low, etc.)
+  - Symbol separation guaranteed
+  - Test coverage: 18/18 tests passing (100%)
+
+- **Performance:**
+  - 1.5M rows → 437K rows (5min): 72.4% reduction
+  - 1.5M rows → 165K rows (15min): 89.6% reduction
+  - 1.5M rows → 45K rows (1hour): 97.2% reduction
+  - 1.5M rows → 3K rows (1day): 99.8% reduction
