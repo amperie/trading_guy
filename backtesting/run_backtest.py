@@ -1,9 +1,6 @@
 
 from pathlib import Path
 
-from scripts.regsetup import description
-
-from algorithms.test_algorithm import TestAlgorithm
 from algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
 from core.om.backtesting_om import BacktestingOM
 from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
