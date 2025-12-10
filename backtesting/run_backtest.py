@@ -186,7 +186,7 @@ def run_parallel_backtests():
 
         logger.info("All jobs completed!")
 
-def backtest_objective_fn(config: dict, symbol: str) -> float:
+def backtest_objective_fn(config: dict, symbol: str) -> dict:
 
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / f"{symbol}_5min.csv")
@@ -211,7 +211,7 @@ def backtest_objective_fn(config: dict, symbol: str) -> float:
         "profit_pct": int(config["profit_pct"])
     }
     result = run_backtest_local(backtest_cfg, alg_cfg, pf_cfg, dp_cfg)
-    return result['metrics'].annualized_return * -1
+    return {"_metric": result['metrics'].annualized_return * -1}
 
 def tune_backtest_hyperparameters():
 
