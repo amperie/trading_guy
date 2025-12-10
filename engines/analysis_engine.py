@@ -1398,11 +1398,11 @@ Trading Days:           {self._metrics.trading_days}
 
                         logger.debug("Logging HTML to MLflow...")
                         mlflow.log_html(html_string, "interactive_portfolio")
-                        logger.info("✅ Successfully logged interactive chart: interactive_portfolio.html")
+                        logger.info("Successfully logged interactive chart: interactive_portfolio.html")
                     except ImportError as e:
-                        logger.warning(f"⚠️  Plotly not installed, skipping interactive chart. Install with: pip install plotly")
+                        logger.warning(f"⚠Plotly not installed, skipping interactive chart. Install with: pip install plotly")
                     except Exception as e:
-                        logger.error(f"❌ Failed to log interactive chart: {e}", exc_info=True)
+                        logger.error(f"Failed to log interactive chart: {e}", exc_info=True)
 
                     logger.debug("Logged 7 static chart artifacts + 1 interactive HTML chart")
 

@@ -13,6 +13,7 @@ from engines.analysis_engine import AnalysisEngine
 from utils.logger import Logger
 import ray
 from ray import tune
+from ray.tune.search.optuna import OptunaSearch
 
 logger = Logger().get_logger(__name__)
 
@@ -188,16 +189,16 @@ def run_parallel_backtests():
 
         logger.info("All jobs completed!")
 
-def backtest_objective_fn(config: dict) -> float:
+def backtest_objective_fn(config: dict, symbol: str) -> float:
 
     project_root = Path(__file__).parent.parent
-    data_path = str(project_root / "data" / "GDXU_5min.csv")
+    data_path = str(project_root / "data" / f"{symbol}_5min.csv")
     dp_cfg = {
         "path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider",
         "truncate": 10000000
     }
     backtest_cfg = {
-        "symbol": "GDXU","run_name": "GDXU_Recreation", "description": "Backtest", "starting_cash": 1000.0,
+        "symbol": symbol,"run_name": f"{symbol}_HPO", "description": "Backtest", "starting_cash": 1000.0,
         "experiment_name": "Hyperparameter Optimization Runs"
     }
     alg_cfg = {
@@ -208,7 +209,7 @@ def backtest_objective_fn(config: dict) -> float:
         "extra_history_period": int(config["extra_history_period"])
     }
     pf_cfg = {
-        "symbol": "GDXU",
+        "symbol": symbol,
         "stop_pct": int(config["stop_pct"]),
         "profit_pct": int(config["profit_pct"])
     }
@@ -216,6 +217,19 @@ def backtest_objective_fn(config: dict) -> float:
     return result['metrics'].annualized_return * -1
 
 def tune_backtest_hyperparameters():
+
+    # Initialize Ray with dashboard accessible remotely
+    ray.init(
+        ignore_reinit_error=True,
+        dashboard_host="0.0.0.0",  # Bind to all network interfaces
+        dashboard_port=8265,        # Default dashboard port
+    )
+    # Bind additional parameters
+    trainable_with_params = tune.with_parameters(
+        backtest_objective_fn,
+        symbol="GDXU"
+    )
+
     search_space = {
         "macd_fastperiod": tune.uniform(400, 2000),
         "macd_slowperiod": tune.uniform(1000, 5000),
@@ -225,15 +239,26 @@ def tune_backtest_hyperparameters():
         "profit_pct": tune.uniform(0, 25),
         "extra_history_period": tune.uniform(1000, 20000),
     }
+
+    # Configure Bayesian Optimization with Optuna
+    optuna_search = OptunaSearch(
+        metric="_metric",
+        mode="min",
+    )
+
     tuner = tune.Tuner(
-        backtest_objective_fn, param_space=search_space,
+        trainable_with_params,
+        param_space=search_space,
         tune_config=tune.TuneConfig(
-        num_samples=50,
-        max_concurrent_trials=8,
-          )
+            metric="_metric",
+            mode="min",
+            num_samples=50,
+            max_concurrent_trials=8,
+            search_alg=optuna_search,  # Use Bayesian optimization
+        )
     )
     results = tuner.fit()
-    print(results.get_best_result(metric="score", mode="min").config)
+    print(results.get_best_result(metric="_metric", mode="min").config)
 
 if __name__ == "__main__":
     tune_backtest_hyperparameters()
