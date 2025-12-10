@@ -33,6 +33,10 @@ class DataProvider(ABC):
     def get_data(self):
         return self.data
 
+    @final
+    def get_data_length(self):
+        return self.data['timestamp'].unique().shape[0]
+
     def iterate(self) -> Generator[list[PriceData], None, None]:
         """
         Yields lists of PriceData, one list per timestamp.

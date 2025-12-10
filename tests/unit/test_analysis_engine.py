@@ -23,6 +23,8 @@ class TestAnalysisEngine:
         pf = SingleSymbolPortfolio(
             cfg={
                 'symbol': 'AAPL',
+                'stop_pct': 10.0,
+                'profit_pct': 20.0,
                 'cash': 10000.0,
                 'keep_history': True
             },

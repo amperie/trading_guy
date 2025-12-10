@@ -9,6 +9,9 @@ from core.order_manager import OrderManager
 from data_providers.data_provider import DataProvider
 from core.classes import PriceData, Order, TickResults
 from engines.base_engine import BaseEngine
+from utils.logger import Logger
+
+logger = Logger().get_logger(__name__)
 
 class BacktestingEngine(BaseEngine):
 
@@ -24,8 +27,19 @@ class BacktestingEngine(BaseEngine):
         Feed all the market signals into the portfolio for it to execute on signals
         Portfolio outputs a list of orders, feed those to the OrderManager
         """
+        iters = 0
+        length = self.dp.get_data_length()
+        logger.info(f"Starting backtest for {length} timestamps")
 
         for tick in self.dp.iterate():
+            iters+=1
+            if iters % 500 == 0:
+                if len(tick) > 0:
+                    ts = tick[0].timestamp
+                else:
+                    ts = "None"
+                logger.info(f"Running iteration {iters} of {length} for timestamp {ts}")
+
             self.on_tick(tick)
 
     def on_tick(self, tick: list[PriceData]) -> TickResults:

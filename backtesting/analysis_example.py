@@ -19,22 +19,22 @@ def main():
     # Run a backtest using the simulator
     print("Running backtest...")
     project_root = Path(__file__).parent.parent
-    data_path = str(project_root / "data" / "SPXU_GDXU_UPRO_1min.csv")
+    data_path = str(project_root / "data" / "UPRO_5min.csv")
     om = BacktestingOM()
 
     alg_cfg = {
-        "macd_fastperiod": 120,
-        "macd_slowperiod": 260,
-        "macd_signalperiod": 90,
-        "rsi_period": 140,
+        "macd_fastperiod": 480,
+        "macd_slowperiod": 1040,
+        "macd_signalperiod": 360,
+        "rsi_period": 14,
     }
 
-    al = MacdRsiAlgorithm(alg_cfg, history_length=360)
+    al = MacdRsiAlgorithm(alg_cfg, history_length=1500)
 
 
-    dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider", "truncate": 5000}
+    dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
-    pf = SingleSymbolPortfolio({"symbol": "GDXU", "stop_pct": 5, "profit_pct": 5}, om, 1000.0, {}, True)
+    pf = SingleSymbolPortfolio({"symbol": "UPRO", "stop_pct": 5, "profit_pct": 5}, om, 1000.0, {}, True)
 
     sim = BacktestingEngine({}, dp, al, om, pf)
     sim.run()

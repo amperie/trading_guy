@@ -10,6 +10,7 @@ momentum_default_params = {
     "macd_slowperiod": 26,
     "macd_signalperiod": 9,
     "rsi_period": 14,
+    "extra_history_period": 200,
 }
 
 
@@ -23,10 +24,19 @@ class MacdRsiAlgorithm(Algorithm):
                 "macd_fastperiod": 12,
                 "macd_slowperiod": 26,
                 "macd_signalperiod": 9,
-                "rsi_period": 14
+                "rsi_period": 14,
+                "extra_history_period": 200, To more accurately calculate moving averages
             }
         """
-        super().__init__(cfg, history_length)
+        if history_length != 0:
+            history = history_length
+        elif "extra_history_period" in cfg:
+            history = cfg["extra_history_period"] + cfg["macd_slowperiod"]
+        else:
+            history = cfg["macd_slowperiod"] * 2
+
+
+        super().__init__(cfg, history)
         self.macd_fastperiod = cfg["macd_fastperiod"]
         self.macd_slowperiod = cfg["macd_slowperiod"]
         self.macd_signalperiod = cfg["macd_signalperiod"]
