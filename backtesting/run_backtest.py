@@ -225,12 +225,18 @@ def tune_backtest_hyperparameters():
         "profit_pct": tune.uniform(0, 25),
         "extra_history_period": tune.uniform(1000, 20000),
     }
-    tuner = tune.Tuner(backtest_objective_fn, param_space=search_space)
+    tuner = tune.Tuner(
+        backtest_objective_fn, param_space=search_space,
+        tune_config=tune.TuneConfig(
+        num_samples=50,
+        max_concurrent_trials=8,
+          )
+    )
     results = tuner.fit()
     print(results.get_best_result(metric="score", mode="min").config)
 
 if __name__ == "__main__":
     tune_backtest_hyperparameters()
-    example_usage()
-    run_multiple_backtests()
-    run_parallel_backtests()
+    #example_usage()
+    #run_multiple_backtests()
+    #run_parallel_backtests()

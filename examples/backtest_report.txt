@@ -1,0 +1,64 @@
+
+================================================================================
+TRADING PERFORMANCE REPORT
+================================================================================
+
+OVERVIEW
+--------
+Initial Equity:         $1,000.00
+Final Equity:           $1,000.00
+Peak Equity:            $1,000.00
+Total Return:           $0.00 (0.00%)
+Annualized Return:      0.00%
+
+RISK METRICS
+------------
+Volatility (Ann.):      0.00%
+Sharpe Ratio:           0.00
+Sortino Ratio:          0.00
+Calmar Ratio:           0.00
+Max Drawdown:           $0.00 (0.00%)
+Max DD Duration:        0.0 days
+Ulcer Index:            0.00
+
+TRADE STATISTICS
+----------------
+Total Trades:           0
+Winning Trades:         0
+Losing Trades:          0
+Win Rate:               0.00%
+
+Average Win:            $0.00
+Average Loss:           $0.00
+Largest Win:            $0.00
+Largest Loss:           $0.00
+Profit Factor:          0.00
+
+Avg Trade P&L:          $0.00
+Avg Trade Duration:     0.00 hours
+Avg Bars in Trade:      0.0
+
+DAILY STATISTICS
+----------------
+Best Day:               0.00%
+Worst Day:              0.00%
+Avg Daily Return:       0.0000%
+
+DISTRIBUTION
+------------
+Skewness:               0.00
+Kurtosis:               0.00
+
+BRACKET ORDER ANALYSIS
+----------------------
+Total Bracket Trades:   0
+Stop Loss Triggers:     0 (0.0%)
+Profit Taker Triggers:  0 (0.0%)
+Manual Exits:           0
+
+TIME PERIOD
+-----------
+Total Days:             29.2
+Trading Days:           5000
+
+================================================================================
