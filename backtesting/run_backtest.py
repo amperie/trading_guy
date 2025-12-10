@@ -224,7 +224,7 @@ def tune_backtest_hyperparameters():
     # Bind additional parameters
     trainable_with_params = tune.with_parameters(
         backtest_objective_fn,
-        symbol="GDXU"
+        symbol="SPXU"
     )
 
     search_space = {
@@ -232,8 +232,8 @@ def tune_backtest_hyperparameters():
         "macd_slowperiod": tune.uniform(1000, 5000),
         "macd_signalperiod": tune.uniform(100, 2000),
         "rsi_period": tune.uniform(10, 2000),
-        "stop_pct": tune.uniform(0, 25),
-        "profit_pct": tune.uniform(0, 25),
+        "stop_pct": tune.uniform(1, 25),
+        "profit_pct": tune.uniform(1, 25),
         "extra_history_period": tune.uniform(1000, 20000),
     }
 
