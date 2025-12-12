@@ -9,7 +9,11 @@
       "Bash(pytest:*)",
       "Bash(find:*)",
       "Bash(ls:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(brew info:*)",
+      "Bash(brew list:*)",
+      "Bash(pip install:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []
