@@ -86,21 +86,22 @@ def run_backtest_local(backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: 
 
 def example_usage():
     project_root = Path(__file__).parent.parent
-    data_path = str(project_root / "data" / "GDXU_5min.csv")
+    symbol = "GDXU"
+    data_path = str(project_root / "data" / f"{symbol}_5min_MarketHours.csv")
     dp_cfg = {
         "path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider",
-        "truncate": 10000
+        "truncate": 10000000
     }
     backtest_cfg = {
-        "symbol": "GDXU","run_name": "GDXU_Recreation", "description": "Backtest", "starting_cash": 1000.0,
+        "symbol": symbol,"run_name": f"{symbol}_Recreation", "description": "Backtest", "starting_cash": 1000.0,
         "experiment_name": "Backtesting"
     }
     alg_cfg = {
-        "macd_fastperiod": 540,
-        "macd_slowperiod": 1170,
-        "macd_signalperiod": 405,
+        "macd_fastperiod": 54,
+        "macd_slowperiod": 117,
+        "macd_signalperiod": 40,
         "rsi_period": 14,
-        "extra_history_period": 10000
+        "extra_history_period": 50
     }
     pf_cfg = {"symbol": "GDXU", "stop_pct": 5, "profit_pct": 10}
     run_backtest_local(backtest_cfg, alg_cfg, pf_cfg, dp_cfg)
@@ -258,7 +259,7 @@ def tune_backtest_hyperparameters():
     print(results.get_best_result(metric="_metric", mode="min").config)
 
 if __name__ == "__main__":
-    tune_backtest_hyperparameters()
-    #example_usage()
+    #tune_backtest_hyperparameters()
+    example_usage()
     #run_multiple_backtests()
     #run_parallel_backtests()

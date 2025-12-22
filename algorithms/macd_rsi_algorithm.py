@@ -67,15 +67,13 @@ class MacdRsiAlgorithm(Algorithm):
                         strength=100 # TODO: make this dynamic based on MACD and RSI
                     )
                     ret_val.append(ret)
-                # else:
-                    # TODO: Does this need to be here? seems wrong
-                    ret = None
-                    # ret = MarketSignal(
-                    #    type=SignalType.SELL,
-                    #    symbol=symbol,
-                    #    strength=100
-                    # )
-                    # ret_val.append(ret)
+                else:
+                    ret = MarketSignal(
+                        type=SignalType.SELL,
+                        symbol=symbol,
+                        strength=100
+                    )
+                    ret_val.append(ret)
 
         return ret_val
 

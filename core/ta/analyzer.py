@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from typing import Union, Optional
-
+import talib as ta
+import numpy as np
 
 
 @dataclass
@@ -23,13 +24,77 @@ class MACD:
 class RSI:
     period: int
     rsi: float
-    avg_gain: float
-    avg_loss: float
-    rs: Optional[float]  # Relative Strength (None if avg_loss is 0)
-
+    avg_gain: float = None
+    avg_loss: float = None
+    rs: float = None  # Relative Strength (None if avg_loss is 0)
 
 class TechnicalAnalyzer:
 
+    @staticmethod
+    def calculate_macd(prices: deque[float], slow_period: int=26, fast_period: int=12,
+                       signal_period: int=9, calculate_prev_macd: bool = False) -> Union[None, MACD]:
+        """Calculate MACD, Signal, Histogram using TAlib"""
+
+        if len(prices) < slow_period:
+            return None
+
+        pr = np.array(prices)
+        macd = ta.MACD(
+            pr, fastperiod=fast_period,
+            slowperiod=slow_period,
+            signalperiod=signal_period, )
+
+        # If MACD is NaN, return since we don't have enough data yet
+        if np.isnan(macd[0][-1].item()).item():
+            return None
+
+        if calculate_prev_macd:
+            # If previous MACD is NaN, return since we don't have enough data yet
+            if np.isnan(macd[0][-2].item()).item():
+                return None
+
+            prev_macd = MACD(
+                slow_period=slow_period,
+                fast_period=fast_period,
+                signal_period=signal_period,
+                slow_ema=0,
+                fast_ema=0,
+                macd=macd[0][-2].item(),
+                signal=macd[1][-2].item(),
+                histogram=macd[2][-2].item(),
+            )
+        else:
+            prev_macd = None
+
+        ret_val = MACD(
+            slow_period=slow_period,
+            fast_period=fast_period,
+            signal_period=signal_period,
+            slow_ema=0,
+            fast_ema=0,
+            macd=macd[0][-1].item(),
+            signal=macd[1][-1].item(),
+            histogram=macd[2][-1].item(),
+            last_macd=prev_macd
+        )
+        return ret_val
+
+    @staticmethod
+    def calculate_rsi(prices: deque[float], period: int = 14) -> Union[None, RSI]:
+
+        if len(prices) < period + 1:  # Need period + 1 to calculate first change
+            return None
+
+        pr = np.array(prices)
+        rsi = ta.RSI(pr, period)
+
+        return RSI(
+            period=period,
+            rsi=rsi[-1].item(),
+        )
+
+
+class TechnicalAnalyzerOLD:
 
     @staticmethod
     def calculate_ema_series(prices: deque[float], period: int) -> Union[list[None], list[float]]:

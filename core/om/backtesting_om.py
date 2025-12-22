@@ -1,6 +1,4 @@
-from argparse import Action
 from typing import Union
-
 from core.classes import Order, PriceData, OrderType, OrderStatus, Position, OrderAction, BracketOrder
 from core.order_manager import OrderManager
 from utils.utils import find_pricedata_in_list
@@ -8,12 +6,20 @@ from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
 
-def _process_market_order(order: Order, pd: PriceData, pf_cash: float, quantity: int) -> Order:
+def _process_market_order(
+        order: Order, pd: PriceData, pf_cash: float, quantity: int,
+        positions: dict[str, Position]=None) -> Order:
 
     if pd is None:
         return order
+
     if order.action == OrderAction.SELL:
-        tx_quantity = min(order.quantity, quantity)
+        # When selling make sure you don't sell more than you have
+        if positions is not None and order.symbol not in positions:
+            position_quantity = 0
+        else:
+            position_quantity = positions[order.symbol].quantity
+        tx_quantity = min(order.quantity, quantity, position_quantity)
     else:
         tx_quantity = min(order.quantity, int(pf_cash / pd.close))
 
@@ -32,6 +38,11 @@ def _process_market_order(order: Order, pd: PriceData, pf_cash: float, quantity:
 
 class BacktestingOM(OrderManager):
 
+    def _cancel_order(self, order_id: str) -> Order:
+        if order_id in self._pending_orders_by_id:
+            self._pending_orders_by_id[order_id].status = OrderStatus.CANCELED
+        return self._all_orders[order_id]
+
     def _update_order_status_from_backend(
             self, order: Union[BracketOrder, Order], current_tick: list[PriceData] = None,
             positions: dict[str,Position]=None, pf_cash: float = 0.0) -> Order:
@@ -46,11 +57,11 @@ class BacktestingOM(OrderManager):
 
         pd = find_pricedata_in_list(order.symbol, current_tick)
         if pd is None:
-            logger.debug(f"No price data found for {order.symbol}")
+            logger.error(f"No price data found for {order.symbol}")
             return order
 
         if order.type == OrderType.MARKET:
-            return _process_market_order(order, pd, pf_cash, order.quantity)
+            return _process_market_order(order, pd, pf_cash, order.quantity, positions)
 
         elif order.type == OrderType.BRACKET:
             # Process all options for a bracket order
@@ -82,24 +93,40 @@ class BacktestingOM(OrderManager):
                     return order
                 elif curr_price <= so.price:
                     # Trigger stop loss order. Sell
+                    # Make sure to sell the right amount, check what positions we have
+                    if positions is not None and order.symbol not in positions:
+                        position_quantity = 0
+                    else:
+                        position_quantity = positions[order.symbol].quantity
+                    tx_quantity = min(so.quantity, position_quantity)
+
                     order.status = OrderStatus.FILLED
                     so.status = OrderStatus.FILLED
                     po.status = OrderStatus.CANCELED
                     order.MANUAL_SALE = False
                     so.executed_datetime = pd.timestamp
                     so.price = curr_price
-                    so.cash = curr_price * so.quantity
+                    so.cash = curr_price * tx_quantity
+                    so.quantity = tx_quantity
                     order.SOLD_ORDER = so
                     return order
                 elif curr_price >= po.price:
                     # Trigger profit taking order. Sell high
+                    # Make sure to sell the right amount, check what positions we have
+                    if positions is not None and order.symbol not in positions:
+                        position_quantity = 0
+                    else:
+                        position_quantity = positions[order.symbol].quantity
+                    tx_quantity = min(so.quantity, position_quantity)
+
                     order.status = OrderStatus.FILLED
                     po.status = OrderStatus.FILLED
                     so.status = OrderStatus.CANCELED
                     order.MANUAL_SALE = False
                     po.executed_datetime = pd.timestamp
                     po.price = curr_price
-                    po.cash = curr_price * po.quantity
+                    po.cash = curr_price * tx_quantity
+                    po.quantity = tx_quantity
                     order.SOLD_ORDER = po
                     return order
                 else:
@@ -116,6 +143,8 @@ class BacktestingOM(OrderManager):
             positions: dict[str,Position]=None, pf_cash: float = 0.0) -> list[str]:
         if current_tick is None:
             raise ValueError("Backtesting OM requires current_tick to be set")
+        if positions is None:
+            raise ValueError("Backtesting OM requires positions to be set")
         # Process all orders and create a return value list of just the ones that changed
         ret_val = []
         for order in orders.values():
@@ -144,7 +173,7 @@ class BacktestingOM(OrderManager):
 
         # Go through all supported order types and process them
         if order.type == OrderType.MARKET:
-            _process_market_order(order, pd, pf_cash, position.quantity)
+            _process_market_order(order, pd, pf_cash, position.quantity, positions)
 
         elif order.type == OrderType.BRACKET:
             order.status = OrderStatus.PENDING_SALE

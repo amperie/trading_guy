@@ -85,10 +85,11 @@ class Portfolio(ABC):
     @final
     def _update_pf_sell(self, order: Order):
         if order.symbol not in self.positions:
-            logger.error(f"Cannot SELL {order.symbol} - No position exists")
-            raise ValueError(f"No position for {order.symbol}")
+            logger.error(f"Cannot SELL {order.symbol} - No position exists, cancelling order")
+            raise Exception(f"Cannot SELL {order.symbol} - No position exists")
         if self.positions[order.symbol].quantity < order.quantity:
-            logger.error(f"Cannot SELL {order.symbol} - Insufficient quantity (Have: {self.positions[order.symbol].quantity}, Need: {order.quantity})")
+            logger.error(f"SELL {order.symbol} - Insufficient quantity (Have: {self.positions[order.symbol].quantity}, Need: {order.quantity})")
+            raise Exception("SELL {order.symbol} - Insufficient quantity")
 
         self.cash = self.cash + order.cash - order.tx_cost
         self.positions[order.symbol].quantity -= order.quantity
@@ -113,13 +114,16 @@ class Portfolio(ABC):
             if status == OrderStatus.FILLED:
                 if order.action == OrderAction.BUY:
                     self._update_pf_buy(order)
+                    logger.info(f"MARKET BUY order {order.symbol}: {order.quantity} @ ${order.price:.2f}")
                     return order
                 elif order.action == OrderAction.SELL:
+                    logger.info(f"MARKET SELL order {order.symbol}: {order.quantity} @ ${order.price:.2f}")
                     self._update_pf_sell(order)
                     return order
                 else:
                     raise NotImplementedError(f"MARKET order {order.action} action not implemented")
             elif status == OrderStatus.CANCELED:
+                logger.info(f"MARKET CANCELED order {order.symbol}")
                 # Do nothing
                 order.processed_by_portfolio = True
                 return order

@@ -11,7 +11,9 @@ from core.classes import Order, PriceData, OrderStatus, Position, BracketOrder, 
 from utils.utils import trim_dictionary
 from abc import ABC, abstractmethod
 from typing import final, Union
+from utils.logger import Logger
 
+logger = Logger().get_logger(__name__)
 
 class OrderManager(ABC):
 
@@ -119,6 +121,21 @@ class OrderManager(ABC):
         self._update_order_lists(ret_val)
         return ret_val
 
+    @final
+    def cancel_all_pending_orders(self, order_type: OrderType=None) -> list[str]:
+        ret_val = []
+        keys = list(self._pending_orders_by_id.keys())
+        for order_id in keys:
+            # If order_type is None it means to cancel all types
+            # If it's set to a type, only cancel orders of that type
+            order = self.all_orders[order_id]
+            if order_type is None or order.type == order_type:
+                self._cancel_order(order_id)
+                self._update_all_order_lists()
+                ret_val.append(order_id)
+                logger.info(f"Canceled {order.type} order {order_id}")
+        return ret_val
+
     @abstractmethod
     def _update_order_status_from_backend(
             self, order: Order, current_tick: list[PriceData]=None,
@@ -145,4 +162,8 @@ class OrderManager(ABC):
         """
         Override this for specific backends
         """
+        raise NotImplementedError
+
+    @abstractmethod
+    def _cancel_order(self, order_id: str) -> Order:
         raise NotImplementedError

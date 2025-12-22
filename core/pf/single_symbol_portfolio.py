@@ -4,7 +4,7 @@ ticker is configured through the config {'symbol':'SPXU'}
 """
 from core.portfolio import Portfolio
 from core.order_manager import OrderManager
-from core.classes import Order, MarketSignal, PriceData, SignalType, OrderAction, BracketOrder
+from core.classes import Order, MarketSignal, PriceData, SignalType, OrderAction, BracketOrder, OrderType
 from core.classes import TickResults
 from utils.utils import find_marketsignal_in_list, find_pricedata_in_list
 
@@ -63,5 +63,14 @@ class SingleSymbolPortfolio(Portfolio):
             )
             ret_val = TickResults(orders=[bo])
             return ret_val
+        elif signal is not None and signal.type == SignalType.SELL:
+            if symbol not in self.positions:
+                return TickResults(orders=[])
+            so = Order.create_market_order(
+                symbol, OrderAction.SELL, self.positions[symbol].quantity, 0.0, tick
+            )
+            # Cancel all other pending bracket orders so there isn't a race condition on sales
+            self.om.cancel_all_pending_orders(OrderType.BRACKET)
+            return TickResults(orders=[so])
         else:
             return TickResults(orders=[])
