@@ -32,3 +32,7 @@ class BaseEngine(ABC):
     @abstractmethod
     def on_tick(self, tick: list[PriceData]) -> TickResults:
         raise NotImplementedError()
+
+    @abstractmethod
+    def finalize(self):
+        raise NotImplementedError()

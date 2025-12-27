@@ -55,6 +55,18 @@ class Algorithm(ABC):
             self.full_history.append(data)
 
     @final
+    def get_price_history(self):
+        return self.price_history
+
+    @final
+    def get_price_data_history(self):
+        return self.price_data_history
+
+    @final
+    def get_full_history(self):
+        return self.full_history
+
+    @final
     def on_data(self, data: list[PriceData]) -> list[MarketSignal]:
         # Add logic for history and other stuff here
         self._update_history(data)

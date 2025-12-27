@@ -22,6 +22,9 @@ class BacktestingEngine(BaseEngine):
         ):
         super().__init__(cfg=cfg, dp=dp, al=al, om=om, pf=pf)
 
+    def finalize(self):
+        pass
+
     def run(self):
         """Run through the data, feed it into the algorithm
         Feed all the market signals into the portfolio for it to execute on signals
