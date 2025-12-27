@@ -1,4 +1,4 @@
-from core.classes import PriceData, Order, TickResults
+from core.classes import PriceData, TickResults
 from core.algorithm import Algorithm
 from core.portfolio import Portfolio
 from core.order_manager import OrderManager
