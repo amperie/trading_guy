@@ -4,10 +4,12 @@ from data_providers.test_data_provider import TestDataProvider
 symbol = "GDXU"
 cfg = {
     "symbol": symbol,
+    "target_configs": [
+        {'loss_pct': 0.05, 'profit_pct': 0.10, 'look_ahead_period': 100, 'name': 'target_5_10_100'},
+        {'loss_pct': 0.03, 'profit_pct': 0.06, 'look_ahead_period': 50, 'name': 'target_3_6_50'},
+        {'loss_pct': 0.10, 'profit_pct': 0.20, 'look_ahead_period': 200, 'name': 'target_10_20_200'}
+    ],
     "lag_values": 10,
-    "loss_pct": 0.05,
-    "profit_pct": 0.1,
-    "look_ahead_period": 100,
     "output_file": f"../../data/ml/{symbol}_test_ml.csv",
     "history_length": 100,
 }

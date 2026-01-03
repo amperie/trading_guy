@@ -13,7 +13,8 @@
       "Bash(brew info:*)",
       "Bash(brew list:*)",
       "Bash(pip install:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(PYTHONPATH=. python:*)"
     ],
     "deny": [],
     "ask": []

@@ -28,6 +28,65 @@ class RSI:
     avg_loss: float = None
     rs: float = None  # Relative Strength (None if avg_loss is 0)
 
+
+@dataclass
+class BollingerBands:
+    period: int
+    std_dev: float  # Number of standard deviations (typically 2)
+    upper: float
+    middle: float  # SMA
+    lower: float
+    bandwidth: float  # (upper - lower) / middle
+    percent_b: float  # Where price is relative to bands: (price - lower) / (upper - lower)
+    current_price: float
+
+
+@dataclass
+class Stochastic:
+    fastk_period: int
+    slowk_period: int
+    slowd_period: int
+    slowk: float  # %K line (slow)
+    slowd: float  # %D line (signal)
+
+
+@dataclass
+class ATR:
+    period: int
+    atr: float  # Average True Range
+
+
+@dataclass
+class ADX:
+    period: int
+    adx: float  # Average Directional Index
+    plus_di: float  # +DI (Positive Directional Indicator)
+    minus_di: float  # -DI (Negative Directional Indicator)
+
+
+@dataclass
+class CCI:
+    period: int
+    cci: float  # Commodity Channel Index
+
+
+@dataclass
+class WilliamsR:
+    period: int
+    willr: float  # Williams %R
+
+
+@dataclass
+class EMA:
+    period: int
+    ema: float  # Exponential Moving Average
+
+
+@dataclass
+class SMA:
+    period: int
+    sma: float  # Simple Moving Average
+
 class TechnicalAnalyzer:
 
     @staticmethod
@@ -91,6 +150,241 @@ class TechnicalAnalyzer:
         return RSI(
             period=period,
             rsi=rsi[-1].item(),
+        )
+
+    @staticmethod
+    def calculate_bollinger_bands(
+        prices: deque[float],
+        period: int = 20,
+        std_dev: float = 2.0
+    ) -> Union[None, BollingerBands]:
+        """Calculate Bollinger Bands using TAlib"""
+
+        if len(prices) < period:
+            return None
+
+        pr = np.array(prices)
+        upper, middle, lower = ta.BBANDS(
+            pr,
+            timeperiod=period,
+            nbdevup=std_dev,
+            nbdevdn=std_dev,
+            matype=0  # SMA
+        )
+
+        # Check if we have valid data
+        if np.isnan(upper[-1]):
+            return None
+
+        # Calculate bandwidth and %B
+        current_price = prices[-1]
+        bandwidth = (upper[-1] - lower[-1]) / middle[-1] if middle[-1] != 0 else 0
+        percent_b = (current_price - lower[-1]) / (upper[-1] - lower[-1]) if (upper[-1] - lower[-1]) != 0 else 0.5
+
+        return BollingerBands(
+            period=period,
+            std_dev=std_dev,
+            upper=upper[-1].item(),
+            middle=middle[-1].item(),
+            lower=lower[-1].item(),
+            bandwidth=bandwidth,
+            percent_b=percent_b,
+            current_price=current_price
+        )
+
+    @staticmethod
+    def calculate_stochastic(
+        high: deque[float],
+        low: deque[float],
+        close: deque[float],
+        fastk_period: int = 14,
+        slowk_period: int = 3,
+        slowd_period: int = 3
+    ) -> Union[None, Stochastic]:
+        """Calculate Stochastic Oscillator using TAlib"""
+
+        if len(close) < fastk_period:
+            return None
+
+        h = np.array(high)
+        l = np.array(low)
+        c = np.array(close)
+
+        slowk, slowd = ta.STOCH(
+            h, l, c,
+            fastk_period=fastk_period,
+            slowk_period=slowk_period,
+            slowk_matype=0,  # SMA
+            slowd_period=slowd_period,
+            slowd_matype=0   # SMA
+        )
+
+        # Check if we have valid data
+        if np.isnan(slowk[-1]):
+            return None
+
+        return Stochastic(
+            fastk_period=fastk_period,
+            slowk_period=slowk_period,
+            slowd_period=slowd_period,
+            slowk=slowk[-1].item(),
+            slowd=slowd[-1].item()
+        )
+
+    @staticmethod
+    def calculate_atr(
+        high: deque[float],
+        low: deque[float],
+        close: deque[float],
+        period: int = 14
+    ) -> Union[None, ATR]:
+        """Calculate Average True Range using TAlib"""
+
+        if len(close) < period:
+            return None
+
+        h = np.array(high)
+        l = np.array(low)
+        c = np.array(close)
+
+        atr = ta.ATR(h, l, c, timeperiod=period)
+
+        # Check if we have valid data
+        if np.isnan(atr[-1]):
+            return None
+
+        return ATR(
+            period=period,
+            atr=atr[-1].item()
+        )
+
+    @staticmethod
+    def calculate_adx(
+        high: deque[float],
+        low: deque[float],
+        close: deque[float],
+        period: int = 14
+    ) -> Union[None, ADX]:
+        """Calculate Average Directional Index using TAlib"""
+
+        if len(close) < period:
+            return None
+
+        h = np.array(high)
+        l = np.array(low)
+        c = np.array(close)
+
+        adx = ta.ADX(h, l, c, timeperiod=period)
+        plus_di = ta.PLUS_DI(h, l, c, timeperiod=period)
+        minus_di = ta.MINUS_DI(h, l, c, timeperiod=period)
+
+        # Check if we have valid data
+        if np.isnan(adx[-1]):
+            return None
+
+        return ADX(
+            period=period,
+            adx=adx[-1].item(),
+            plus_di=plus_di[-1].item(),
+            minus_di=minus_di[-1].item()
+        )
+
+    @staticmethod
+    def calculate_cci(
+        high: deque[float],
+        low: deque[float],
+        close: deque[float],
+        period: int = 14
+    ) -> Union[None, CCI]:
+        """Calculate Commodity Channel Index using TAlib"""
+
+        if len(close) < period:
+            return None
+
+        h = np.array(high)
+        l = np.array(low)
+        c = np.array(close)
+
+        cci = ta.CCI(h, l, c, timeperiod=period)
+
+        # Check if we have valid data
+        if np.isnan(cci[-1]):
+            return None
+
+        return CCI(
+            period=period,
+            cci=cci[-1].item()
+        )
+
+    @staticmethod
+    def calculate_willr(
+        high: deque[float],
+        low: deque[float],
+        close: deque[float],
+        period: int = 14
+    ) -> Union[None, WilliamsR]:
+        """Calculate Williams %R using TAlib"""
+
+        if len(close) < period:
+            return None
+
+        h = np.array(high)
+        l = np.array(low)
+        c = np.array(close)
+
+        willr = ta.WILLR(h, l, c, timeperiod=period)
+
+        # Check if we have valid data
+        if np.isnan(willr[-1]):
+            return None
+
+        return WilliamsR(
+            period=period,
+            willr=willr[-1].item()
+        )
+
+    @staticmethod
+    def calculate_ema(
+        prices: deque[float],
+        period: int = 20
+    ) -> Union[None, EMA]:
+        """Calculate Exponential Moving Average using TAlib"""
+
+        if len(prices) < period:
+            return None
+
+        pr = np.array(prices)
+        ema = ta.EMA(pr, timeperiod=period)
+
+        # Check if we have valid data
+        if np.isnan(ema[-1]):
+            return None
+
+        return EMA(
+            period=period,
+            ema=ema[-1].item()
+        )
+
+    @staticmethod
+    def calculate_sma(
+        prices: deque[float],
+        period: int = 20
+    ) -> Union[None, SMA]:
+        """Calculate Simple Moving Average using TAlib"""
+
+        if len(prices) < period:
+            return None
+
+        pr = np.array(prices)
+        sma = ta.SMA(pr, timeperiod=period)
+
+        # Check if we have valid data
+        if np.isnan(sma[-1]):
+            return None
+
+        return SMA(
+            period=period,
+            sma=sma[-1].item()
         )
 
 
