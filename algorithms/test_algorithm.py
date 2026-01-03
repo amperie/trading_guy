@@ -75,8 +75,7 @@ class ReadSignalsFromFile(Algorithm):
                     signal_type = SignalType.BUY
                     strength = int(min(signal_value * 100, 100))
                 else:
-                    signal_type = SignalType.SELL
-                    strength = int(min((1 - signal_value) * 100, 100))
+                    pass # Don't generate sell signals
 
                 signals.append(MarketSignal(
                     type=signal_type,
