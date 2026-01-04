@@ -329,7 +329,7 @@ class MLflowClient:
             return
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, filename)
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(text)
             mlflow.log_artifact(filepath)
         logger.debug(f"Logged text artifact: {filename}")
@@ -346,7 +346,7 @@ class MLflowClient:
             return
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, filename)
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, default=str)
             mlflow.log_artifact(filepath)
         logger.debug(f"Logged JSON artifact: {filename}")
@@ -366,7 +366,7 @@ class MLflowClient:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, filename)
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(markdown)
             mlflow.log_artifact(filepath)
         logger.debug(f"Logged markdown artifact: {filename}")

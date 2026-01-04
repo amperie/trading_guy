@@ -211,7 +211,7 @@ class AnalysisEngine:
 
         # Get equity curve
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
 
         initial_equity = equity_curve.iloc[0]
         final_equity = equity_curve.iloc[-1]
@@ -378,7 +378,7 @@ class AnalysisEngine:
 
         # Create equity curve from portfolio value history
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
 
         # Calculate tick-by-tick returns
         tick_returns = equity_curve.pct_change().dropna()
@@ -398,7 +398,7 @@ class AnalysisEngine:
             raise ValueError("Portfolio must have keep_history=True")
 
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
 
         # Resample to daily, taking the last value of each day
         daily_equity = equity_curve.resample('D').last().dropna()
@@ -417,7 +417,7 @@ class AnalysisEngine:
             raise ValueError("Portfolio must have keep_history=True")
 
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
 
         # Resample to monthly, taking the last value of each month
         monthly_equity = equity_curve.resample('ME').last().dropna()
@@ -487,7 +487,7 @@ class AnalysisEngine:
             raise ValueError("Portfolio must have keep_history=True")
 
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
 
         fig, ax = plt.subplots(figsize=(12, 6))
         ax.plot(equity_curve.index, equity_curve.values, linewidth=2)
@@ -520,7 +520,7 @@ class AnalysisEngine:
             raise ValueError("Portfolio must have keep_history=True")
 
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
 
         running_max = equity_curve.expanding().max()
         drawdown_pct = ((equity_curve - running_max) / running_max) * 100
@@ -616,7 +616,7 @@ class AnalysisEngine:
 
         # Get equity curve
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
 
         # Get all filled orders (exclude CANCELED and child orders of brackets)
         buy_orders = []
@@ -1070,7 +1070,7 @@ class AnalysisEngine:
         # 1. Equity Curve
         ax1 = fig.add_subplot(gs[0, :])
         equity_curve = pd.Series(self.portfolio.value_history)
-        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()))
+        equity_curve.index = pd.to_datetime(list(self.portfolio.tick_history.keys()), utc=True)
         ax1.plot(equity_curve.index, equity_curve.values, linewidth=2, color='blue')
         ax1.set_title('Equity Curve', fontsize=12, fontweight='bold')
         ax1.set_ylabel('Portfolio Value ($)')
@@ -1134,6 +1134,102 @@ class AnalysisEngine:
             plt.show()
 
         return fig
+
+    def calculate_benchmark_comparison(self) -> Dict[str, Any]:
+        """
+        Calculate buy-and-hold benchmark metrics for comparison
+
+        Returns:
+            Dict with benchmark metrics for each symbol and comparative analysis
+        """
+        if not self.portfolio.tick_history:
+            raise ValueError("Portfolio must have keep_history=True")
+
+        # Extract price data for each symbol from tick_history
+        symbol_prices = defaultdict(list)
+        symbol_times = defaultdict(list)
+
+        for timestamp, tick_data in self.portfolio.tick_history.items():
+            for price_data in tick_data:
+                symbol = price_data.symbol
+                symbol_times[symbol].append(timestamp)
+                symbol_prices[symbol].append(price_data.close)
+
+        if not symbol_prices:
+            return {}
+
+        # Get portfolio returns for comparison
+        portfolio_returns = self.get_tick_returns()
+        initial_equity = self._metrics.initial_equity if self._metrics else self.portfolio.value_history[0]
+
+        benchmark_results = {}
+
+        for symbol in symbol_prices:
+            prices = np.array(symbol_prices[symbol])
+
+            # Calculate buy-and-hold returns
+            initial_price = prices[0]
+            final_price = prices[-1]
+
+            # Buy-and-hold metrics
+            total_return_pct = ((final_price - initial_price) / initial_price) * 100
+
+            # Calculate hypothetical shares if all capital was invested in this symbol
+            shares = initial_equity / initial_price
+            final_value = shares * final_price
+            total_return_dollars = final_value - initial_equity
+
+            # Calculate returns series for this symbol
+            symbol_returns = pd.Series(prices).pct_change().fillna(0)
+
+            # Risk metrics for buy-and-hold
+            volatility = symbol_returns.std() * np.sqrt(252 * 78) * 100  # Annualized (5min bars)
+
+            # Calculate max drawdown
+            cumulative = (1 + symbol_returns).cumprod()
+            running_max = cumulative.expanding().max()
+            drawdown = (cumulative - running_max) / running_max
+            max_drawdown_pct = drawdown.min() * 100
+
+            # Sharpe ratio (assuming 0% risk-free rate for simplicity)
+            if volatility > 0:
+                sharpe = (symbol_returns.mean() * 252 * 78) / (symbol_returns.std() * np.sqrt(252 * 78))
+            else:
+                sharpe = 0
+
+            benchmark_results[symbol] = {
+                'total_return_pct': total_return_pct,
+                'total_return_dollars': total_return_dollars,
+                'final_value': final_value,
+                'volatility': volatility,
+                'sharpe_ratio': sharpe,
+                'max_drawdown_pct': max_drawdown_pct,
+                'initial_price': initial_price,
+                'final_price': final_price,
+                'price_change_pct': total_return_pct
+            }
+
+        # Calculate comparative metrics vs portfolio
+        if self._metrics and benchmark_results:
+            # Use equal-weighted benchmark if multiple symbols
+            avg_benchmark_return = np.mean([b['total_return_pct'] for b in benchmark_results.values()])
+            avg_benchmark_sharpe = np.mean([b['sharpe_ratio'] for b in benchmark_results.values()])
+            avg_benchmark_vol = np.mean([b['volatility'] for b in benchmark_results.values()])
+
+            comparison = {
+                'portfolio_return_pct': self._metrics.total_return_pct,
+                'benchmark_return_pct': avg_benchmark_return,
+                'alpha': self._metrics.total_return_pct - avg_benchmark_return,
+                'portfolio_sharpe': self._metrics.sharpe_ratio,
+                'benchmark_sharpe': avg_benchmark_sharpe,
+                'portfolio_volatility': self._metrics.volatility,
+                'benchmark_volatility': avg_benchmark_vol,
+                'outperformance': self._metrics.total_return_pct > avg_benchmark_return
+            }
+
+            benchmark_results['_comparison'] = comparison
+
+        return benchmark_results
 
     def generate_report(self) -> str:
         """Generate a comprehensive text report"""
@@ -1211,6 +1307,51 @@ Bracket Performance:
   - Profit Taker Exits: Avg P&L ${bracket_analysis['profit_taker_exits'].get('avg_pnl', 0):,.2f}, Win Rate {bracket_analysis['profit_taker_exits'].get('win_rate', 0):.1f}%
   - Manual Exits:       Avg P&L ${bracket_analysis['manual_exits'].get('avg_pnl', 0):,.2f}, Win Rate {bracket_analysis['manual_exits'].get('win_rate', 0):.1f}%
 """
+
+        # Add benchmark comparison section
+        try:
+            benchmark = self.calculate_benchmark_comparison()
+            if benchmark:
+                report += f"""
+BENCHMARK COMPARISON (BUY & HOLD)
+----------------------------------
+"""
+                # Per-symbol benchmarks
+                for symbol, metrics in benchmark.items():
+                    if symbol == '_comparison':
+                        continue
+                    report += f"""
+{symbol}:
+  Initial Price:        ${metrics['initial_price']:,.2f}
+  Final Price:          ${metrics['final_price']:,.2f}
+  Price Change:         {metrics['price_change_pct']:.2f}%
+  B&H Total Return:     ${metrics['total_return_dollars']:,.2f} ({metrics['total_return_pct']:.2f}%)
+  B&H Sharpe Ratio:     {metrics['sharpe_ratio']:.2f}
+  B&H Volatility:       {metrics['volatility']:.2f}%
+  B&H Max Drawdown:     {metrics['max_drawdown_pct']:.2f}%
+"""
+
+                # Overall comparison
+                if '_comparison' in benchmark:
+                    comp = benchmark['_comparison']
+                    outperform_symbol = "[+]" if comp['outperformance'] else "[-]"
+                    report += f"""
+STRATEGY vs. BUY & HOLD COMPARISON
+-----------------------------------
+Strategy Return:        {comp['portfolio_return_pct']:.2f}%
+Buy & Hold Return:      {comp['benchmark_return_pct']:.2f}%
+Alpha (Excess Return):  {comp['alpha']:.2f}% {outperform_symbol}
+
+Strategy Sharpe:        {comp['portfolio_sharpe']:.2f}
+Buy & Hold Sharpe:      {comp['benchmark_sharpe']:.2f}
+
+Strategy Volatility:    {comp['portfolio_volatility']:.2f}%
+Buy & Hold Volatility:  {comp['benchmark_volatility']:.2f}%
+
+Performance:            {"OUTPERFORMED" if comp['outperformance'] else "UNDERPERFORMED"} buy-and-hold by {abs(comp['alpha']):.2f}%
+"""
+        except Exception as e:
+            logger.debug(f"Could not calculate benchmark comparison: {e}")
 
         report += f"""
 TIME PERIOD

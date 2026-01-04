@@ -58,13 +58,26 @@ class ReadSignalsFromFile(Algorithm):
             # Get current timestamp from the data
             current_timestamp = price_data.timestamp
 
-            # Convert to pandas datetime if needed (handle timezone-aware timestamps)
-            if hasattr(current_timestamp, 'tz_localize'):
-                # Already a pandas timestamp
+            # Convert to pandas datetime if needed
+            if isinstance(current_timestamp, pd.Timestamp):
                 lookup_timestamp = current_timestamp
             else:
-                # Convert to pandas timestamp
                 lookup_timestamp = pd.to_datetime(current_timestamp)
+
+            # Normalize timezone to match the dataframe index
+            # If the index is timezone-naive, make the lookup timestamp timezone-naive
+            # If the index is timezone-aware, make the lookup timestamp timezone-aware
+            if self.signals_df.index.tz is None:
+                # Index is timezone-naive, remove timezone from lookup timestamp if present
+                if lookup_timestamp.tz is not None:
+                    lookup_timestamp = lookup_timestamp.tz_localize(None)
+            else:
+                # Index is timezone-aware, add timezone to lookup timestamp if missing
+                if lookup_timestamp.tz is None:
+                    lookup_timestamp = lookup_timestamp.tz_localize(self.signals_df.index.tz)
+                else:
+                    # Convert to the same timezone as the index
+                    lookup_timestamp = lookup_timestamp.tz_convert(self.signals_df.index.tz)
 
             try:
                 # Retrieve the signal value from the dataframe for this timestamp
@@ -74,14 +87,12 @@ class ReadSignalsFromFile(Algorithm):
                 if signal_value >= self.threshold:
                     signal_type = SignalType.BUY
                     strength = int(min(signal_value * 100, 100))
-                else:
-                    pass # Don't generate sell signals
 
-                signals.append(MarketSignal(
-                    type=signal_type,
-                    symbol=price_data.symbol,
-                    strength=strength
-                ))
+                    signals.append(MarketSignal(
+                        type=signal_type,
+                        symbol=price_data.symbol,
+                        strength=strength
+                    ))
             except KeyError:
                 # Timestamp not found in the dataframe - no signal for this timestamp
                 pass
