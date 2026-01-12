@@ -95,8 +95,10 @@ Each component is designed to be swappable via configuration, enabling easy test
   - `plot_interactive_portfolio()` → **NEW** Interactive Plotly chart with portfolio value, cash, trades, and stock prices (zoomable, clickable legend, shows only quantity > 0)
   - `plot_comprehensive_dashboard()` → Multi-panel dashboard with key metrics
   - `generate_report()` → Returns formatted text report string
-  - `log_to_mlflow(experiment_name, run_name, description, tags, parameters, ...)` → Log all analysis results to MLflow with optional experiment name override (includes interactive chart)
-  - `run_full_analysis(log_to_mlflow=True, experiment_name, ...)` → Run complete analysis and optionally log to MLflow with custom experiment (includes interactive chart)
+  - `generate_signals_orders_report()` → **NEW** Generates detailed text report linking signals (with 'order_id' in metadata) to their corresponding orders, showing entry/exit details and P&L
+  - `generate_signals_orders_dataframe()` → **NEW** Generates pandas DataFrame linking signals to orders with metadata exploded to columns for win/loss analysis (includes risk metrics, time features, and P&L calculations). **Object Explosion**: If metadata contains objects (e.g., RSI, MACD indicators), their attributes are automatically exploded into separate columns with dot notation (e.g., `signal_rsi.period`, `signal_rsi.rsi`)
+  - `log_to_mlflow(experiment_name, run_name, description, tags, parameters, log_signals=True, ...)` → Log all analysis results to MLflow with optional experiment name override (includes interactive chart, signals history, signals-to-orders report, and signals-to-orders DataFrame in CSV/Parquet formats)
+  - `run_full_analysis(log_to_mlflow=True, experiment_name, ...)` → Run complete analysis and optionally log to MLflow with custom experiment (includes interactive chart, signals history, signals-to-orders report, and DataFrame)
 - **Example Usage:**
   ```python
   from engines.analysis_engine import AnalysisEngine
@@ -126,7 +128,13 @@ Each component is designed to be swappable via configuration, enabling easy test
       save_report_locally=True
   )
   # Results dict contains: trades, metrics, tick_returns, daily_returns, monthly_returns, bracket_analysis, report
-  # MLflow artifacts: 7 static charts, interactive_portfolio.html, trades.json, reports
+  # MLflow artifacts:
+  #   - Charts: 7 PNG files + interactive_portfolio.html
+  #   - Data: trades.json, bracket_analysis.json (if applicable)
+  #   - Signals: signals_history.json, signals_history_flat.json
+  #   - Analysis: signals_orders_dataframe.csv (easily downloadable), signals_orders_dataframe.parquet
+  #   - Reports: performance_report.txt, signals_to_orders_report.txt, summary.md
+  # Note: signals_orders_dataframe.csv is the key file for analyzing signal win/loss patterns!
 
   # Option 3: Manual MLflow logging for fine-grained control
   engine = AnalysisEngine(portfolio, order_manager)

@@ -59,6 +59,7 @@ class MarketSignal:
     type: SignalType
     symbol: str
     strength: int # 0-100 to indicate how strong the signal is
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class TickResults:

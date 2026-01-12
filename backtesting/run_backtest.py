@@ -9,13 +9,13 @@ from data_providers.test_data_provider import TestDataProvider
 from engines.backtest_engine import BacktestingEngine
 from engines.analysis_engine import AnalysisEngine
 from utils.logger import Logger
-import ray
-from ray import tune
-from ray.tune.search.optuna import OptunaSearch
+#import ray
+#from ray import tune
+#from ray.tune.search.optuna import OptunaSearch
 
 logger = Logger().get_logger(__name__)
 
-@ray.remote
+#@ray.remote
 def run_backtest(backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: dict):
     # Run a backtest using the simulator
     experiment_name = backtest_cfg['experiment_name']
@@ -64,7 +64,7 @@ def run_backtest_local(backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: 
     data_path = str(project_root / "data" / f"{symbol}_5min.csv")
     om = BacktestingOM()
 
-    al = ReadSignalsFromFile(alg_cfg)
+    al = MacdRsiAlgorithm(alg_cfg)
     dp = TestDataProvider(dp_cfg)
     pf = SingleSymbolPortfolio(pf_cfg, om, starting_cash, {}, True)
     sim = BacktestingEngine({}, dp, al, om, pf)
@@ -87,30 +87,31 @@ def run_backtest_local(backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: 
 
 def example_usage():
     project_root = Path(__file__).parent.parent
-    symbol = "GDXU"
-    data_path = str(project_root / "data" / f"{symbol}_5min_MarketHours.csv")
+    symbol = "UPRO"
+    data_path = str(project_root / "data" / f"{symbol}_5min.csv")
     dp_cfg = {
         "path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider",
-        "truncate": 10000000,
-        "start_date": "08/08/2025"
+        "truncate": 2000000,
+        # "start_date": "08/01/2024"
     }
     backtest_cfg = {
-        "symbol": symbol,"run_name": f"{symbol}_datarobot", "description": "Backtest", "starting_cash": 1000.0,
-        "experiment_name": "Backtesting"
+        "symbol": symbol,"run_name": f"{symbol}_test", "description": "Backtest", "starting_cash": 1000.0,
+        "experiment_name": "Tests"
     }
-    """
+
     alg_cfg = {
         "macd_fastperiod": 54,
         "macd_slowperiod": 117,
         "macd_signalperiod": 40,
         "rsi_period": 14,
         "extra_history_period": 50
-    }"""
-    alg_cfg = {
-        "threshold": .44,
-        "csv_path": str(project_root / "data" / "dr_signals.csv"),
     }
-    pf_cfg = {"symbol": "GDXU", "stop_pct": 1, "profit_pct": 1}
+    """
+    alg_cfg = {
+        "threshold": .15,
+        "csv_path": str(project_root / "data" / f"dr_signals_{symbol}.csv"),
+    }"""
+    pf_cfg = {"symbol": symbol, "stop_pct": 2, "profit_pct": 5}
     run_backtest_local(backtest_cfg, alg_cfg, pf_cfg, dp_cfg)
 
 def create_multiple_backtests() -> list[dict]:

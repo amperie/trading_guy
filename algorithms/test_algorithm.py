@@ -84,7 +84,7 @@ class ReadSignalsFromFile(Algorithm):
                 signal_value = self.signals_df.loc[lookup_timestamp, self.signal_column]
 
                 # Convert signal value to SignalType based on threshold
-                if signal_value >= self.threshold:
+                if signal_value <= self.threshold:
                     signal_type = SignalType.BUY
                     strength = int(min(signal_value * 100, 100))
 

@@ -231,3 +231,168 @@ def aggregate_stock_data_custom(
     result = result.sort_values([timestamp_col, symbol_col]).reset_index(drop=True)
 
     return result
+
+
+def serialize_market_signal(signal: MarketSignal) -> dict:
+    """
+    Convert MarketSignal to JSON-serializable dictionary.
+
+    Args:
+        signal: MarketSignal object to serialize
+
+    Returns:
+        Dictionary with all signal data in JSON-serializable format
+
+    Example:
+        >>> signal = MarketSignal(type=SignalType.BUY, symbol="AAPL", strength=75, metadata={"reason": "crossover"})
+        >>> data = serialize_market_signal(signal)
+        >>> # {'type': 'BUY', 'symbol': 'AAPL', 'strength': 75, 'metadata': {'reason': 'crossover'}}
+    """
+    from core.classes import SignalType
+    from datetime import datetime
+
+    # Deep copy metadata and convert datetime objects to ISO strings
+    metadata_copy = {}
+    for key, value in signal.metadata.items():
+        if isinstance(value, datetime):
+            metadata_copy[key] = value.isoformat()
+        else:
+            metadata_copy[key] = value
+
+    return {
+        "type": signal.type.name,  # Convert enum to string (e.g., "BUY")
+        "symbol": signal.symbol,
+        "strength": signal.strength,
+        "metadata": metadata_copy
+    }
+
+
+def deserialize_market_signal(data: dict) -> MarketSignal:
+    """
+    Convert dictionary back to MarketSignal object.
+
+    Args:
+        data: Dictionary with serialized signal data
+
+    Returns:
+        MarketSignal object
+
+    Example:
+        >>> data = {'type': 'BUY', 'symbol': 'AAPL', 'strength': 75, 'metadata': {'reason': 'crossover'}}
+        >>> signal = deserialize_market_signal(data)
+        >>> # MarketSignal(type=SignalType.BUY, symbol='AAPL', strength=75, metadata={'reason': 'crossover'})
+    """
+    from core.classes import SignalType
+    from datetime import datetime
+
+    # Reconstruct metadata, converting ISO strings back to datetime
+    metadata = {}
+    for key, value in data.get("metadata", {}).items():
+        # Try to parse as datetime if it looks like ISO format
+        if isinstance(value, str) and "T" in value:
+            try:
+                metadata[key] = datetime.fromisoformat(value)
+            except ValueError:
+                metadata[key] = value
+        else:
+            metadata[key] = value
+
+    return MarketSignal(
+        type=SignalType[data["type"]],  # Convert string back to enum
+        symbol=data["symbol"],
+        strength=data["strength"],
+        metadata=metadata
+    )
+
+
+def serialize_signals_history(signals_history: list[list[MarketSignal]]) -> list[dict]:
+    """
+    Convert signals_history (list of lists) to JSON-serializable format.
+
+    Preserves the tick grouping structure where each tick can have multiple signals.
+
+    Args:
+        signals_history: List where each element is a list of MarketSignal objects from one tick
+
+    Returns:
+        List of dictionaries, each containing tick_index and signals array
+
+    Example:
+        >>> signals_history = [
+        ...     [MarketSignal(type=SignalType.BUY, symbol="AAPL", strength=75)],
+        ...     [MarketSignal(type=SignalType.SELL, symbol="TSLA", strength=80)]
+        ... ]
+        >>> data = serialize_signals_history(signals_history)
+        >>> # [
+        >>> #   {'tick_index': 0, 'signals': [{'type': 'BUY', 'symbol': 'AAPL', ...}]},
+        >>> #   {'tick_index': 1, 'signals': [{'type': 'SELL', 'symbol': 'TSLA', ...}]}
+        >>> # ]
+    """
+    return [
+        {
+            "tick_index": idx,
+            "signals": [serialize_market_signal(sig) for sig in tick_signals]
+        }
+        for idx, tick_signals in enumerate(signals_history)
+    ]
+
+
+def deserialize_signals_history(data: list[dict]) -> list[list[MarketSignal]]:
+    """
+    Convert JSON data back to signals_history format.
+
+    Args:
+        data: List of dictionaries with tick_index and signals arrays
+
+    Returns:
+        List of lists of MarketSignal objects, preserving tick grouping
+
+    Example:
+        >>> data = [
+        ...     {'tick_index': 0, 'signals': [{'type': 'BUY', 'symbol': 'AAPL', 'strength': 75, 'metadata': {}}]},
+        ...     {'tick_index': 1, 'signals': [{'type': 'SELL', 'symbol': 'TSLA', 'strength': 80, 'metadata': {}}]}
+        ... ]
+        >>> signals_history = deserialize_signals_history(data)
+        >>> # [[MarketSignal(...)], [MarketSignal(...)]]
+    """
+    # Sort by tick_index to ensure correct order
+    sorted_data = sorted(data, key=lambda x: x["tick_index"])
+
+    return [
+        [deserialize_market_signal(sig) for sig in tick["signals"]]
+        for tick in sorted_data
+    ]
+
+
+def serialize_signals_history_flat(signals_history: list[list[MarketSignal]]) -> list[dict]:
+    """
+    Flatten signals_history to single list for easier analysis.
+
+    This format is more convenient for loading into pandas DataFrames or
+    analyzing in spreadsheet tools.
+
+    Args:
+        signals_history: List where each element is a list of MarketSignal objects from one tick
+
+    Returns:
+        Flattened list of signal dictionaries, each with tick_index added
+
+    Example:
+        >>> signals_history = [
+        ...     [MarketSignal(type=SignalType.BUY, symbol="AAPL", strength=75)],
+        ...     [MarketSignal(type=SignalType.SELL, symbol="TSLA", strength=80)]
+        ... ]
+        >>> data = serialize_signals_history_flat(signals_history)
+        >>> # [
+        >>> #   {'tick_index': 0, 'type': 'BUY', 'symbol': 'AAPL', 'strength': 75, 'metadata': {}},
+        >>> #   {'tick_index': 1, 'type': 'SELL', 'symbol': 'TSLA', 'strength': 80, 'metadata': {}}
+        >>> # ]
+        >>> df = pd.DataFrame(data)  # Easy to analyze
+    """
+    flat_signals = []
+    for tick_idx, tick_signals in enumerate(signals_history):
+        for signal in tick_signals:
+            sig_dict = serialize_market_signal(signal)
+            sig_dict["tick_index"] = tick_idx
+            flat_signals.append(sig_dict)
+    return flat_signals

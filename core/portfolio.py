@@ -229,7 +229,8 @@ class Portfolio(ABC):
             self.tick_history[tick[0].timestamp] = tick
             self.cash_history[tick[0].timestamp] = self.cash
             self.value_history[tick[0].timestamp] = self.total_value
-            self.signals_history[tick[0].timestamp] = signals
+            if len(signals) > 0:
+                self.signals_history[tick[0].timestamp] = signals
 
         # Return the new orders that were created
         ret_val = TickResults(orders=orders)

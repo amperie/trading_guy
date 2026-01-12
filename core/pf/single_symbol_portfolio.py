@@ -61,6 +61,7 @@ class SingleSymbolPortfolio(Portfolio):
                 symbol, price * (1.0 + profit_pct/100), price * (1.0 - stop_pct/100.0),
                 quantity, 0.0, tick
             )
+            signal.metadata['order_id'] = bo.order_id
             ret_val = TickResults(orders=[bo])
             return ret_val
         elif signal is not None and signal.type == SignalType.SELL:
@@ -69,6 +70,7 @@ class SingleSymbolPortfolio(Portfolio):
             so = Order.create_market_order(
                 symbol, OrderAction.SELL, self.positions[symbol].quantity, 0.0, tick
             )
+            signal.metadata['order_id'] = so.order_id
             # Cancel all other pending bracket orders so there isn't a race condition on sales
             self.om.cancel_all_pending_orders(OrderType.BRACKET)
             return TickResults(orders=[so])

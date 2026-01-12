@@ -64,14 +64,16 @@ class MacdRsiAlgorithm(Algorithm):
                     ret = MarketSignal(
                         type=SignalType.BUY,
                         symbol=symbol,
-                        strength=100 # TODO: make this dynamic based on MACD and RSI
+                        strength=100, # TODO: make this dynamic based on MACD and RSI
+                        metadata ={"rsi": rsi, "macd": macd, "macd_last": macd.last_macd},
                     )
                     ret_val.append(ret)
                 else:
                     ret = MarketSignal(
                         type=SignalType.SELL,
                         symbol=symbol,
-                        strength=100
+                        strength=100,
+                        metadata ={"rsi": rsi, "macd": macd, "macd_last": macd.last_macd},
                     )
                     ret_val.append(ret)
 

@@ -14,7 +14,8 @@
       "Bash(brew list:*)",
       "Bash(pip install:*)",
       "WebSearch",
-      "Bash(PYTHONPATH=. python:*)"
+      "Bash(PYTHONPATH=. python:*)",
+      "Bash(jupyter nbconvert:*)"
     ],
     "deny": [],
     "ask": []

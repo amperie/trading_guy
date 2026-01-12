@@ -206,7 +206,7 @@ class AnalysisEngine:
         if self._trades is None:
             self.extract_trades()
 
-        if not self.portfolio.tick_history:
+        if not self.portfolio.keep_history:
             raise ValueError("Portfolio must have keep_history=True to calculate metrics")
 
         # Get equity curve
@@ -1364,6 +1364,470 @@ Trading Days:           {self._metrics.trading_days}
 
         return report
 
+    def generate_signals_orders_report(self) -> str:
+        """
+        Generate a detailed report linking signals to their corresponding orders.
+
+        For each signal that has an 'order_id' in its metadata, shows:
+        - Signal details (type, symbol, strength, timestamp, full metadata)
+        - Entry order details (price, quantity, cost)
+        - Exit order details (price, quantity, proceeds, P&L) if applicable
+
+        Returns:
+            Formatted text report as string
+        """
+        if not hasattr(self.portfolio, 'signals_history') or not self.portfolio.signals_history:
+            return "No signals history available.\n"
+
+        report_lines = []
+        report_lines.append("=" * 100)
+        report_lines.append("SIGNALS TO ORDERS REPORT")
+        report_lines.append("=" * 100)
+        report_lines.append("")
+
+        # Sort signals by timestamp
+        sorted_timestamps = sorted(self.portfolio.signals_history.keys())
+
+        signal_count = 0
+        matched_count = 0
+
+        for timestamp in sorted_timestamps:
+            signals = self.portfolio.signals_history[timestamp]
+
+            for signal in signals:
+                signal_count += 1
+
+                # Check if signal has an order_id in metadata
+                if 'order_id' not in signal.metadata:
+                    continue
+
+                order_id = signal.metadata['order_id']
+
+                # Find the order in order_manager
+                order = self.order_manager.all_orders.get(order_id)
+
+                if order is None:
+                    logger.warning(f"Order {order_id} referenced in signal not found in order manager")
+                    continue
+
+                matched_count += 1
+
+                # Generate entry for this signal-order pair
+                report_lines.append("-" * 100)
+                report_lines.append(f"SIGNAL #{matched_count}")
+                report_lines.append("-" * 100)
+
+                # Signal details
+                report_lines.append(f"Timestamp:          {timestamp}")
+                report_lines.append(f"Signal Type:        {signal.type.name}")
+                report_lines.append(f"Symbol:             {signal.symbol}")
+                report_lines.append(f"Strength:           {signal.strength}/100")
+
+                # Metadata (excluding order_id which we already show)
+                if signal.metadata:
+                    report_lines.append(f"Metadata:")
+                    for key, value in signal.metadata.items():
+                        if key != 'order_id':
+                            # Format datetime objects nicely
+                            if isinstance(value, datetime):
+                                value = value.strftime("%Y-%m-%d %H:%M:%S")
+                            # Format floats to 4 decimal places
+                            elif isinstance(value, float):
+                                value = f"{value:.4f}"
+                            report_lines.append(f"  {key:20s} = {value}")
+
+                report_lines.append("")
+
+                # Entry Order details
+                report_lines.append(f"ENTRY ORDER:")
+                report_lines.append(f"  Order ID:         {order.order_id}")
+                report_lines.append(f"  Order Type:       {order.type.name}")
+                report_lines.append(f"  Action:           {order.action.name}")
+                report_lines.append(f"  Status:           {order.status.name}")
+                report_lines.append(f"  Quantity:         {order.quantity:,}")
+                report_lines.append(f"  Entry Price:      ${order.price:,.4f}")
+                report_lines.append(f"  Total Cost:       ${order.cash:,.2f}")
+                report_lines.append(f"  Transaction Cost: ${order.tx_cost:,.2f}")
+                report_lines.append(f"  Placed:           {order.placed_datetime}")
+                if order.executed_datetime:
+                    report_lines.append(f"  Executed:         {order.executed_datetime}")
+
+                # Check if this is a BracketOrder with a SOLD_ORDER (exit)
+                if isinstance(order, BracketOrder) and hasattr(order, 'SOLD_ORDER') and order.SOLD_ORDER is not None:
+                    sold_order = order.SOLD_ORDER
+                    report_lines.append("")
+                    report_lines.append(f"EXIT ORDER:")
+                    report_lines.append(f"  Order ID:         {sold_order.order_id}")
+                    report_lines.append(f"  Exit Type:        {sold_order.type.name}")
+                    report_lines.append(f"  Action:           {sold_order.action.name}")
+                    report_lines.append(f"  Status:           {sold_order.status.name}")
+                    report_lines.append(f"  Quantity:         {sold_order.quantity:,}")
+                    report_lines.append(f"  Exit Price:       ${sold_order.price:,.4f}")
+                    report_lines.append(f"  Total Proceeds:   ${sold_order.cash:,.2f}")
+                    report_lines.append(f"  Transaction Cost: ${sold_order.tx_cost:,.2f}")
+                    if sold_order.executed_datetime:
+                        report_lines.append(f"  Executed:         {sold_order.executed_datetime}")
+
+                    # Calculate P&L
+                    entry_total = order.cash + order.tx_cost
+                    exit_total = sold_order.cash - sold_order.tx_cost
+                    pnl = exit_total - entry_total
+                    pnl_pct = (pnl / entry_total * 100) if entry_total > 0 else 0
+
+                    # Calculate duration
+                    if order.executed_datetime and sold_order.executed_datetime:
+                        duration = sold_order.executed_datetime - order.executed_datetime
+                        duration_hours = duration.total_seconds() / 3600
+                        duration_str = f"{duration_hours:.2f} hours"
+                    else:
+                        duration_str = "N/A"
+
+                    report_lines.append("")
+                    report_lines.append(f"TRADE SUMMARY:")
+                    report_lines.append(f"  Entry Total:      ${entry_total:,.2f}")
+                    report_lines.append(f"  Exit Total:       ${exit_total:,.2f}")
+                    report_lines.append(f"  Net P&L:          ${pnl:,.2f} ({pnl_pct:+.2f}%)")
+                    report_lines.append(f"  Duration:         {duration_str}")
+
+                    # Show which exit condition triggered
+                    if sold_order.type == OrderType.STOP_LOSS:
+                        report_lines.append(f"  Exit Reason:      STOP LOSS triggered")
+                    elif sold_order.type == OrderType.PROFIT_TAKER:
+                        report_lines.append(f"  Exit Reason:      PROFIT TARGET hit")
+                    else:
+                        report_lines.append(f"  Exit Reason:      Manual exit")
+
+                report_lines.append("")
+
+        # Summary
+        report_lines.append("=" * 100)
+        report_lines.append(f"SUMMARY: {matched_count} signals linked to orders (out of {signal_count} total signals)")
+        report_lines.append("=" * 100)
+        report_lines.append("")
+
+        return "\n".join(report_lines)
+
+    def _is_object_to_explode(self, value: Any) -> bool:
+        """
+        Check if a metadata value should be exploded into separate columns.
+
+        Returns True for objects with attributes (dataclasses, custom classes, etc.)
+        Returns False for primitive types (str, int, float, bool, datetime, None, lists, dicts)
+
+        Args:
+            value: The value to check
+
+        Returns:
+            True if value should be exploded, False otherwise
+        """
+        # Primitive types - don't explode
+        if value is None:
+            return False
+        if isinstance(value, (str, int, float, bool, bytes)):
+            return False
+        if isinstance(value, datetime):
+            return False
+        # Collections - don't explode (they'll be stored as is or converted to string)
+        if isinstance(value, (list, tuple, dict, set)):
+            return False
+
+        # Check if it's an object with __dict__ (class instance)
+        if hasattr(value, '__dict__'):
+            return True
+
+        # Check if it's a dataclass
+        try:
+            from dataclasses import is_dataclass
+            if is_dataclass(value):
+                return True
+        except ImportError:
+            pass
+
+        return False
+
+    def _get_object_attributes(self, obj: Any) -> Dict[str, Any]:
+        """
+        Extract attributes from an object for DataFrame explosion.
+
+        Handles both regular class instances and dataclasses.
+        Skips private attributes (starting with _).
+
+        Args:
+            obj: The object to extract attributes from
+
+        Returns:
+            Dictionary mapping attribute names to values
+
+        Example:
+            >>> rsi = RSI(period=14, rsi=51.37, avg_gain=0.5, avg_loss=0.3)
+            >>> attrs = _get_object_attributes(rsi)
+            >>> # {'period': 14, 'rsi': 51.37, 'avg_gain': 0.5, 'avg_loss': 0.3}
+        """
+        attributes = {}
+
+        # Try dataclass first (if available)
+        try:
+            from dataclasses import is_dataclass, fields
+            if is_dataclass(obj):
+                for field in fields(obj):
+                    if not field.name.startswith('_'):
+                        attributes[field.name] = getattr(obj, field.name)
+                return attributes
+        except ImportError:
+            pass
+
+        # Fall back to __dict__ for regular class instances
+        if hasattr(obj, '__dict__'):
+            for attr_name, attr_value in obj.__dict__.items():
+                # Skip private attributes
+                if not attr_name.startswith('_'):
+                    attributes[attr_name] = attr_value
+
+        return attributes
+
+    def generate_signals_orders_dataframe(self) -> pd.DataFrame:
+        """
+        Generate a DataFrame linking signals to their corresponding orders for analysis.
+
+        This is useful for analyzing which signal characteristics lead to winning vs losing trades.
+        All metadata fields are exploded into separate columns for easy filtering and analysis.
+
+        **Object Explosion:**
+        If a metadata value is an object (e.g., RSI, MACD indicator), its attributes are
+        automatically exploded into separate columns with dot notation:
+            - metadata['rsi'] = RSI(period=14, rsi=51.37, ...) becomes:
+              - signal_rsi.period = 14
+              - signal_rsi.rsi = 51.37
+              - signal_rsi.avg_gain = ...
+              - signal_rsi.avg_loss = ...
+
+        Returns:
+            pandas DataFrame with columns:
+                - timestamp: When signal occurred
+                - signal_type: BUY or SELL
+                - symbol: Trading symbol
+                - signal_strength: 0-100
+                - signal_[field]: Primitive metadata values
+                - signal_[object].[attribute]: Exploded object attributes (e.g., signal_rsi.period)
+                - order_id: Order ID
+                - order_type: MARKET, BRACKET, etc.
+                - entry_price: Entry price
+                - entry_quantity: Number of shares
+                - entry_cost: Total entry cost
+                - entry_tx_cost: Entry transaction cost
+                - entry_total: entry_cost + entry_tx_cost
+                - entry_datetime: When entry was executed
+                - exit_price: Exit price (if applicable)
+                - exit_quantity: Exit quantity (if applicable)
+                - exit_proceeds: Total exit proceeds (if applicable)
+                - exit_tx_cost: Exit transaction cost (if applicable)
+                - exit_total: exit_proceeds - exit_tx_cost (if applicable)
+                - exit_datetime: When exit was executed (if applicable)
+                - exit_type: STOP_LOSS, PROFIT_TAKER, MANUAL, etc. (if applicable)
+                - exit_reason: Human-readable exit reason (if applicable)
+                - net_pnl: Profit/loss in dollars
+                - net_pnl_pct: Profit/loss percentage
+                - duration_seconds: Trade duration in seconds
+                - duration_hours: Trade duration in hours
+                - duration_days: Trade duration in days
+                - is_win: Boolean - True if profitable trade
+                - is_bracket_order: Boolean - True if bracket order
+                - order_status: Current order status
+                - has_exit: Boolean - True if order has been exited
+
+        Example:
+            engine = AnalysisEngine(portfolio, order_manager)
+            df = engine.generate_signals_orders_dataframe()
+
+            # Analyze winning vs losing trades
+            wins = df[df['is_win'] == True]
+            losses = df[df['is_win'] == False]
+            print(f"Win rate: {len(wins) / len(df) * 100:.1f}%")
+
+            # Find best signal characteristics
+            print(wins.groupby('signal_type')['net_pnl'].mean())
+        """
+        if not hasattr(self.portfolio, 'signals_history') or not self.portfolio.signals_history:
+            logger.warning("No signals history available for DataFrame generation")
+            return pd.DataFrame()
+
+        records = []
+
+        # Sort signals by timestamp
+        sorted_timestamps = sorted(self.portfolio.signals_history.keys())
+
+        for timestamp in sorted_timestamps:
+            signals = self.portfolio.signals_history[timestamp]
+
+            for signal in signals:
+                # Check if signal has an order_id in metadata
+                if 'order_id' not in signal.metadata:
+                    continue
+
+                order_id = signal.metadata['order_id']
+
+                # Find the order in order_manager
+                order = self.order_manager.all_orders.get(order_id)
+
+                if order is None:
+                    logger.warning(f"Order {order_id} referenced in signal not found")
+                    continue
+
+                # Base record with signal data
+                record = {
+                    'timestamp': timestamp,
+                    'signal_type': signal.type.name,
+                    'symbol': signal.symbol,
+                    'signal_strength': signal.strength,
+                }
+
+                # Explode metadata fields as separate columns (excluding order_id)
+                for key, value in signal.metadata.items():
+                    if key != 'order_id':
+                        # Check if value is an object with attributes (not a primitive type)
+                        if self._is_object_to_explode(value):
+                            # Explode object attributes into separate columns
+                            for attr_name, attr_value in self._get_object_attributes(value).items():
+                                # Use dot notation: signal_rsi.period, signal_rsi.rsi, etc.
+                                record[f'signal_{key}.{attr_name}'] = attr_value
+                        else:
+                            # Primitive value - store directly
+                            record[f'signal_{key}'] = value
+
+                # Order identification
+                record['order_id'] = order.order_id
+                record['order_type'] = order.type.name
+                record['order_status'] = order.status.name
+                record['is_bracket_order'] = isinstance(order, BracketOrder)
+
+                # Entry order details
+                record['entry_price'] = order.price
+                record['entry_quantity'] = order.quantity
+                record['entry_cost'] = order.cash
+                record['entry_tx_cost'] = order.tx_cost
+                record['entry_total'] = order.cash + order.tx_cost
+                record['entry_datetime'] = order.executed_datetime if order.executed_datetime else order.placed_datetime
+
+                # Exit order details (if applicable)
+                has_exit = isinstance(order, BracketOrder) and hasattr(order, 'SOLD_ORDER') and order.SOLD_ORDER is not None
+                record['has_exit'] = has_exit
+
+                if has_exit:
+                    sold_order = order.SOLD_ORDER
+                    record['exit_price'] = sold_order.price
+                    record['exit_quantity'] = sold_order.quantity
+                    record['exit_proceeds'] = sold_order.cash
+                    record['exit_tx_cost'] = sold_order.tx_cost
+                    record['exit_total'] = sold_order.cash - sold_order.tx_cost
+                    record['exit_datetime'] = sold_order.executed_datetime
+                    record['exit_type'] = sold_order.type.name
+
+                    # Human-readable exit reason
+                    if sold_order.type == OrderType.STOP_LOSS:
+                        record['exit_reason'] = 'STOP_LOSS'
+                    elif sold_order.type == OrderType.PROFIT_TAKER:
+                        record['exit_reason'] = 'PROFIT_TARGET'
+                    else:
+                        record['exit_reason'] = 'MANUAL'
+
+                    # Calculate P&L metrics
+                    entry_total = order.cash + order.tx_cost
+                    exit_total = sold_order.cash - sold_order.tx_cost
+                    net_pnl = exit_total - entry_total
+                    net_pnl_pct = (net_pnl / entry_total * 100) if entry_total > 0 else 0
+
+                    record['net_pnl'] = net_pnl
+                    record['net_pnl_pct'] = net_pnl_pct
+                    record['is_win'] = net_pnl > 0
+
+                    # Calculate duration
+                    if order.executed_datetime and sold_order.executed_datetime:
+                        duration = sold_order.executed_datetime - order.executed_datetime
+                        record['duration_seconds'] = duration.total_seconds()
+                        record['duration_hours'] = duration.total_seconds() / 3600
+                        record['duration_days'] = duration.total_seconds() / 86400
+
+                        # Extract time-based features for analysis
+                        record['entry_hour'] = order.executed_datetime.hour
+                        record['entry_day_of_week'] = order.executed_datetime.strftime('%A')
+                        record['exit_hour'] = sold_order.executed_datetime.hour
+                        record['exit_day_of_week'] = sold_order.executed_datetime.strftime('%A')
+                    else:
+                        record['duration_seconds'] = None
+                        record['duration_hours'] = None
+                        record['duration_days'] = None
+                        record['entry_hour'] = None
+                        record['entry_day_of_week'] = None
+                        record['exit_hour'] = None
+                        record['exit_day_of_week'] = None
+
+                    # Calculate return metrics for comparison
+                    record['price_change_pct'] = ((sold_order.price - order.price) / order.price * 100) if order.price > 0 else 0
+                    record['total_return'] = exit_total
+
+                    # Risk metrics
+                    if isinstance(order, BracketOrder):
+                        stop_order = order.get_child_order("STOP")
+                        profit_order = order.get_child_order("PROFIT")
+
+                        if stop_order and profit_order:
+                            record['stop_loss_price'] = stop_order.price
+                            record['profit_target_price'] = profit_order.price
+                            record['risk_pct'] = ((order.price - stop_order.price) / order.price * 100) if order.price > 0 else 0
+                            record['reward_pct'] = ((profit_order.price - order.price) / order.price * 100) if order.price > 0 else 0
+                            record['risk_reward_ratio'] = record['reward_pct'] / record['risk_pct'] if record['risk_pct'] != 0 else 0
+                        else:
+                            record['stop_loss_price'] = None
+                            record['profit_target_price'] = None
+                            record['risk_pct'] = None
+                            record['reward_pct'] = None
+                            record['risk_reward_ratio'] = None
+                    else:
+                        record['stop_loss_price'] = None
+                        record['profit_target_price'] = None
+                        record['risk_pct'] = None
+                        record['reward_pct'] = None
+                        record['risk_reward_ratio'] = None
+
+                else:
+                    # No exit yet - populate with None/NaN
+                    record['exit_price'] = None
+                    record['exit_quantity'] = None
+                    record['exit_proceeds'] = None
+                    record['exit_tx_cost'] = None
+                    record['exit_total'] = None
+                    record['exit_datetime'] = None
+                    record['exit_type'] = None
+                    record['exit_reason'] = None
+                    record['net_pnl'] = None
+                    record['net_pnl_pct'] = None
+                    record['is_win'] = None
+                    record['duration_seconds'] = None
+                    record['duration_hours'] = None
+                    record['duration_days'] = None
+                    record['entry_hour'] = None
+                    record['entry_day_of_week'] = None
+                    record['exit_hour'] = None
+                    record['exit_day_of_week'] = None
+                    record['price_change_pct'] = None
+                    record['total_return'] = None
+                    record['stop_loss_price'] = None
+                    record['profit_target_price'] = None
+                    record['risk_pct'] = None
+                    record['reward_pct'] = None
+                    record['risk_reward_ratio'] = None
+
+                records.append(record)
+
+        df = pd.DataFrame(records)
+
+        if not df.empty:
+            logger.info(f"Generated signals-orders DataFrame with {len(df)} rows and {len(df.columns)} columns")
+        else:
+            logger.warning("No signals with order_id found in metadata")
+
+        return df
+
     def log_to_mlflow(
         self,
         experiment_name: Optional[str] = None,
@@ -1373,6 +1837,7 @@ Trading Days:           {self._metrics.trading_days}
         parameters: Optional[Dict[str, Any]] = None,
         log_charts: bool = True,
         log_trades: bool = True,
+        log_signals: bool = True,
         log_report: bool = True,
         chart_dpi: int = 150
     ):
@@ -1387,6 +1852,7 @@ Trading Days:           {self._metrics.trading_days}
             parameters: Strategy/algorithm parameters to log
             log_charts: Whether to log chart visualizations
             log_trades: Whether to log individual trades as JSON
+            log_signals: Whether to log signals history as JSON (default: True)
             log_report: Whether to log text report
             chart_dpi: DPI for chart images
 
@@ -1576,6 +2042,97 @@ Trading Days:           {self._metrics.trading_days}
             if self._metrics.bracket_trades > 0:
                 bracket_analysis = self.analyze_bracket_effectiveness()
                 mlflow.log_json(bracket_analysis, "bracket_analysis.json")
+
+            # Log signals history as JSON if enabled
+            if log_signals and hasattr(self.portfolio, 'signals_history') and self.portfolio.signals_history:
+                logger.debug("Logging signals history...")
+                from utils.utils import serialize_signals_history, serialize_signals_history_flat
+
+                # Convert dict[datetime, list[MarketSignal]] to list[list[MarketSignal]]
+                # Sort by timestamp to maintain chronological order
+                sorted_timestamps = sorted(self.portfolio.signals_history.keys())
+                signals_list = [self.portfolio.signals_history[ts] for ts in sorted_timestamps]
+
+                # Log nested format (preserves tick structure)
+                signals_nested = serialize_signals_history(signals_list)
+                mlflow.log_json(signals_nested, "signals_history.json")
+
+                # Log flat format (easier for pandas analysis)
+                signals_flat = serialize_signals_history_flat(signals_list)
+                mlflow.log_json(signals_flat, "signals_history_flat.json")
+
+                # Calculate signal statistics
+                total_signals = sum(len(signals) for signals in signals_list)
+                buy_signals = sum(1 for signals in signals_list for s in signals if s.type.name == "BUY")
+                sell_signals = sum(1 for signals in signals_list for s in signals if s.type.name == "SELL")
+                avg_strength = sum(s.strength for signals in signals_list for s in signals) / total_signals if total_signals > 0 else 0
+
+                logger.info(f"Logged {total_signals} signals across {len(signals_list)} ticks "
+                           f"({buy_signals} BUY, {sell_signals} SELL, avg strength: {avg_strength:.1f})")
+
+                # Generate and log signals-to-orders report (with error handling)
+                try:
+                    logger.debug("Generating signals-to-orders report...")
+                    signals_orders_report = self.generate_signals_orders_report()
+                    if signals_orders_report and "No signals history" not in signals_orders_report:
+                        mlflow.log_text(signals_orders_report, "signals_to_orders_report.txt")
+                        logger.debug("Signals-to-orders report logged successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to generate signals-to-orders report: {e}")
+                    logger.debug("Continuing without signals-to-orders report", exc_info=True)
+
+                # Generate and log signals-to-orders DataFrame (with error handling)
+                try:
+                    logger.debug("Generating signals-to-orders DataFrame...")
+                    signals_df = self.generate_signals_orders_dataframe()
+                    if not signals_df.empty:
+                        # Save DataFrame as CSV for easy analysis
+                        import tempfile
+                        import os
+
+                        # Create temp directory to ensure proper filenames
+                        temp_dir = tempfile.mkdtemp()
+
+                        # Save CSV with proper filename
+                        csv_path = os.path.join(temp_dir, "signals_orders_dataframe.csv")
+                        signals_df.to_csv(csv_path, index=False)
+                        mlflow.log_artifact(csv_path)
+                        logger.debug(f"Signals-to-orders DataFrame CSV logged ({len(signals_df)} rows, {len(signals_df.columns)} columns)")
+
+                        # Also save as Parquet for efficient storage (if pyarrow available)
+                        try:
+                            parquet_path = os.path.join(temp_dir, "signals_orders_dataframe.parquet")
+                            signals_df.to_parquet(parquet_path, index=False)
+                            mlflow.log_artifact(parquet_path)
+                            logger.debug("Signals-to-orders DataFrame Parquet logged")
+                        except ImportError:
+                            logger.debug("Parquet export skipped (pyarrow not available)")
+                        except Exception as e:
+                            logger.debug(f"Parquet export failed: {e}")
+
+                        # Clean up temp directory
+                        try:
+                            if os.path.exists(csv_path):
+                                os.unlink(csv_path)
+                            # Check if parquet file was created
+                            parquet_path = os.path.join(temp_dir, "signals_orders_dataframe.parquet")
+                            if os.path.exists(parquet_path):
+                                os.unlink(parquet_path)
+                            os.rmdir(temp_dir)
+                        except:
+                            pass  # Best effort cleanup
+
+                        # Log basic statistics about the DataFrame
+                        if 'is_win' in signals_df.columns:
+                            wins = signals_df['is_win'].sum()
+                            total = signals_df['is_win'].notna().sum()
+                            win_rate = (wins / total * 100) if total > 0 else 0
+                            logger.info(f"Signals-orders analysis: {wins}/{total} wins ({win_rate:.1f}% win rate)")
+                    else:
+                        logger.debug("No signal-order correlations found")
+                except Exception as e:
+                    logger.warning(f"Failed to generate signals-to-orders DataFrame: {e}")
+                    logger.debug("Continuing without signals-to-orders DataFrame", exc_info=True)
 
             # Log text report if enabled
             if log_report:
@@ -1797,5 +2354,5 @@ Trading Days:           {self._metrics.trading_days}
             "daily_returns": daily_returns,
             "monthly_returns": monthly_returns,
             "bracket_analysis": bracket_analysis,
-            "report": report
+            "report": report,
         }
