@@ -15,9 +15,9 @@ NOTE: There are two ways to use RSI:
 2. calculate_rsi() from utils.indicators - Returns just the RSI value (wrapper)
 """
 
-from core.algorithm import Algorithm
-from core.classes import MarketSignal, PriceData, SignalType
-from core.ta.analyzer import TechnicalAnalyzer  # Recommended: Use TechnicalAnalyzer directly
+from trading.core.algorithm import Algorithm
+from trading.core.classes import MarketSignal, PriceData, SignalType
+from trading.core.ta import TechnicalAnalyzer  # Recommended: Use TechnicalAnalyzer directly
 from utils.indicators import calculate_rsi, calculate_rsi_series  # Backward compatibility wrappers
 
 
@@ -285,7 +285,7 @@ simulator:
 # Example usage in a script
 if __name__ == "__main__":
     from engines.simulator import Simulator
-    from engines.analysis_engine import AnalysisEngine
+    from trading.engines.analysis_engine import AnalysisEngine
 
     # Create algorithm with custom config
     algo_config = {

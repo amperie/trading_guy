@@ -21,8 +21,9 @@ Runs a complete analysis (similar to `analysis_example.py`) and optionally logs 
 - Optionally saves files locally
 
 **Usage:**
+
 ```python
-from engines.analysis_engine import AnalysisEngine
+from trading.engines.analysis_engine import AnalysisEngine
 
 engine = AnalysisEngine(portfolio, order_manager)
 

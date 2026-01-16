@@ -115,8 +115,8 @@ algorithm = ReadSignalsFromFile(cfg=config)
 ### Basic Usage
 
 ```python
-from algorithms.test_algorithm import ReadSignalsFromFile
-from core.classes import PriceData
+from trading.core.algorithms.test_algorithm import ReadSignalsFromFile
+from trading.core.classes import PriceData
 
 # Configure the algorithm
 config = {
@@ -297,7 +297,7 @@ signals_df = pd.DataFrame({
 signals_df.to_csv('data/ml/UPRO_backtest_signals.csv', index=False)
 
 # Step 3: Run backtest with signals
-from algorithms.test_algorithm import ReadSignalsFromFile
+from trading.core.algorithms.test_algorithm import ReadSignalsFromFile
 from engines.simulator import Simulator
 
 config = {

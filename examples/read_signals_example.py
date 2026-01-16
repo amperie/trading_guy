@@ -25,8 +25,8 @@ The algorithm will:
 4. Generate BUY signal if value >= threshold, SELL otherwise
 """
 
-from algorithms.test_algorithm import ReadSignalsFromFile
-from core.classes import PriceData, SignalType
+from trading.core.algorithms.test_algorithm import ReadSignalsFromFile
+from trading.core.classes import PriceData
 from datetime import datetime
 
 

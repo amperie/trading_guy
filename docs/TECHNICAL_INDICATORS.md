@@ -10,7 +10,7 @@ The `TechnicalAnalyzer` class provides battle-tested implementations of common t
 **Dataclass:** `EMA`
 
 ```python
-from core.ta import TechnicalAnalyzer, EMA
+from trading.core.ta import TechnicalAnalyzer, EMA
 
 ema: EMA = TechnicalAnalyzer.calculate_ema(prices, period=20)
 # Returns: EMA(period=20, ema=105.45)
@@ -33,7 +33,7 @@ ema: EMA = TechnicalAnalyzer.calculate_ema(prices, period=20)
 **Dataclass:** `SMA`
 
 ```python
-from core.ta import TechnicalAnalyzer, SMA
+from trading.core.ta import TechnicalAnalyzer, SMA
 
 sma: SMA = TechnicalAnalyzer.calculate_sma(prices, period=20)
 # Returns: SMA(period=20, sma=104.50)
@@ -58,7 +58,7 @@ sma: SMA = TechnicalAnalyzer.calculate_sma(prices, period=20)
 **Dataclass:** `RSI`
 
 ```python
-from core.ta import TechnicalAnalyzer, RSI
+from trading.core.ta import TechnicalAnalyzer, RSI
 
 rsi: RSI = TechnicalAnalyzer.calculate_rsi(prices, period=14)
 # Returns: RSI(period=14, rsi=65.5, avg_gain=0.5, avg_loss=0.3, rs=1.67)
@@ -81,7 +81,7 @@ rsi: RSI = TechnicalAnalyzer.calculate_rsi(prices, period=14)
 **Dataclass:** `MACD`
 
 ```python
-from core.ta import TechnicalAnalyzer, MACD
+from trading.core.ta import TechnicalAnalyzer, MACD
 
 macd: MACD = TechnicalAnalyzer.calculate_macd(
     prices,
@@ -112,7 +112,7 @@ macd: MACD = TechnicalAnalyzer.calculate_macd(
 **Dataclass:** `BollingerBands`
 
 ```python
-from core.ta import TechnicalAnalyzer, BollingerBands
+from trading.core.ta import TechnicalAnalyzer, BollingerBands
 
 bb: BollingerBands = TechnicalAnalyzer.calculate_bollinger_bands(
     prices,
@@ -144,7 +144,7 @@ bb: BollingerBands = TechnicalAnalyzer.calculate_bollinger_bands(
 **Dataclass:** `Stochastic`
 
 ```python
-from core.ta import TechnicalAnalyzer, Stochastic
+from trading.core.ta import TechnicalAnalyzer, Stochastic
 
 stoch: Stochastic = TechnicalAnalyzer.calculate_stochastic(
     high, low, close,
@@ -172,7 +172,7 @@ stoch: Stochastic = TechnicalAnalyzer.calculate_stochastic(
 **Dataclass:** `ATR`
 
 ```python
-from core.ta import TechnicalAnalyzer, ATR
+from trading.core.ta import TechnicalAnalyzer, ATR
 
 atr: ATR = TechnicalAnalyzer.calculate_atr(high, low, close, period=14)
 # Returns: ATR(period=14, atr=2.5)
@@ -193,7 +193,7 @@ atr: ATR = TechnicalAnalyzer.calculate_atr(high, low, close, period=14)
 **Dataclass:** `ADX`
 
 ```python
-from core.ta import TechnicalAnalyzer, ADX
+from trading.core.ta import TechnicalAnalyzer, ADX
 
 adx: ADX = TechnicalAnalyzer.calculate_adx(high, low, close, period=14)
 # Returns: ADX(adx=35.5, plus_di=28.5, minus_di=12.3, ...)
@@ -217,7 +217,7 @@ adx: ADX = TechnicalAnalyzer.calculate_adx(high, low, close, period=14)
 **Dataclass:** `CCI`
 
 ```python
-from core.ta import TechnicalAnalyzer, CCI
+from trading.core.ta import TechnicalAnalyzer, CCI
 
 cci: CCI = TechnicalAnalyzer.calculate_cci(high, low, close, period=14)
 # Returns: CCI(period=14, cci=125.5)
@@ -239,7 +239,7 @@ cci: CCI = TechnicalAnalyzer.calculate_cci(high, low, close, period=14)
 **Dataclass:** `WilliamsR`
 
 ```python
-from core.ta import TechnicalAnalyzer, WilliamsR
+from trading.core.ta import TechnicalAnalyzer, WilliamsR
 
 willr: WilliamsR = TechnicalAnalyzer.calculate_willr(high, low, close, period=14)
 # Returns: WilliamsR(period=14, willr=-25.5)
@@ -262,7 +262,7 @@ willr: WilliamsR = TechnicalAnalyzer.calculate_willr(high, low, close, period=14
 
 ```python
 from collections import deque
-from core.ta import TechnicalAnalyzer
+from trading.core.ta import TechnicalAnalyzer
 
 # Price data
 prices = deque([100.0, 101.5, 102.0, ...])
@@ -295,7 +295,8 @@ if bb:
 
 ```python
 from collections import deque
-from core.ta import TechnicalAnalyzer
+from trading.core.ta import TechnicalAnalyzer
+
 
 def moving_average_crossover(prices, history_prices=None):
     """
@@ -331,6 +332,7 @@ def moving_average_crossover(prices, history_prices=None):
     else:
         return "HOLD_BEARISH"  # Downtrend
 
+
 # Example with EMA crossover (more responsive)
 def ema_crossover(prices, history_prices=None):
     """
@@ -364,8 +366,9 @@ def ema_crossover(prices, history_prices=None):
 ### Algorithm Usage
 
 ```python
-from core.algorithm import Algorithm
-from core.ta import TechnicalAnalyzer
+from trading.core.algorithm import Algorithm
+from trading.core.ta import TechnicalAnalyzer
+
 
 class MyStrategy(Algorithm):
     def on_data_logic(self, data):

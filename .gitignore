@@ -214,3 +214,9 @@ __marimo__/
 # Large data files (>100MB - GitHub file size limit)
 data/*_1min.csv
 data/*_5min.csv
+data/dr_signals_*.csv
+data/ml/*_ml_*.csv
+data/ml/dataset.csv
+
+# Claude Code temporary files
+tmpclaude-*

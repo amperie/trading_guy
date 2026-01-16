@@ -5,12 +5,11 @@ Tests trade extraction, metrics calculation, and returns analysis
 import pytest
 from datetime import datetime
 import pandas as pd
-import numpy as np
 
-from engines.analysis_engine import AnalysisEngine, Trade, PerformanceMetrics
-from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from core.om.backtesting_om import BacktestingOM
-from core.classes import PriceData, MarketSignal, SignalType, OrderType, OrderAction
+from trading.engines.analysis_engine import AnalysisEngine, Trade, PerformanceMetrics
+from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
+from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.classes import PriceData, MarketSignal, SignalType, OrderType, OrderAction
 
 
 class TestAnalysisEngine:
@@ -224,7 +223,7 @@ class TestAnalysisEngine:
 
     def test_trade_dataclass(self):
         """Test Trade dataclass structure"""
-        from core.classes import Order, OrderAction
+        from trading.core.classes import Order, OrderAction
 
         entry = Order.create_market_order(
             "AAPL", OrderAction.BUY, 10, 1.0,

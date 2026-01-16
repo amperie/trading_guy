@@ -66,10 +66,11 @@ All exceptions in `core/exceptions.py`.
 **Strategy**: Raise early, fail fast for fatal errors. Allow graceful degradation for missing data.
 
 ```python
-from core.exceptions import DataProviderError, MissingDataError, wrap_exception
+from trading.core.exceptions import DataProviderError, MissingDataError, wrap_exception
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
 
 class TestDataProvider(DataProvider):
     def load_data(self):
@@ -138,10 +139,11 @@ class TestDataProvider(DataProvider):
 **Strategy**: Handle errors gracefully, return empty signals on failure. Never crash the backtest.
 
 ```python
-from core.exceptions import AlgorithmError, IndicatorCalculationError
+from trading.core.exceptions import AlgorithmError, IndicatorCalculationError
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
 
 class MyAlgorithm(Algorithm):
     def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
@@ -217,10 +219,11 @@ class MyAlgorithm(Algorithm):
 **Strategy**: Validate before acting, revert on error, maintain consistency.
 
 ```python
-from core.exceptions import PortfolioError, InsufficientFundsError, PositionError
+from trading.core.exceptions import PortfolioError, InsufficientFundsError, PositionError
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
 
 class Portfolio:
     def process_tick_market_signals(self, signals, tick):
@@ -309,10 +312,11 @@ class Portfolio:
 **Strategy**: Validate orders strictly, reject invalid orders gracefully.
 
 ```python
-from core.exceptions import InvalidOrderError, OrderRejectedError
+from trading.core.exceptions import InvalidOrderError, OrderRejectedError
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
 
 class BacktestingOM(OrderManager):
     def submit_order(self, order, tick, positions, pf_cash):
@@ -378,10 +382,11 @@ class BacktestingOM(OrderManager):
 **Strategy**: Catch everything at top level, decide whether to continue or stop.
 
 ```python
-from core.exceptions import TradingException, ConfigurationError
+from trading.core.exceptions import TradingException, ConfigurationError
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
 
 class Simulator:
     def run(self):

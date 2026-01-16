@@ -58,7 +58,7 @@ Hover over any point to see:
 ### Basic Usage
 
 ```python
-from engines.analysis_engine import AnalysisEngine
+from trading.engines.analysis_engine import AnalysisEngine
 
 # After running your backtest
 engine = AnalysisEngine(portfolio, order_manager)

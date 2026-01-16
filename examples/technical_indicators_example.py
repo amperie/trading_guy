@@ -15,7 +15,7 @@ All indicators return dataclasses with complete information.
 """
 
 from collections import deque
-from core.ta import (
+from trading.core.ta import (
     TechnicalAnalyzer,
     MACD,
     RSI,

@@ -3,7 +3,7 @@ from typing import Any, Union
 
 import pandas as pd
 
-from core.classes import PriceData, MarketSignal
+from trading.core.classes import PriceData, MarketSignal
 
 
 def instantiate_from_string(full_path: str, *args, **kwargs) -> Any:
@@ -248,7 +248,6 @@ def serialize_market_signal(signal: MarketSignal) -> dict:
         >>> data = serialize_market_signal(signal)
         >>> # {'type': 'BUY', 'symbol': 'AAPL', 'strength': 75, 'metadata': {'reason': 'crossover'}}
     """
-    from core.classes import SignalType
     from datetime import datetime
 
     # Deep copy metadata and convert datetime objects to ISO strings
@@ -282,7 +281,7 @@ def deserialize_market_signal(data: dict) -> MarketSignal:
         >>> signal = deserialize_market_signal(data)
         >>> # MarketSignal(type=SignalType.BUY, symbol='AAPL', strength=75, metadata={'reason': 'crossover'})
     """
-    from core.classes import SignalType
+    from trading.core.classes import SignalType
     from datetime import datetime
 
     # Reconstruct metadata, converting ISO strings back to datetime

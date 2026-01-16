@@ -1,0 +1,225 @@
+from pathlib import Path
+
+from trading.core.algorithms.test_algorithm import ReadSignalsFromFile
+from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
+from trading.data_providers.test_data_provider import TestDataProvider
+from trading.engines.backtest_engine import BacktestingEngine
+from trading.engines.analysis_engine import AnalysisEngine
+from utils.logger import Logger
+import ray
+from ray import tune
+from ray.tune.search.optuna import OptunaSearch
+
+logger = Logger().get_logger(__name__)
+
+
+def create_multiple_backtests() -> list[dict]:
+
+    # Parameters to test
+    tickers = ["GDXU", "SPXU", "UPRO"]
+    periods = [
+        {"macd_fastperiod": 12 * mult, "macd_slowperiod": 26 * mult, "macd_signalperiod": 9 * mult, "rsi_period": 14 * mult}
+        for mult in [30, 35, 40, 45, 50]]
+    profit_capture = [(10, 5), (10, 10), (15, 5), (5, 15), (5, 20), (5, 10), (5, 5)]
+    ex = "Backtesting"
+
+    project_root = Path(__file__).parent.parent
+
+    ret_val = []
+
+    for ticker in tickers:
+        for period in periods:
+            for pc in profit_capture:
+
+                backtest_cfg = {
+                    "symbol": ticker, "run_name": f"{ticker}_MACD_RSI", "experiment_name": ex,
+                    "starting_cash": 1000.0, "description": f"{ticker}_MACD_RSI"}
+
+                alg_cfg = {
+                    "macd_fastperiod": period["macd_fastperiod"],
+                    "macd_slowperiod": period["macd_slowperiod"],
+                    "macd_signalperiod": period["macd_signalperiod"],
+                    "rsi_period": period["rsi_period"],
+                    "extra_history_period": 1000
+                }
+
+                pf_cfg = {
+                    "symbol": ticker,
+                    "stop_pct": pc[0],
+                    "profit_pct": pc[1]
+                }
+
+                data_path = str(project_root / "data" / f"{ticker}_5min.csv")
+                dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
+                cfg = {
+                    "backtest_cfg": backtest_cfg,
+                    "alg_cfg": alg_cfg,
+                    "pf_cfg": pf_cfg,
+                    "dp_cfg": dp_cfg
+                }
+                ret_val.append(cfg)
+    return ret_val
+
+@ray.remote
+def run_backtest(backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: dict):
+    # Run a backtest using the simulator
+    experiment_name = backtest_cfg['experiment_name']
+    symbol = backtest_cfg['symbol']
+    starting_cash = backtest_cfg['starting_cash']
+    run_name = backtest_cfg['run_name']
+    desc = backtest_cfg['description']
+    params = backtest_cfg | alg_cfg | pf_cfg | dp_cfg
+
+    print(f"Running backtest for {backtest_cfg}")
+    project_root = Path(__file__).parent.parent
+    data_path = str(project_root / "data" / f"{symbol}_5min.csv")
+    om = BacktestingOM()
+
+    al = ReadSignalsFromFile(alg_cfg)
+    dp = TestDataProvider(dp_cfg)
+    pf = SingleSymbolPortfolio(pf_cfg, om, starting_cash, {}, True)
+    sim = BacktestingEngine({}, dp, al, om, pf)
+    sim.run()
+
+    # Create the analysis engine
+    print(f"\nAnalyzing results for run {run_name}")
+    engine = AnalysisEngine(sim.pf, pf.om)
+
+    results = engine.run_full_analysis(
+        experiment_name=experiment_name,
+        run_name=run_name,
+        description=desc,
+        parameters=params,
+        log_to_mlflow=True,
+        save_charts_locally=False,
+        save_report_locally=False
+    )
+
+def run_parallel_backtests():
+    bts = create_multiple_backtests()
+    logger.info(f"Submitting {len(bts)} backtests to Ray")
+    futures = []
+    ray.init(ignore_reinit_error=True)
+
+    for bt in bts:
+        logger.info(f"Submitting backtests to Ray: {bt}")
+
+        btc = bt['backtest_cfg']
+        alc = bt['alg_cfg']
+        pfc = bt['pf_cfg']
+        dpc = bt['dp_cfg']
+        futures.append(run_backtest.remote(btc, alc, pfc, dpc))
+
+        logger.info("Waiting for all jobs to complete...")
+
+        # Wait for all jobs to finish
+        ray.get(futures)
+
+        logger.info("All jobs completed!")
+
+def backtest_objective_fn(config: dict, symbol: str) -> dict:
+
+    project_root = Path(__file__).parent.parent
+    data_path = str(project_root / "data" / f"{symbol}_5min.csv")
+    dp_cfg = {
+        "path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider",
+        "truncate": 10000000
+    }
+    backtest_cfg = {
+        "symbol": symbol,"run_name": f"{symbol}_HPO", "description": "Backtest", "starting_cash": 1000.0,
+        "experiment_name": "Hyperparameter Optimization Runs"
+    }
+    alg_cfg = {
+        "macd_fastperiod": int(config["macd_fastperiod"]),
+        "macd_slowperiod": int(config["macd_slowperiod"]),
+        "macd_signalperiod": int(config["macd_signalperiod"]),
+        "rsi_period": int(config["rsi_period"]),
+        "extra_history_period": int(config["extra_history_period"])
+    }
+    pf_cfg = {
+        "symbol": symbol,
+        "stop_pct": int(config["stop_pct"]),
+        "profit_pct": int(config["profit_pct"])
+    }
+    result = run_backtest_local(backtest_cfg, alg_cfg, pf_cfg, dp_cfg)
+    return {"_metric": result['metrics'].annualized_return * -1}
+
+def run_backtest_local(backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: dict):
+    # Run a backtest using the simulator
+    experiment_name = backtest_cfg['experiment_name']
+    symbol = backtest_cfg['symbol']
+    starting_cash = backtest_cfg['starting_cash']
+    run_name = backtest_cfg['run_name']
+    desc = backtest_cfg['description']
+    params = backtest_cfg | alg_cfg | pf_cfg | dp_cfg
+
+    print(f"Running backtest for {backtest_cfg}")
+    project_root = Path(__file__).parent.parent
+    data_path = str(project_root / "data" / f"{symbol}_5min.csv")
+    om = BacktestingOM()
+
+    al = MacdRsiAlgorithm(alg_cfg)
+    dp = TestDataProvider(dp_cfg)
+    pf = SingleSymbolPortfolio(pf_cfg, om, starting_cash, {}, True)
+    sim = BacktestingEngine({}, dp, al, om, pf)
+    sim.run()
+
+    # Create the analysis engine
+    print(f"\nAnalyzing results for run {run_name}")
+    engine = AnalysisEngine(sim.pf, pf.om)
+
+    results = engine.run_full_analysis(
+        experiment_name=experiment_name,
+        run_name=run_name,
+        description=desc,
+        parameters=params,
+        log_to_mlflow=True,
+        save_charts_locally=False,
+        save_report_locally=False
+    )
+    return results
+
+def tune_backtest_hyperparameters():
+
+    # Initialize Ray with dashboard accessible remotely
+    ray.init(
+        ignore_reinit_error=True,
+        dashboard_host="0.0.0.0",  # Bind to all network interfaces
+        dashboard_port=8265,        # Default dashboard port
+    )
+    # Bind additional parameters
+    trainable_with_params = tune.with_parameters(
+        backtest_objective_fn,
+        symbol="SPXU"
+    )
+
+    search_space = {
+        "macd_fastperiod": tune.uniform(400, 2000),
+        "macd_slowperiod": tune.uniform(1000, 5000),
+        "macd_signalperiod": tune.uniform(100, 2000),
+        "rsi_period": tune.uniform(10, 2000),
+        "stop_pct": tune.uniform(1, 25),
+        "profit_pct": tune.uniform(1, 25),
+        "extra_history_period": tune.uniform(1000, 20000),
+    }
+
+    # Configure Bayesian Optimization with Optuna
+    optuna_search = OptunaSearch(
+        metric="_metric",
+        mode="min",
+    )
+
+    tuner = tune.Tuner(
+        trainable_with_params,
+        param_space=search_space,
+        tune_config=tune.TuneConfig(
+            metric="_metric",
+            mode="min",
+            num_samples=50,
+            max_concurrent_trials=8,
+            search_alg=optuna_search,  # Use Bayesian optimization
+        )
+    )
+    results = tuner.fit()
+    print(results.get_best_result(metric="_metric", mode="min").config)

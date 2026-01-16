@@ -2,13 +2,12 @@
 Test suite for bracket order status progression through BacktestingOM
 Tests: stop-loss trigger, profit-taker trigger, and manual sale
 """
-import pytest
 from datetime import datetime
-from core.classes import (
-    Order, PriceData, OrderStatus, OrderType,
-    OrderAction, BracketOrder, Position
+from trading.core.classes import (
+    PriceData, OrderStatus, OrderType,
+    OrderAction, BracketOrder
 )
-from core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOM
 
 
 class TestBracketOrderStatusProgression:
@@ -212,7 +211,7 @@ class TestBracketOrderStatusProgression:
         bracket_order = om.submit_order(bracket_order, tick_initial, positions, pf_cash)
 
         # After bracket order fills, add the position
-        from core.classes import Position
+        from trading.core.classes import Position
         positions[symbol] = Position(symbol, 15)
 
         # Verify initial state

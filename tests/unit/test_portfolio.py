@@ -2,14 +2,12 @@
 Comprehensive test suite for Portfolio class functionality
 Tests market orders, bracket orders, history tracking, and portfolio state management
 """
-import pytest
 from datetime import datetime
-from core.classes import (
-    Order, PriceData, OrderStatus, OrderType,
-    OrderAction, BracketOrder, Position, MarketSignal, SignalType
+from trading.core.classes import (
+    PriceData, OrderStatus, OrderAction, MarketSignal, SignalType
 )
-from core.om.backtesting_om import BacktestingOM
-from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
+from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 
 
 class TestPortfolioMarketOrders:

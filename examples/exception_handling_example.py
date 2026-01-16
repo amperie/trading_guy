@@ -11,8 +11,7 @@ from collections import deque
 from datetime import datetime
 from typing import Optional
 
-from core.exceptions import (
-    TradingException,
+from trading.core.exceptions import (
     ConfigurationError,
     DataProviderError,
     InvalidDataError,
@@ -21,8 +20,8 @@ from core.exceptions import (
     InsufficientFundsError,
     wrap_exception
 )
-from core.classes import PriceData, MarketSignal, SignalType
-from core.algorithm import Algorithm
+from trading.core.classes import PriceData, MarketSignal, SignalType
+from trading.core.algorithm import Algorithm
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)

@@ -2,18 +2,17 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-from core.classes import OrderType, OrderStatus, OrderAction, Order, PriceData, BracketOrder, Position, MarketSignal, \
+from trading.core.classes import OrderType, OrderAction, Order, PriceData, BracketOrder, Position, MarketSignal, \
     SignalType
 
 # For Jupyter notebooks, use current working directory
 project_root = Path.cwd()
 sys.path.insert(0, str(project_root))
 
-from engines.backtest_engine import BacktestingEngine
-from core.om.backtesting_om import BacktestingOM
-from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from algorithms.test_algorithm import TestAlgorithm
-from data_providers.test_data_provider import TestDataProvider
+from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
+from trading.core.algorithms.test_algorithm import TestAlgorithm
+from trading.data_providers.test_data_provider import TestDataProvider
 
 
 project_root = Path.cwd()

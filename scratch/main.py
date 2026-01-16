@@ -2,15 +2,15 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-from core.classes import OrderType, OrderStatus, OrderAction, Order, PriceData
+from trading.core.classes import OrderType, OrderAction, Order, PriceData
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from engines.backtest_engine import BacktestingEngine
-from core.om.backtesting_om import BacktestingOM
-from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from algorithms.test_algorithm import TestAlgorithm
-from data_providers.test_data_provider import TestDataProvider
+from trading.engines.backtest_engine import BacktestingEngine
+from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
+from trading.core.algorithms.test_algorithm import TestAlgorithm
+from trading.data_providers.test_data_provider import TestDataProvider
 
 def test_simulator():
     # Get absolute path to data file relative to project root
@@ -47,7 +47,7 @@ def test_om():
     pass
 
 def test_indicators():
-    from core.ta.analyzer import TechnicalAnalyzer
+    from trading.core.ta import TechnicalAnalyzer
 
     data = [
         1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 12.0,

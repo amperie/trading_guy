@@ -6,12 +6,12 @@ with zoomable timeline, clickable legend, and detailed hover information.
 """
 from pathlib import Path
 
-from algorithms.test_algorithm import TestAlgorithm
-from core.om.backtesting_om import BacktestingOM
-from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from data_providers.test_data_provider import TestDataProvider
-from engines.backtest_engine import BacktestingEngine
-from engines.analysis_engine import AnalysisEngine
+from trading.core.algorithms.test_algorithm import TestAlgorithm
+from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
+from trading.data_providers.test_data_provider import TestDataProvider
+from trading.engines.backtest_engine import BacktestingEngine
+from trading.engines.analysis_engine import AnalysisEngine
 
 
 def main():

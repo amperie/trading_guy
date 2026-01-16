@@ -101,7 +101,7 @@ Each component is designed to be swappable via configuration, enabling easy test
   - `run_full_analysis(log_to_mlflow=True, experiment_name, ...)` → Run complete analysis and optionally log to MLflow with custom experiment (includes interactive chart, signals history, signals-to-orders report, and DataFrame)
 - **Example Usage:**
   ```python
-  from engines.analysis_engine import AnalysisEngine
+  from trading.engines.analysis_engine import AnalysisEngine
 
   # Option 1: Manual analysis steps
   engine = AnalysisEngine(portfolio, order_manager)
@@ -190,7 +190,7 @@ Each component is designed to be swappable via configuration, enabling easy test
 - **Example Usage:**
   ```python
   from utils.mlflow_client import MLflowClient
-  from engines.analysis_engine import AnalysisEngine
+  from trading.engines.analysis_engine import AnalysisEngine
 
   # Create client from config
   mlflow = MLflowClient.from_config()
@@ -454,9 +454,11 @@ simulator:
 ### Usage Examples
 
 **Creating a Simple Trading Algorithm:**
+
 ```python
-from core.algorithm import Algorithm
-from core.classes import MarketSignal, PriceData, SignalType
+from trading.core.algorithm import Algorithm
+from trading.core.classes import MarketSignal, PriceData, SignalType
+
 
 class MyAlgorithm(Algorithm):
     """Simple moving average crossover strategy"""
@@ -493,7 +495,7 @@ class MyAlgorithm(Algorithm):
 
 ```python
 from engines.simulator import Simulator
-from core.pf.single_symbol_portfolio import SingleSymbolPortfolio
+from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from core.om.backtesting_om_old import BacktestingOM
 
 # Option 1: Use config.yaml settings
@@ -529,9 +531,11 @@ print(f"Positions: {pf.positions}")
 ```
 
 **Creating a Custom Portfolio Strategy:**
+
 ```python
-from core.portfolio import Portfolio
-from core.classes import Order, MarketSignal, PriceData, SignalType
+from trading.core.portfolio import Portfolio
+from trading.core.classes import Order, MarketSignal, PriceData, SignalType
+
 
 class RiskManagedPortfolio(Portfolio):
     """Portfolio with position sizing based on signal strength"""
@@ -558,14 +562,15 @@ class RiskManagedPortfolio(Portfolio):
 ```
 
 **Using Bracket Orders:**
+
 ```python
-from core.classes import Order
+from trading.core.classes import Order
 
 # Create bracket order: buy at $100, stop-loss at $95, take-profit at $110
 orders = Order.create_bracket_order(
     symbol="AAPL",
     price=100.0,
-    low_sell_price=95.0,   # Stop-loss
+    low_sell_price=95.0,  # Stop-loss
     high_sell_price=110.0,  # Take-profit
     quantity=100,
     tx_cost=1.0
