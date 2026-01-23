@@ -49,12 +49,25 @@ class DataProvider(ABC):
         tmp_data = self.data.set_index(['symbol',"timestamp"])
         # Get the range of date times to iterate through
         dts = self.data['timestamp'].unique()
-        sdts = sorted(
-            dts, key=lambda x: datetime.strptime(x, '%Y-%m-%d %H:%M:%S%z'))
+
+        # Handle both string and Timestamp types
+        def parse_timestamp(ts):
+            """Convert timestamp to datetime for sorting"""
+            if isinstance(ts, pd.Timestamp):
+                return ts.to_pydatetime()
+            elif isinstance(ts, str):
+                return datetime.strptime(ts, '%Y-%m-%d %H:%M:%S%z')
+            else:
+                # Already a datetime
+                return ts
+
+        sdts = sorted(dts, key=parse_timestamp)
+
         # Iterate through all the timestamps in the data
         for ts in sdts:
-            # TODO: fix all these conversions back and forth
-            pt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S%z')
+            # Convert to datetime for PriceData
+            pt = parse_timestamp(ts)
+
             # Get the data for the timestamp in a dict
             ts_data = (tmp_data.xs(
                         ts, level='timestamp')

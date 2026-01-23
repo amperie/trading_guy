@@ -1828,6 +1828,310 @@ Trading Days:           {self._metrics.trading_days}
 
         return df
 
+    def extract_all_orders(self) -> Dict[str, list[Order]]:
+        """
+        Extract ALL orders from order_manager including filled, pending, cancelled,
+        and child orders from bracket orders.
+
+        Returns:
+            Dictionary with keys:
+                - 'all_orders': All orders (flat list)
+                - 'filled_orders': Orders with FILLED status
+                - 'pending_orders': Orders with PENDING status
+                - 'cancelled_orders': Orders with CANCELED status
+                - 'bracket_parents': Parent orders from bracket orders
+                - 'bracket_children': Child orders from bracket orders (STOP, PROFIT, MANUAL)
+        """
+        all_orders = []
+        filled_orders = []
+        pending_orders = []
+        cancelled_orders = []
+        bracket_parents = []
+        bracket_children = []
+
+        # Iterate through all orders in order_manager
+        for order_id, order in self.order_manager.all_orders.items():
+            all_orders.append(order)
+
+            # Categorize by status
+            if order.status == OrderStatus.FILLED:
+                filled_orders.append(order)
+            elif order.status == OrderStatus.PENDING or order.status == OrderStatus.PENDING_SALE:
+                pending_orders.append(order)
+            elif order.status == OrderStatus.CANCELED:
+                cancelled_orders.append(order)
+
+            # Check if it's a bracket order parent
+            if isinstance(order, BracketOrder):
+                bracket_parents.append(order)
+
+                # Extract child orders
+                if hasattr(order, 'child_orders') and order.child_orders:
+                    for child_name in order.child_orders:
+                        child_order = order.get_child_order(child_name)
+                        if child_order:
+                            bracket_children.append(child_order)
+                            all_orders.append(child_order)
+
+                            # Categorize child by status
+                            if child_order.status == OrderStatus.FILLED:
+                                filled_orders.append(child_order)
+                            elif child_order.status == OrderStatus.PENDING or child_order.status == OrderStatus.PENDING_SALE:
+                                pending_orders.append(child_order)
+                            elif child_order.status == OrderStatus.CANCELED:
+                                cancelled_orders.append(child_order)
+
+        return {
+            'all_orders': all_orders,
+            'filled_orders': filled_orders,
+            'pending_orders': pending_orders,
+            'cancelled_orders': cancelled_orders,
+            'bracket_parents': bracket_parents,
+            'bracket_children': bracket_children,
+        }
+
+    def generate_all_orders_report(self) -> str:
+        """
+        Generate comprehensive text report showing ALL orders executed,
+        including filled, pending, and cancelled orders.
+
+        Organizes bracket orders by parent-child relationships and standalone orders separately.
+
+        Returns:
+            Formatted text report string
+        """
+        orders_dict = self.extract_all_orders()
+
+        all_orders = orders_dict['all_orders']
+        filled_orders = orders_dict['filled_orders']
+        pending_orders = orders_dict['pending_orders']
+        cancelled_orders = orders_dict['cancelled_orders']
+        bracket_parents = orders_dict['bracket_parents']
+        bracket_children = orders_dict['bracket_children']
+
+        lines = []
+        lines.append("=" * 100)
+        lines.append("COMPREHENSIVE ORDERS REPORT - ALL ORDERS")
+        lines.append("=" * 100)
+        lines.append("")
+
+        # Summary statistics
+        lines.append("SUMMARY")
+        lines.append("-" * 100)
+        lines.append(f"Total Orders:           {len(all_orders)}")
+        lines.append(f"  Filled:               {len(filled_orders)}")
+        lines.append(f"  Pending:              {len(pending_orders)}")
+        lines.append(f"  Cancelled:            {len(cancelled_orders)}")
+        lines.append(f"Bracket Parents:        {len(bracket_parents)}")
+        lines.append(f"Bracket Children:       {len(bracket_children)}")
+        lines.append(f"Standalone Orders:      {len(all_orders) - len(bracket_parents) - len(bracket_children)}")
+        lines.append("")
+
+        # Bracket Orders Section
+        if bracket_parents:
+            lines.append("=" * 100)
+            lines.append("BRACKET ORDERS (Parent + Children)")
+            lines.append("=" * 100)
+            lines.append("")
+
+            for parent in bracket_parents:
+                lines.append("-" * 100)
+                lines.append(f"PARENT ORDER: {parent.order_id}")
+                lines.append(f"  Symbol:           {parent.symbol}")
+                lines.append(f"  Type:             {parent.type.name}")
+                lines.append(f"  Status:           {parent.status.name}")
+                lines.append(f"  Action:           {parent.action.name}")
+                lines.append(f"  Quantity:         {parent.quantity}")
+                lines.append(f"  Price:            ${parent.price:.2f}")
+                lines.append(f"  Cash:             ${parent.cash:.2f}")
+                lines.append(f"  Tx Cost:          ${parent.tx_cost:.2f}")
+                lines.append(f"  Placed:           {parent.placed_datetime}")
+                if parent.executed_datetime:
+                    lines.append(f"  Executed:         {parent.executed_datetime}")
+
+                # Child orders
+                if hasattr(parent, 'child_orders') and parent.child_orders:
+                    lines.append("")
+                    lines.append("  CHILD ORDERS:")
+                    for child_name in parent.child_orders:
+                        child_order = parent.get_child_order(child_name)
+                        if child_order:
+                            lines.append(f"    {child_name}:")
+                            lines.append(f"      Order ID:       {child_order.order_id}")
+                            lines.append(f"      Type:           {child_order.type.name}")
+                            lines.append(f"      Status:         {child_order.status.name}")
+                            lines.append(f"      Action:         {child_order.action.name}")
+                            lines.append(f"      Quantity:       {child_order.quantity}")
+                            lines.append(f"      Price:          ${child_order.price:.2f}")
+                            lines.append(f"      Placed:         {child_order.placed_datetime}")
+                            if child_order.executed_datetime:
+                                lines.append(f"      Executed:       {child_order.executed_datetime}")
+
+                # Show which child was sold
+                if hasattr(parent, 'SOLD_ORDER') and parent.SOLD_ORDER:
+                    lines.append("")
+                    lines.append(f"  SOLD VIA:         {parent.SOLD_ORDER.type.name}")
+
+                lines.append("")
+
+        # Standalone Orders Section
+        standalone_orders = [o for o in all_orders
+                             if not isinstance(o, BracketOrder)
+                             and not hasattr(o, 'parent_id')]
+
+        if standalone_orders:
+            lines.append("=" * 100)
+            lines.append("STANDALONE ORDERS")
+            lines.append("=" * 100)
+            lines.append("")
+
+            for order in standalone_orders:
+                lines.append("-" * 100)
+                lines.append(f"ORDER: {order.order_id}")
+                lines.append(f"  Symbol:           {order.symbol}")
+                lines.append(f"  Type:             {order.type.name}")
+                lines.append(f"  Status:           {order.status.name}")
+                lines.append(f"  Action:           {order.action.name}")
+                lines.append(f"  Quantity:         {order.quantity}")
+                lines.append(f"  Price:            ${order.price:.2f}")
+                lines.append(f"  Cash:             ${order.cash:.2f}")
+                lines.append(f"  Tx Cost:          ${order.tx_cost:.2f}")
+                lines.append(f"  Placed:           {order.placed_datetime}")
+                if order.executed_datetime:
+                    lines.append(f"  Executed:         {order.executed_datetime}")
+                lines.append("")
+
+        lines.append("=" * 100)
+        lines.append("END OF COMPREHENSIVE ORDERS REPORT")
+        lines.append("=" * 100)
+
+        return "\n".join(lines)
+
+    def plot_orders_timeline(self, show: bool = False, save_path: Optional[str] = None):
+        """
+        Create timeline visualization showing ALL orders (filled, pending, cancelled)
+        plotted at their execution prices.
+
+        Args:
+            show: Whether to display the plot
+            save_path: Path to save the plot (optional)
+
+        Returns:
+            matplotlib figure object
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+
+        orders_dict = self.extract_all_orders()
+        all_orders = orders_dict['all_orders']
+
+        if not all_orders:
+            logger.warning("No orders to plot")
+            return None
+
+        fig, ax = plt.subplots(figsize=(16, 8))
+
+        # Prepare data - categorize by action and status
+        buy_filled = {'x': [], 'y': [], 'labels': [], 'symbols': []}
+        sell_filled = {'x': [], 'y': [], 'labels': [], 'symbols': []}
+        buy_pending = {'x': [], 'y': [], 'labels': [], 'symbols': []}
+        sell_pending = {'x': [], 'y': [], 'labels': [], 'symbols': []}
+        buy_cancelled = {'x': [], 'y': [], 'labels': [], 'symbols': []}
+        sell_cancelled = {'x': [], 'y': [], 'labels': [], 'symbols': []}
+
+        for order in all_orders:
+            # Use executed datetime if available, else placed datetime
+            order_time = order.executed_datetime if order.executed_datetime else order.placed_datetime
+            # Y-axis is now the execution price
+            price = order.price
+
+            label = f"{order.symbol} {order.action.name} {order.quantity}@${order.price:.2f} ({order.status.name})"
+
+            # Categorize by status and action
+            if order.status == OrderStatus.FILLED:
+                if order.action == OrderAction.BUY:
+                    buy_filled['x'].append(order_time)
+                    buy_filled['y'].append(price)
+                    buy_filled['labels'].append(label)
+                    buy_filled['symbols'].append(order.symbol)
+                else:
+                    sell_filled['x'].append(order_time)
+                    sell_filled['y'].append(price)
+                    sell_filled['labels'].append(label)
+                    sell_filled['symbols'].append(order.symbol)
+            elif order.status in [OrderStatus.PENDING, OrderStatus.PENDING_SALE]:
+                if order.action == OrderAction.BUY:
+                    buy_pending['x'].append(order_time)
+                    buy_pending['y'].append(price)
+                    buy_pending['labels'].append(label)
+                    buy_pending['symbols'].append(order.symbol)
+                else:
+                    sell_pending['x'].append(order_time)
+                    sell_pending['y'].append(price)
+                    sell_pending['labels'].append(label)
+                    sell_pending['symbols'].append(order.symbol)
+            elif order.status == OrderStatus.CANCELED:
+                if order.action == OrderAction.BUY:
+                    buy_cancelled['x'].append(order_time)
+                    buy_cancelled['y'].append(price)
+                    buy_cancelled['labels'].append(label)
+                    buy_cancelled['symbols'].append(order.symbol)
+                else:
+                    sell_cancelled['x'].append(order_time)
+                    sell_cancelled['y'].append(price)
+                    sell_cancelled['labels'].append(label)
+                    sell_cancelled['symbols'].append(order.symbol)
+
+        # Plot each category with distinct colors
+        if buy_filled['x']:
+            ax.scatter(buy_filled['x'], buy_filled['y'], c='green', marker='^',
+                       s=120, alpha=0.8, label='BUY - Filled', edgecolors='black', linewidths=1.5)
+
+        if sell_filled['x']:
+            ax.scatter(sell_filled['x'], sell_filled['y'], c='red', marker='v',
+                       s=120, alpha=0.8, label='SELL - Filled', edgecolors='black', linewidths=1.5)
+
+        if buy_pending['x']:
+            ax.scatter(buy_pending['x'], buy_pending['y'], c='blue', marker='^',
+                       s=120, alpha=0.7, label='BUY - Pending', edgecolors='black', linewidths=1.5)
+
+        if sell_pending['x']:
+            ax.scatter(sell_pending['x'], sell_pending['y'], c='orange', marker='v',
+                       s=120, alpha=0.7, label='SELL - Pending', edgecolors='black', linewidths=1.5)
+
+        if buy_cancelled['x']:
+            ax.scatter(buy_cancelled['x'], buy_cancelled['y'], c='lightgray', marker='^',
+                       s=100, alpha=0.5, label='BUY - Cancelled', edgecolors='black', linewidths=1)
+
+        if sell_cancelled['x']:
+            ax.scatter(sell_cancelled['x'], sell_cancelled['y'], c='darkgray', marker='v',
+                       s=100, alpha=0.5, label='SELL - Cancelled', edgecolors='black', linewidths=1)
+
+        # Formatting
+        ax.set_xlabel('Time', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Price ($)', fontsize=12, fontweight='bold')
+        ax.set_title('Orders Timeline - All Orders by Execution Price', fontsize=14, fontweight='bold')
+        ax.legend(loc='upper left', fontsize=10, framealpha=0.9)
+        ax.grid(True, alpha=0.3, linestyle='--')
+
+        # Format y-axis as currency
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.2f}'))
+
+        # Format x-axis dates
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+        plt.xticks(rotation=45, ha='right')
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            logger.info(f"Orders timeline saved to {save_path}")
+
+        if show:
+            plt.show()
+
+        return fig
+
     def log_to_mlflow(
         self,
         experiment_name: Optional[str] = None,
@@ -2139,6 +2443,29 @@ Trading Days:           {self._metrics.trading_days}
                 logger.debug("Logging text report...")
                 report = self.generate_report()
                 mlflow.log_text(report, "performance_report.txt")
+
+            # Log comprehensive orders report (all orders including cancelled)
+            try:
+                logger.debug("Generating comprehensive orders report...")
+                all_orders_report = self.generate_all_orders_report()
+                if all_orders_report:
+                    mlflow.log_text(all_orders_report, "all_orders_report.txt")
+                    logger.debug("Comprehensive orders report logged successfully")
+            except Exception as e:
+                logger.warning(f"Failed to generate comprehensive orders report: {e}")
+                logger.debug("Continuing without comprehensive orders report", exc_info=True)
+
+            # Log orders timeline chart if charts are enabled
+            if log_charts:
+                try:
+                    logger.debug("Generating orders timeline chart...")
+                    fig = self.plot_orders_timeline(show=False)
+                    if fig:
+                        mlflow.log_chart(fig, "orders_timeline", format="png", dpi=chart_dpi)
+                        logger.debug("Orders timeline chart logged successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to generate orders timeline chart: {e}")
+                    logger.debug("Continuing without orders timeline chart", exc_info=True)
 
             # Log summary as markdown
             logger.debug("Logging markdown summary...")

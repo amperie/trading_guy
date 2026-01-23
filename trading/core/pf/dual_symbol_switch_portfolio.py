@@ -17,6 +17,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
         self.tx_cost = self.cfg.get("tx_cost", 0.0)
         self.min_signal_strength = self.cfg.get("min_signal_strength", 0)
         self._pending_target = None
+        self._pending_switch_state = None  # None or "SELLING"
 
     def _current_symbol(self) -> str | None:
         for symbol in (self.upro_symbol, self.spxu_symbol):
@@ -29,19 +30,11 @@ class DualSymbolSwitchPortfolio(Portfolio):
             tick: list[PriceData]) -> TickResults:
         orders: list[Order] = []
 
-        # Execute queued target from previous tick (next-bar execution).
+        # If we're waiting for a SELL to complete, only BUY when the position is gone.
         if self._pending_target is not None:
-            target = self._pending_target
             current_symbol = self._current_symbol()
-
-            if current_symbol != target:
-                if current_symbol is not None:
-                    qty = self.positions[current_symbol].quantity
-                    if qty > 0:
-                        orders.append(Order.create_market_order(
-                            current_symbol, OrderAction.SELL, qty, self.tx_cost, tick
-                        ))
-
+            if current_symbol is None:
+                target = self._pending_target
                 pd = find_pricedata_in_list(target, tick)
                 if pd is not None:
                     qty = int(self.cash / pd.close)
@@ -49,10 +42,12 @@ class DualSymbolSwitchPortfolio(Portfolio):
                         orders.append(Order.create_market_order(
                             target, OrderAction.BUY, qty, self.tx_cost, tick
                         ))
+                self._pending_target = None
+                self._pending_switch_state = None
+                return TickResults(orders=orders)
+            return TickResults(orders=orders)
 
-            self._pending_target = None
-
-        # Queue next target based on current tick signals.
+        # Select target from current tick signals.
         target_signal = None
         for signal in signals:
             if signal.type != SignalType.BUY:
@@ -65,7 +60,30 @@ class DualSymbolSwitchPortfolio(Portfolio):
                 target_signal = signal
 
         if target_signal is not None:
-            self._pending_target = target_signal.symbol
-            target_signal.metadata["order_target_next_tick"] = True
+            target = target_signal.symbol
+            current_symbol = self._current_symbol()
+
+            # Case 1: No position -> buy immediately.
+            if current_symbol is None:
+                pd = find_pricedata_in_list(target, tick)
+                if pd is not None:
+                    qty = int(self.cash / pd.close)
+                    if qty > 0:
+                        orders.append(Order.create_market_order(
+                            target, OrderAction.BUY, qty, self.tx_cost, tick
+                        ))
+
+            # Case 2: Different position -> sell now, buy after sell fills.
+            elif current_symbol != target:
+                qty = self.positions[current_symbol].quantity
+                if qty > 0:
+                    orders.append(Order.create_market_order(
+                        current_symbol, OrderAction.SELL, qty, self.tx_cost, tick
+                    ))
+                    self._pending_target = target
+                    self._pending_switch_state = "SELLING"
+                    target_signal.metadata["order_target_after_sell"] = True
+
+            # Case 3: Already in target -> no action.
 
         return TickResults(orders=orders)
