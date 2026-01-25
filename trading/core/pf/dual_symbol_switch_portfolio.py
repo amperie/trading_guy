@@ -1,6 +1,8 @@
 from trading.core.portfolio import Portfolio
-from trading.core.classes import MarketSignal, PriceData, SignalType, OrderAction, Order, TickResults
+from trading.core.classes import MarketSignal, PriceData, SignalType, OrderAction, Order, TickResults, BracketOrder, OrderType, OrderStatus
 from utils.utils import find_pricedata_in_list
+from typing import Optional
+from datetime import datetime
 
 
 class DualSymbolSwitchPortfolio(Portfolio):
@@ -16,8 +18,18 @@ class DualSymbolSwitchPortfolio(Portfolio):
         self.spxu_symbol = self.cfg.get("spxu_symbol", "SPXU")
         self.tx_cost = self.cfg.get("tx_cost", 0.0)
         self.min_signal_strength = self.cfg.get("min_signal_strength", 0)
+
+        # Bracket order parameters
+        self.stop_pct = self.cfg.get("stop_pct", 5.0)
+        self.profit_pct = self.cfg.get("profit_pct", 10.0)
+
+        # Holding period (in hours)
+        self.holding_period_hours = self.cfg.get("holding_period_hours", 2)
+
+        # State variables
         self._pending_target = None
-        self._pending_switch_state = None  # None or "SELLING"
+        self._pending_switch_state = None  # None or "SWITCHING"
+        self._symbol_entry_time = {}  # symbol -> datetime
 
     def _current_symbol(self) -> str | None:
         for symbol in (self.upro_symbol, self.spxu_symbol):
@@ -25,29 +37,68 @@ class DualSymbolSwitchPortfolio(Portfolio):
                 return symbol
         return None
 
+    def _holding_period_elapsed(self, symbol: str, current_timestamp: datetime) -> bool:
+        """
+        Check if holding period has elapsed since entering this position.
+
+        Args:
+            symbol: Symbol to check
+            current_timestamp: Current tick timestamp
+
+        Returns:
+            True if holding period has elapsed or no entry time recorded
+        """
+        if symbol not in self._symbol_entry_time:
+            return True  # No entry time means we can enter/exit freely
+
+        from datetime import timedelta
+        entry_time = self._symbol_entry_time[symbol]
+        holding_delta = timedelta(hours=self.holding_period_hours)
+
+        return current_timestamp >= entry_time + holding_delta
+
+    def _find_active_bracket(self, symbol: str) -> Optional[BracketOrder]:
+        """
+        Find the active bracket order for a symbol.
+
+        Args:
+            symbol: Symbol to search for
+
+        Returns:
+            BracketOrder if found, None otherwise
+        """
+        for order_id in self.om.pending_orders_by_id:
+            order = self.om.pending_orders_by_id[order_id]
+            if (isinstance(order, BracketOrder) and
+                order.symbol == symbol and
+                order.status == OrderStatus.PENDING_SALE):
+                return order
+
+        return None
+
     def process_tick_market_signals_logic(
             self, signals: list[MarketSignal],
             tick: list[PriceData]) -> TickResults:
+        """
+        Process signals with bracket orders and holding period enforcement.
+
+        Strategy:
+        1. Bracket triggers (stop/profit) → Exit immediately at any time
+        2. Signal changes → Exit via manual sale ONLY if holding period elapsed
+        3. During holding period → Ignore new signals for different symbols
+        4. Always use bracket orders for entries
+        """
         orders: list[Order] = []
 
-        # If we're waiting for a SELL to complete, only BUY when the position is gone.
-        if self._pending_target is not None:
-            current_symbol = self._current_symbol()
-            if current_symbol is None:
-                target = self._pending_target
-                pd = find_pricedata_in_list(target, tick)
-                if pd is not None:
-                    qty = int(self.cash / pd.close)
-                    if qty > 0:
-                        orders.append(Order.create_market_order(
-                            target, OrderAction.BUY, qty, self.tx_cost, tick
-                        ))
-                self._pending_target = None
-                self._pending_switch_state = None
-                return TickResults(orders=orders)
-            return TickResults(orders=orders)
+        # Get current timestamp from tick
+        current_timestamp = tick[0].timestamp if tick else None
+        if current_timestamp is None:
+            return TickResults(orders=[])
 
-        # Select target from current tick signals.
+        # Check current position
+        current_symbol = self._current_symbol()
+
+        # Phase 1: Find target from current tick signals
         target_signal = None
         for signal in signals:
             if signal.type != SignalType.BUY:
@@ -59,31 +110,110 @@ class DualSymbolSwitchPortfolio(Portfolio):
             if target_signal is None or signal.strength > target_signal.strength:
                 target_signal = signal
 
-        if target_signal is not None:
-            target = target_signal.symbol
-            current_symbol = self._current_symbol()
+        # No signal → nothing to do
+        if target_signal is None:
+            return TickResults(orders=[])
 
-            # Case 1: No position -> buy immediately.
-            if current_symbol is None:
-                pd = find_pricedata_in_list(target, tick)
+        target = target_signal.symbol
+
+        # Phase 3: Execute pending switch FIRST (takes precedence)
+        if self._pending_switch_state == "SWITCHING" and self._pending_target is not None:
+            # Check if previous position is closed
+            if current_symbol is None:  # Position exited
+                pending_target = self._pending_target
+                pd = find_pricedata_in_list(pending_target, tick)
+
                 if pd is not None:
-                    qty = int(self.cash / pd.close)
+                    entry_price = pd.close
+                    qty = int(self.cash / entry_price)
+
                     if qty > 0:
-                        orders.append(Order.create_market_order(
-                            target, OrderAction.BUY, qty, self.tx_cost, tick
-                        ))
+                        bo = BracketOrder.create_bracket_order(
+                            symbol=pending_target,
+                            high_sell_price=entry_price * (1.0 + self.profit_pct / 100.0),
+                            low_sell_price=entry_price * (1.0 - self.stop_pct / 100.0),
+                            quantity=qty,
+                            tx_cost=self.tx_cost,
+                            current_tick=tick
+                        )
 
-            # Case 2: Different position -> sell now, buy after sell fills.
-            elif current_symbol != target:
-                qty = self.positions[current_symbol].quantity
-                if qty > 0:
-                    orders.append(Order.create_market_order(
-                        current_symbol, OrderAction.SELL, qty, self.tx_cost, tick
-                    ))
+                        # Track entry time
+                        self._symbol_entry_time[pending_target] = current_timestamp
+
+                        # Link to signal if available
+                        if target_signal and target_signal.symbol == pending_target:
+                            target_signal.metadata['order_id'] = bo.order_id
+                            target_signal.metadata['entry_time'] = current_timestamp
+
+                        orders.append(bo)
+
+                # Reset state
+                self._pending_target = None
+                self._pending_switch_state = None
+
+                # Return early - don't process other cases this tick
+                return TickResults(orders=orders)
+
+        # Phase 2: Handle position switching logic
+
+        # Case A: No current position → Enter immediately
+        if current_symbol is None:
+            pd = find_pricedata_in_list(target, tick)
+            if pd is None:
+                return TickResults(orders=[])
+
+            # Create bracket order
+            entry_price = pd.close
+            qty = int(self.cash / entry_price)
+
+            if qty > 0:
+                bo = BracketOrder.create_bracket_order(
+                    symbol=target,
+                    high_sell_price=entry_price * (1.0 + self.profit_pct / 100.0),
+                    low_sell_price=entry_price * (1.0 - self.stop_pct / 100.0),
+                    quantity=qty,
+                    tx_cost=self.tx_cost,
+                    current_tick=tick
+                )
+
+                # Track entry time for holding period
+                self._symbol_entry_time[target] = current_timestamp
+
+                # Link signal to order for analysis
+                target_signal.metadata['order_id'] = bo.order_id
+                target_signal.metadata['entry_time'] = current_timestamp
+
+                orders.append(bo)
+
+        # Case B: Holding same symbol → Ignore (don't add to position)
+        elif current_symbol == target:
+            # Already holding target, no action needed
+            pass
+
+        # Case C: Different symbol → Switch if holding period elapsed
+        elif current_symbol != target:
+            # Check if holding period has elapsed
+            if self._holding_period_elapsed(current_symbol, current_timestamp):
+                # Find active bracket for current position
+                active_bracket = self._find_active_bracket(current_symbol)
+
+                if active_bracket is not None:
+                    # Trigger manual sale
+                    active_bracket.MANUAL_SALE = True
+
+                    # Queue next target for next tick
                     self._pending_target = target
-                    self._pending_switch_state = "SELLING"
-                    target_signal.metadata["order_target_after_sell"] = True
+                    self._pending_switch_state = "SWITCHING"
 
-            # Case 3: Already in target -> no action.
+                    # Clear entry time for old symbol
+                    if current_symbol in self._symbol_entry_time:
+                        del self._symbol_entry_time[current_symbol]
+
+                    # Note: No orders created this tick
+                    # Manual sale will process, then next tick we'll buy
+            else:
+                # Holding period not elapsed → Ignore signal
+                # Let bracket exit naturally via stop/profit
+                pass
 
         return TickResults(orders=orders)
