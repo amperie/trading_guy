@@ -101,7 +101,8 @@ def run_ray_spy_trend_switch():
 
     base_dp_cfg = {
         "path": "../data/SPY_UPRO_SPXU_5min.csv",
-        "truncate": 10000000
+        "truncate": 10000000,
+        "start_date": "01/01/2022"
     }
 
     base_backtest_cfg = {
@@ -109,14 +110,14 @@ def run_ray_spy_trend_switch():
         "run_name": "SPY_TrendSwitch_HPO",
         "description": "SPY Trend Switch Optimization",
         "starting_cash": 1000.0,
-        "experiment_name": "Hyperparameter Optimization Runs"
+        "experiment_name": "SPY_switching_ExponentialMovingAverage"
     }
 
     # Search space (parameters to optimize)
     search_space = {
-        "fast_window": tune.randint(5, 250),          # Short SMA: 5-25 bars
-        "slow_window": tune.randint(30, 800),         # Long SMA: 30-80 bars
-        "strength_scale": tune.uniform(5.0, 50.0),   # Signal strength multiplier: 5-50x
+        "fast_window": tune.randint(5, 1500),          # Short SMA: 5-25 bars
+        "slow_window": tune.randint(30, 5000),         # Long SMA: 30-80 bars
+        "strength_scale": tune.uniform(5.0, 5.0),   # Signal strength multiplier: 5-50x
         "min_signal_strength": tune.randint(0, 1),  # Minimum signal threshold: 0-50
     }
 
@@ -141,7 +142,7 @@ def run_ray_spy_trend_switch():
         algorithm_param_keys=algorithm_param_keys,
         portfolio_param_keys=portfolio_param_keys,
 
-        num_samples=50,
+        num_samples=5000,
         max_concurrent_trials=8,
     )
 
@@ -156,7 +157,7 @@ def run_single_spy_trend_switch():
     from trading.core.om.backtesting_om import BacktestingOM
     from trading.backtesting.run_backtest_ray import run_single_backtest
     # Base configurations (static parameters that don't change)
-    
+
     alg_cfg = {
         "spy_symbol": "SPY",
         "upro_symbol": "UPRO",
@@ -194,6 +195,124 @@ def run_single_spy_trend_switch():
     print(f"Total return: {results['metrics'].total_return_pct:.2f}%")
 
 
+def run_split_period_spy_trend_switch():
+    """
+    Run split-period backtest (training + validation) for SpyTrendSwitchAlgorithm.
+
+    This function uses SplitPeriodBacktestEngine to run two sequential backtests:
+    - Training period: Uses data from start_date to cutoff_date
+    - Validation period: Uses data from cutoff_date to end_date
+
+    Both periods start fresh with the same initial cash and use identical parameters.
+    Results are logged to MLflow with validation run including training metrics for comparison.
+    """
+    from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
+    from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
+    from trading.data_providers.test_data_provider import TestDataProvider
+    from trading.core.om.backtesting_om import BacktestingOM
+    from trading.engines.split_period_backtest_engine import SplitPeriodBacktestEngine
+
+    # Algorithm configuration
+    alg_cfg = {
+        "spy_symbol": "SPY",
+        "upro_symbol": "UPRO",
+        "spxu_symbol": "SPXU",
+        "fast_window": 22,
+        "slow_window": 220,
+        "strength_scale": 44.0,
+    }
+
+    # Portfolio configuration
+    pf_cfg = {
+        "upro_symbol": "UPRO",
+        "spxu_symbol": "SPXU",
+        "min_signal_strength": 0,
+        "stop_pct": 5.0,
+        "profit_pct": 10.0,
+        "holding_period_hours": 2,
+    }
+
+    # Data provider configuration
+    dp_cfg = {
+        "path": "../data/SPY_UPRO_SPXU_5min.csv",
+        "truncate": 0  # Use all available data
+    }
+
+    # Backtest configuration
+    backtest_cfg = {
+        "experiment_name": "SPY Trend Switch Validation",
+        "run_name": "SPY_TrendSwitch_TrainVal",
+        "description": "Split-period validation test for SPY trend switching strategy",
+    }
+
+    # Instantiate components
+    om = BacktestingOM()
+    alg = SpyTrendSwitchAlgorithm(alg_cfg)
+    dp = TestDataProvider(dp_cfg)
+    pf = DualSymbolSwitchPortfolio(pf_cfg, om, 1000.0, {}, True)
+
+    # Create and run split-period engine
+    engine = SplitPeriodBacktestEngine(
+        cfg=backtest_cfg,
+        dp=dp,
+        al=alg,
+        om=om,
+        pf=pf,
+        start_date='2022-01-03',     # Training start
+        cutoff_date='2022-07-01',    # Training end / Validation start
+        end_date='2022-12-31'        # Validation end
+    )
+
+    print("="*80)
+    print("RUNNING SPLIT-PERIOD BACKTEST")
+    print("="*80)
+    print()
+
+    results = engine.run()
+
+    # Print summary
+    print()
+    print("="*80)
+    print("SPLIT-PERIOD BACKTEST SUMMARY")
+    print("="*80)
+    print()
+
+    train_metrics = results['training']['metrics']
+    val_metrics = results['validation']['metrics']
+
+    print("TRAINING PERIOD (2022-01-03 to 2022-07-01):")
+    print(f"  Total Return:     {train_metrics.total_return_pct:>10.2f}%")
+    print(f"  Sharpe Ratio:     {train_metrics.sharpe_ratio:>10.2f}")
+    print(f"  Max Drawdown:     {train_metrics.max_drawdown_pct:>10.2f}%")
+    print(f"  Total Trades:     {train_metrics.total_trades:>10}")
+    print(f"  Win Rate:         {train_metrics.win_rate:>10.2f}%")
+    print()
+
+    print("VALIDATION PERIOD (2022-07-01 to 2022-12-31):")
+    print(f"  Total Return:     {val_metrics.total_return_pct:>10.2f}%")
+    print(f"  Sharpe Ratio:     {val_metrics.sharpe_ratio:>10.2f}")
+    print(f"  Max Drawdown:     {val_metrics.max_drawdown_pct:>10.2f}%")
+    print(f"  Total Trades:     {val_metrics.total_trades:>10}")
+    print(f"  Win Rate:         {val_metrics.win_rate:>10.2f}%")
+    print()
+
+    print("PERFORMANCE DELTA (Validation - Training):")
+    print(f"  Return Difference:  {val_metrics.total_return_pct - train_metrics.total_return_pct:>10.2f}%")
+    print(f"  Sharpe Difference:  {val_metrics.sharpe_ratio - train_metrics.sharpe_ratio:>10.2f}")
+    print(f"  Drawdown Change:    {val_metrics.max_drawdown_pct - train_metrics.max_drawdown_pct:>10.2f}%")
+    print()
+
+    print("="*80)
+    print("MLflow UI: http://hp.lan:8899")
+    print(f"Experiment: {backtest_cfg['experiment_name']}")
+    print(f"Training Run: {backtest_cfg['run_name']}")
+    print(f"Validation Run: {backtest_cfg['run_name']}_validation")
+    print("="*80)
+
+    return results
+
+
 if __name__ == "__main__":
     run_ray_spy_trend_switch()
     # run_single_spy_trend_switch()
+    # run_split_period_spy_trend_switch()
