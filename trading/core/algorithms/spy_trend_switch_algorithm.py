@@ -41,6 +41,35 @@ class SpyTrendSwitchAlgorithm(Algorithm):
         recent = list(values)[-window:]
         return sum(recent) / window
 
+    def _ema(self, values, window: int) -> float | None:
+        """
+        Calculate Exponential Moving Average.
+
+        Args:
+            values: Price history (deque or list)
+            window: EMA period
+
+        Returns:
+            EMA value or None if insufficient data
+        """
+        if len(values) < window:
+            return None
+
+        # Convert to list for indexing
+        prices = list(values)
+
+        # Smoothing factor: k = 2 / (N + 1)
+        k = 2.0 / (window + 1)
+
+        # Initial EMA = SMA of first 'window' values
+        ema = sum(prices[:window]) / window
+
+        # Apply EMA formula to remaining values
+        for i in range(window, len(prices)):
+            ema = prices[i] * k + ema * (1 - k)
+
+        return ema
+
     def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
         pd = find_pricedata_in_list(self.spy_symbol, data)
         if pd is None:
@@ -50,8 +79,8 @@ class SpyTrendSwitchAlgorithm(Algorithm):
         if history is None or len(history) < self.slow_window:
             return []
 
-        fast = self._sma(history, self.fast_window)
-        slow = self._sma(history, self.slow_window)
+        fast = self._ema(history, self.fast_window)
+        slow = self._ema(history, self.slow_window)
         if fast is None or slow is None or slow == 0:
             return []
 
