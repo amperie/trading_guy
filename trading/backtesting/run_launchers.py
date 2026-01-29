@@ -198,6 +198,7 @@ def run_ray_spy_trend_macd():
     base_dp_cfg = {
         "path": "../data/SPY_UPRO_SPXU_5min.csv",
         "truncate": 10000000,
+        "start_date": "01/01/2022",
     }
 
     base_backtest_cfg = {
