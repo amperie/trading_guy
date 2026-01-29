@@ -154,17 +154,25 @@ def run_ray_spy_trend_macd():
     """
     Run Ray Tune hyperparameter optimization for SpyTrendMACDAlgorithm + DualSymbolSwitchPortfolio.
 
-    Optimizes MACD parameters (fast/slow/signal periods), signal strength scaling, and portfolio thresholds.
+    Optimizes MACD parameters (fast/slow/signal periods), signal strength scaling,
+    and bracket order parameters (stop-loss and profit-taker percentages).
     Tests strategy that switches between UPRO (3x leveraged long) and SPXU (3x leveraged short)
     based on SPY MACD trend signals.
 
-    MACD Parameters:
-    - macd_fast_period: Fast EMA period (standard: 12)
-    - macd_slow_period: Slow EMA period (standard: 26)
-    - macd_signal_period: Signal line EMA period (standard: 9)
-    - strength_scale: Signal strength multiplier
+    Optimized Parameters:
+    - macd_fast_period: Fast EMA period (5-2500, standard: 12)
+    - macd_slow_period: Slow EMA period (20-5000, standard: 26)
+    - macd_signal_period: Signal line EMA period (5-2000, standard: 9)
+    - strength_scale: Signal strength multiplier (fixed: 5.0)
+    - stop_pct: Stop-loss percentage for bracket orders (1-20%, standard: 5%)
+    - profit_pct: Profit-taker percentage for bracket orders (1-25%, standard: 10%)
+
+    Fixed Parameters:
+    - min_signal_strength: 0 (accept all signals)
+    - holding_period_hours: 2 hours
 
     The algorithm generates BUY signals when MACD crosses above/below signal line.
+    Each trade uses bracket orders with optimized stop-loss and profit-taker levels.
     """
     from run_backtest_ray import tune_backtest_hyperparameters
     from ray import tune
@@ -183,18 +191,19 @@ def run_ray_spy_trend_macd():
     base_pf_cfg = {
         "upro_symbol": "UPRO",
         "spxu_symbol": "SPXU",
+        "min_signal_strength": 0,       # Fixed: accept all signals (not tuned)
+        "holding_period_hours": 2,      # Fixed holding period (not tuned)
     }
 
     base_dp_cfg = {
         "path": "../data/SPY_UPRO_SPXU_5min.csv",
         "truncate": 10000000,
-        "start_date": "01/01/2022"
     }
 
     base_backtest_cfg = {
         "symbol": "SPY",
         "run_name": "SPY_MACD_HPO",
-        "description": "SPY MACD Trend Switch Optimization",
+        "description": "SPY MACD Trend Switch Optimization with Bracket Orders",
         "starting_cash": 1000.0,
         "experiment_name": "SPY_MACD_Hyperparameter_Optimization"
     }
@@ -202,18 +211,19 @@ def run_ray_spy_trend_macd():
     # Search space (parameters to optimize)
     search_space = {
         # MACD Algorithm Parameters
-        "macd_fast_period": tune.randint(5, 25),        # Fast EMA: 5-25 periods (standard: 12)
-        "macd_slow_period": tune.randint(20, 50),       # Slow EMA: 20-50 periods (standard: 26)
-        "macd_signal_period": tune.randint(5, 20),      # Signal line: 5-20 periods (standard: 9)
-        "strength_scale": tune.uniform(5.0, 50.0),      # Signal strength multiplier: 5-50x
+        "macd_fast_period": tune.randint(5, 2500),        # Fast EMA: 5-2500 periods (standard: 12)
+        "macd_slow_period": tune.randint(20, 5000),       # Slow EMA: 20-5000 periods (standard: 26)
+        "macd_signal_period": tune.randint(5, 2000),      # Signal line: 5-2000 periods (standard: 9)
+        "strength_scale": tune.uniform(5.0, 5.0),         # Signal strength multiplier: 5.0 (fixed)
 
-        # Portfolio Parameters
-        "min_signal_strength": tune.randint(0, 50),     # Minimum signal threshold: 0-50
+        # Portfolio Parameters (Bracket Orders)
+        "stop_pct": tune.uniform(1.0, 20.0),              # Stop-loss percentage: 1-20% (standard: 5%)
+        "profit_pct": tune.uniform(1.0, 25.0),            # Profit-taker percentage: 1-25% (standard: 10%)
     }
 
     # Specify which hyperparameters go to which component
     algorithm_param_keys = ["macd_fast_period", "macd_slow_period", "macd_signal_period", "strength_scale"]
-    portfolio_param_keys = ["min_signal_strength"]
+    portfolio_param_keys = ["stop_pct", "profit_pct"]
 
     # Run optimization
     best_config = tune_backtest_hyperparameters(
@@ -529,7 +539,8 @@ def run_split_period_spy_trend_macd():
 
 
 if __name__ == "__main__":
-    run_split_period_spy_trend_macd()
+    run_ray_spy_trend_macd()
+    # run_split_period_spy_trend_macd()
     # run_ray_spy_trend_switch()
     # run_ray_spy_trend_macd()
     # run_single_spy_trend_switch()
