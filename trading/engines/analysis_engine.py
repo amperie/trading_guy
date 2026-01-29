@@ -479,6 +479,8 @@ class AnalysisEngine:
     def plot_equity_curve(self, show: bool = False, save_path: Optional[str] = None):
         """Plot equity curve over time"""
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for thread safety
             import matplotlib.pyplot as plt
         except ImportError:
             raise ImportError("matplotlib is required for plotting. Install with: pip install matplotlib")
@@ -512,6 +514,8 @@ class AnalysisEngine:
     def plot_drawdown(self, show: bool = False, save_path: Optional[str] = None):
         """Plot drawdown over time"""
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for thread safety
             import matplotlib.pyplot as plt
         except ImportError:
             raise ImportError("matplotlib is required for plotting")
@@ -546,6 +550,8 @@ class AnalysisEngine:
     def plot_trade_pnl(self, show: bool = False, save_path: Optional[str] = None):
         """Plot P&L for each trade"""
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for thread safety
             import matplotlib.pyplot as plt
         except ImportError:
             raise ImportError("matplotlib is required for plotting")
@@ -580,6 +586,8 @@ class AnalysisEngine:
     def plot_returns_distribution(self, show: bool = False, save_path: Optional[str] = None):
         """Plot distribution of returns"""
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for thread safety
             import matplotlib.pyplot as plt
         except ImportError:
             raise ImportError("matplotlib is required for plotting")
@@ -607,6 +615,8 @@ class AnalysisEngine:
     def plot_portfolio_with_trades(self, show: bool = False, save_path: Optional[str] = None):
         """Plot portfolio value over time with BUY/SELL markers"""
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for thread safety
             import matplotlib.pyplot as plt
         except ImportError:
             raise ImportError("matplotlib is required for plotting")
@@ -715,6 +725,8 @@ class AnalysisEngine:
         Shows how individual stocks performed during the backtest period
         """
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for thread safety
             import matplotlib.pyplot as plt
         except ImportError:
             raise ImportError("matplotlib is required for plotting")
@@ -1056,6 +1068,8 @@ class AnalysisEngine:
     def plot_comprehensive_dashboard(self, show: bool = False, save_path: Optional[str] = None):
         """Create a comprehensive dashboard with multiple plots"""
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for thread safety
             import matplotlib.pyplot as plt
             from matplotlib.gridspec import GridSpec
         except ImportError:
@@ -2019,6 +2033,8 @@ Trading Days:           {self._metrics.trading_days}
         Returns:
             matplotlib figure object
         """
+        import matplotlib
+        matplotlib.use('Agg')  # Use non-interactive backend for thread safety
         import matplotlib.pyplot as plt
         import matplotlib.dates as mdates
 
