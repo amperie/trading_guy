@@ -101,7 +101,7 @@ Each component is designed to be swappable via configuration, enabling easy test
   - `run_full_analysis(log_to_mlflow=True, experiment_name, ...)` → Run complete analysis and optionally log to MLflow with custom experiment (includes interactive chart, signals history, signals-to-orders report, and DataFrame)
 - **Example Usage:**
   ```python
-  from trading.engines.analysis_engine import AnalysisEngine
+  from trading.analysis.analysis_engine import AnalysisEngine
 
   # Option 1: Manual analysis steps
   engine = AnalysisEngine(portfolio, order_manager)
@@ -190,7 +190,7 @@ Each component is designed to be swappable via configuration, enabling easy test
 - **Example Usage:**
   ```python
   from utils.mlflow_client import MLflowClient
-  from trading.engines.analysis_engine import AnalysisEngine
+  from trading.analysis.analysis_engine import AnalysisEngine
 
   # Create client from config
   mlflow = MLflowClient.from_config()

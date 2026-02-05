@@ -16,6 +16,20 @@ from utils.logger import Logger
 logger = Logger().get_logger(__name__)
 
 class OrderManager(ABC):
+    """
+    Base class for order execution backends.
+
+    Subclassing notes:
+    - Implement the backend hooks:
+        * _submit_order_to_backend: submit an order to the execution system.
+        * _update_order_status_from_backend: refresh a single order status.
+        * _update_orders_statuses_from_backend: refresh many orders efficiently.
+        * _cancel_order: cancel a pending order in the backend.
+    - Do not override public methods (submit_order, submit_orders, update_*).
+      Those methods manage internal bookkeeping and call your backend hooks.
+    - Update Order fields in-place (status, price, executed_datetime, cash, quantity,
+      platform_id) and return the same order instance.
+    """
 
     def __init__(self, cfg: dict=None):
         self.cfg = cfg or {}
@@ -142,6 +156,12 @@ class OrderManager(ABC):
             positions: dict[str,Position]=None, pf_cash: float=0.0) -> Order:
         """
         Updates the status of one order from the backend and returns the updated order
+
+        Responsibilities:
+        - Query backend for the order state.
+        - Update order.status and any fill details (price, executed_datetime,
+          cash, quantity, platform_id).
+        - Return the updated order.
         """
         raise NotImplementedError
 
@@ -152,6 +172,11 @@ class OrderManager(ABC):
         """
         Gets order statuses from backend, updates orders in the dictionary and returns a list
         of order_ids that changed status
+
+        Responsibilities:
+        - Poll backend for all provided pending orders.
+        - Update each order in-place.
+        - Return a list of order_ids whose status changed.
         """
         raise NotImplementedError
 
@@ -161,9 +186,16 @@ class OrderManager(ABC):
             positions: dict[str,Position]=None, pf_cash: float=0.0) -> Order:
         """
         Override this for specific backends
+
+        Responsibilities:
+        - Submit the order to the backend.
+        - Set order.status and any backend IDs (platform_id).
+        - Populate price/quantity/cash if filled immediately.
+        - Return the updated order.
         """
         raise NotImplementedError
 
     @abstractmethod
     def _cancel_order(self, order_id: str) -> Order:
+        """Cancel a pending order in the backend and return the updated order."""
         raise NotImplementedError

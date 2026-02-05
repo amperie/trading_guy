@@ -7,7 +7,7 @@ backtesting runs, including parameters, metrics, and visualizations.
 from utils.mlflow_client import MLflowClient
 from utils.config_manager import ConfigManager
 from trading.engines.backtest_engine import BacktestEngine
-from trading.engines.analysis_engine import AnalysisEngine
+from trading.analysis.analysis_engine import AnalysisEngine
 
 
 def run_backtest_with_mlflow():

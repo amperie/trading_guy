@@ -11,7 +11,7 @@ Interfaces:
 """
 from trading.core.classes import MarketSignal, Order, PriceData, Position, OrderStatus, OrderAction, OrderType
 from trading.core.classes import TickResults
-from trading.core.order_manager import OrderManager
+from trading.core.om.order_manager import OrderManager
 from utils.logger import Logger
 from abc import ABC, abstractmethod
 from typing import final
@@ -23,6 +23,16 @@ logger = Logger().get_logger(__name__)
 
 
 class Portfolio(ABC):
+    """
+    Base class for portfolio logic and order generation.
+
+    Subclassing notes:
+    - Implement process_tick_market_signals_logic to turn signals + tick into orders.
+    - Do not override process_market_signals_for_tick; it manages order updates,
+      order submission, and portfolio value tracking.
+    - Use self.cash / self.positions for sizing, and self.om for order creation.
+    - If keep_history is enabled, history is recorded automatically.
+    """
 
     def __init__(
             self, cfg: dict = None,
@@ -240,4 +250,14 @@ class Portfolio(ABC):
     def process_tick_market_signals_logic(
             self, signals: list[MarketSignal],
             tick: list[PriceData]) -> TickResults:
+        """
+        Portfolio decision logic.
+
+        Args:
+            signals: MarketSignal list for this tick.
+            tick: PriceData list for this tick.
+
+        Returns:
+            TickResults with any orders to submit.
+        """
         raise NotImplementedError("process_market_signals_logic needs to be overridden")

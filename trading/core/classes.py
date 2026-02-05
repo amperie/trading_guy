@@ -81,6 +81,7 @@ class Order:
     order_id: str = field(default_factory=lambda: f"local-{str(uuid.uuid4())}")
     tx_cost: float = 0.0
     parent_id: str = None
+    platform_id: str = None
     _child_orders: list[str] = field(default_factory=lambda: [])
     _child_orders_dict: dict[str, Order] = field(default_factory=lambda: {})
     processed_by_portfolio: bool = False

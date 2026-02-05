@@ -6,12 +6,12 @@ performance on out-of-sample data.
 """
 from trading.engines.base_engine import BaseEngine
 from trading.engines.backtest_engine import BacktestingEngine
-from trading.engines.analysis_engine import AnalysisEngine
+from trading.analysis.analysis_engine import AnalysisEngine
 from trading.data_providers.data_provider import DataProvider
 from trading.core.algorithm import Algorithm
 from trading.core.portfolio import Portfolio
-from trading.core.order_manager import OrderManager
-from typing import Optional, Dict, Any
+from trading.core.om.order_manager import OrderManager
+from typing import Dict, Any
 from utils.logger import Logger
 from dataclasses import asdict
 from datetime import datetime

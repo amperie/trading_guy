@@ -2,12 +2,11 @@
 from pathlib import Path
 
 from trading.core.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
-from trading.core.algorithms.test_algorithm import ReadSignalsFromFile
 from trading.core.om.backtesting_om import BacktestingOM
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider
 from trading.engines.backtest_engine import BacktestingEngine
-from trading.engines.analysis_engine import AnalysisEngine
+from trading.analysis.analysis_engine import AnalysisEngine
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
@@ -98,11 +97,6 @@ def example_usage2():
         "rsi_period": 14,
         "extra_history_period": 50
     }
-    """
-    alg_cfg = {
-        "threshold": .15,
-        "csv_path": str(project_root / "data" / f"dr_signals_{symbol}.csv"),
-    }"""
     pf_cfg = {"symbol": symbol, "stop_pct": 2, "profit_pct": 5}
     run_backtest_local(backtest_cfg, alg_cfg, pf_cfg, dp_cfg)
 

@@ -98,7 +98,7 @@ print()
 
 # Temporarily disable MLflow for this test by modifying the run_full_analysis calls
 # We'll monkey-patch the method to skip MLflow logging
-from trading.engines import analysis_engine
+from trading.analysis import analysis_engine
 
 original_run_full_analysis = analysis_engine.AnalysisEngine.run_full_analysis
 

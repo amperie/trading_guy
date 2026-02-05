@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime
 import pandas as pd
 
-from trading.engines.analysis_engine import AnalysisEngine, Trade, PerformanceMetrics
+from trading.analysis.analysis_engine import AnalysisEngine, Trade, PerformanceMetrics
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from trading.core.om.backtesting_om import BacktestingOM
 from trading.core.classes import PriceData, MarketSignal, SignalType, OrderType, OrderAction

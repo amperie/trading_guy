@@ -15,7 +15,8 @@
       "Bash(pip install:*)",
       "WebSearch",
       "Bash(PYTHONPATH=. python:*)",
-      "Bash(jupyter nbconvert:*)"
+      "Bash(jupyter nbconvert:*)",
+      "Bash(1)"
     ],
     "deny": [],
     "ask": []

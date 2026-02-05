@@ -285,7 +285,7 @@ simulator:
 # Example usage in a script
 if __name__ == "__main__":
     from engines.simulator import Simulator
-    from trading.engines.analysis_engine import AnalysisEngine
+    from trading.analysis.analysis_engine import AnalysisEngine
 
     # Create algorithm with custom config
     algo_config = {

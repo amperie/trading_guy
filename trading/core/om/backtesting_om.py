@@ -1,6 +1,6 @@
 from typing import Union
 from trading.core.classes import Order, PriceData, OrderType, OrderStatus, Position, OrderAction, BracketOrder
-from trading.core.order_manager import OrderManager
+from trading.core.om.order_manager import OrderManager
 from utils.utils import find_pricedata_in_list
 from utils.logger import Logger
 

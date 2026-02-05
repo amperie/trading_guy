@@ -14,6 +14,15 @@ from collections import defaultdict, deque
 
 
 class Algorithm(ABC):
+    """
+    Base class for trading algorithms.
+
+    Subclassing notes:
+    - Implement on_data_logic(self, data) with your strategy logic.
+    - Do not override on_data; it updates history before calling on_data_logic.
+    - Use price_history / price_data_history for rolling windows if history_length > 0.
+    - Use cfg for algorithm-specific parameters.
+    """
 
     default_cfg = {
         "history_length": 0,
@@ -76,4 +85,13 @@ class Algorithm(ABC):
 
     @abstractmethod
     def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
+        """
+        Strategy logic implementation.
+
+        Args:
+            data: List of PriceData for the current tick.
+
+        Returns:
+            List of MarketSignal objects for this tick.
+        """
         raise NotImplementedError("on_data_logic needs to be overriden")

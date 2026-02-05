@@ -79,8 +79,8 @@ class SpyTrendSwitchAlgorithm(Algorithm):
         if history is None or len(history) < self.slow_window:
             return []
 
-        fast = self._ema(history, self.fast_window)
-        slow = self._ema(history, self.slow_window)
+        fast = self._sma(history, self.fast_window)
+        slow = self._sma(history, self.slow_window)
         if fast is None or slow is None or slow == 0:
             return []
 

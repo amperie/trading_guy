@@ -10,7 +10,7 @@ import numpy as np
 from collections import defaultdict
 
 from trading.core.portfolio import Portfolio
-from trading.core.order_manager import OrderManager
+from trading.core.om.order_manager import OrderManager
 from trading.core.classes import Order, BracketOrder, OrderType, OrderAction, OrderStatus
 from utils.logger import Logger
 

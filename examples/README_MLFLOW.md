@@ -23,7 +23,7 @@ Runs a complete analysis (similar to `analysis_example.py`) and optionally logs 
 **Usage:**
 
 ```python
-from trading.engines.analysis_engine import AnalysisEngine
+from trading.analysis.analysis_engine import AnalysisEngine
 
 engine = AnalysisEngine(portfolio, order_manager)
 

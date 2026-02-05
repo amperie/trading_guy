@@ -3,17 +3,14 @@ from typing import Type
 
 from trading.core.algorithm import Algorithm
 from trading.core.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
-from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
-from trading.core.algorithms.test_algorithm import ReadSignalsFromFile
 from trading.core.om.backtesting_om import BacktestingOM
-from trading.core.order_manager import OrderManager
+from trading.core.om.order_manager import OrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
 from trading.core.portfolio import Portfolio
 from trading.data_providers.data_provider import DataProvider
 from trading.data_providers.test_data_provider import TestDataProvider
 from trading.engines.backtest_engine import BacktestingEngine
-from trading.engines.analysis_engine import AnalysisEngine
+from trading.analysis.analysis_engine import AnalysisEngine
 from utils.logger import Logger
 import ray
 from ray import tune

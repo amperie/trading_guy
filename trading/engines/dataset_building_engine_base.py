@@ -2,7 +2,7 @@ from typing import Any, final, Union
 import pandas as pandas
 from datetime import datetime
 from trading.core.algorithm import Algorithm
-from trading.core.order_manager import OrderManager
+from trading.core.om.order_manager import OrderManager
 from trading.core.portfolio import Portfolio
 from trading.data_providers.data_provider import DataProvider
 from trading.core.classes import PriceData, TickResults, MarketSignal
