@@ -5,7 +5,7 @@ Tests: stop-loss trigger, profit-taker trigger, and manual sale
 from datetime import datetime
 from trading.core.classes import (
     PriceData, OrderStatus, OrderType,
-    OrderAction, BracketOrder
+    OrderAction, BracketOrder, Position
 )
 from trading.core.om.backtesting_om import BacktestingOM
 
@@ -50,6 +50,9 @@ class TestBracketOrderStatusProgression:
         positions = {}
         pf_cash = 10000.0
         bracket_order = om.submit_order(bracket_order, tick_initial, positions, pf_cash)
+
+        # After bracket fills, track the position (simulates Portfolio behavior)
+        positions[symbol] = Position(symbol, bracket_order.quantity)
 
         # Step 1: Verify initial state after submission
         assert bracket_order.status == OrderStatus.PENDING_SALE, \
@@ -139,6 +142,9 @@ class TestBracketOrderStatusProgression:
         positions = {}
         pf_cash = 10000.0
         bracket_order = om.submit_order(bracket_order, tick_initial, positions, pf_cash)
+
+        # After bracket fills, track the position (simulates Portfolio behavior)
+        positions[symbol] = Position(symbol, bracket_order.quantity)
 
         # Verify initial state
         assert bracket_order.status == OrderStatus.PENDING_SALE

@@ -232,9 +232,6 @@ def calculate_rsi_series(prices: list, period: int = 14) -> list[Optional[float]
     """
     Calculate RSI for each point in the price series.
 
-    NOTE: This is a wrapper function for backward compatibility.
-    The actual implementation is in TechnicalAnalyzer.calculate_rsi_series().
-
     Args:
         prices: List of price values
         period: RSI period (default: 14)
@@ -249,6 +246,46 @@ def calculate_rsi_series(prices: list, period: int = 14) -> list[Optional[float]
         >>> len(rsi_series) == len(prices)
         True
     """
-    rsi_data_series = TechnicalAnalyzer.calculate_rsi_series(prices, period)
-    # Extract just the RSI values for backward compatibility
-    return [rsi_data.rsi if rsi_data is not None else None for rsi_data in rsi_data_series]
+    if not prices:
+        return []
+
+    result = [None] * len(prices)
+
+    # Need at least period + 1 prices to calculate first RSI
+    if len(prices) < period + 1:
+        return result
+
+    # Calculate initial gains and losses
+    gains = []
+    losses = []
+    for i in range(1, period + 1):
+        change = prices[i] - prices[i - 1]
+        gains.append(max(change, 0))
+        losses.append(max(-change, 0))
+
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+
+    # First RSI value
+    if avg_loss == 0:
+        result[period] = 100.0
+    else:
+        rs = avg_gain / avg_loss
+        result[period] = 100 - (100 / (1 + rs))
+
+    # Calculate subsequent RSI values using smoothed averages
+    for i in range(period + 1, len(prices)):
+        change = prices[i] - prices[i - 1]
+        gain = max(change, 0)
+        loss = max(-change, 0)
+
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+
+        if avg_loss == 0:
+            result[i] = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            result[i] = 100 - (100 / (1 + rs))
+
+    return result

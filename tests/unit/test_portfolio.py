@@ -125,8 +125,9 @@ class TestPortfolioBracketOrders:
         cash_after_buy = pf.cash
         quantity_bought = pf.positions["AAPL"].quantity
 
-        # Price moves to $9, $10, $11 (all within range)
-        for price in [9.0, 10.0, 11.0]:
+        # Price moves within range (stop is at $9.0, profit at $12.0)
+        # Use prices strictly between stop and profit to avoid triggering
+        for price in [9.5, 10.0, 11.0]:
             tick = [PriceData("AAPL", datetime(2024, 1, 1, 11, 0), price, price, price, price, 100)]
             pf.process_market_signals_for_tick([], tick)
 

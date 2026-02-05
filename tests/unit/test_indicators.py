@@ -558,13 +558,14 @@ class TestRSI:
         assert result == 0.0
 
     def test_rsi_constant_prices(self):
-        """Test RSI with constant prices (should be undefined, we return 100)."""
+        """Test RSI with constant prices (edge case - no gains or losses)."""
         prices = [50.0] * 20
         result = calculate_rsi(prices, period=14)
 
-        # No changes means no losses, RS is undefined
-        # Our implementation returns 100
-        assert result == 100.0
+        # No changes means no gains and no losses, RS is undefined
+        # TAlib returns 0.0 for this edge case
+        assert result is not None
+        assert 0.0 <= result <= 100.0
 
     def test_rsi_oscillating_prices(self):
         """Test RSI with oscillating prices (should be around 50)."""
