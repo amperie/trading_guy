@@ -1,8 +1,10 @@
 logging:
   level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
   console: true
+  file_logging: false  # Set to true to enable daily-rotating file output
   folder: "logs"  # Folder for log files
-  filename: "trading.log"  # Set to null to disable file logging
+  filename: "trading.log"  # Base filename; date suffix added on rotation
+  retention_days: 7  # How many days of log files to keep
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 mlflow:

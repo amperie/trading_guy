@@ -8,7 +8,7 @@ import pytest
 from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
 from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'SPY_UPRO_SPXU_5min_sorted.csv')
 DATA_EXISTS = os.path.exists(DATA_PATH)
@@ -21,7 +21,7 @@ class TestSignalsDebug:
 
     def test_signal_generation_and_order_creation(self):
         """Test end-to-end signal generation and order creation."""
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
         alg = SpyTrendSwitchAlgorithm({
             'spy_symbol': 'SPY',
             'upro_symbol': 'UPRO',

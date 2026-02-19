@@ -7,7 +7,7 @@ from trading.core.classes import (
     PriceData, OrderStatus, OrderType,
     OrderAction, BracketOrder, Position
 )
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 
 
 class TestBracketOrderStatusProgression:
@@ -24,7 +24,7 @@ class TestBracketOrderStatusProgression:
         4. Verify stop order is FILLED, profit order is CANCELED
         5. Verify SOLD_ORDER points to stop order
         """
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
 
         # Create bracket order: buy at $100, stop at $95, profit at $110
         symbol = "AAPL"
@@ -117,7 +117,7 @@ class TestBracketOrderStatusProgression:
         """
         Test that bracket order triggers profit-taker when price rises above profit price.
         """
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
 
         # Create bracket order
         symbol = "TSLA"
@@ -191,7 +191,7 @@ class TestBracketOrderStatusProgression:
         """
         Test manual sale of bracket order while in PENDING_SALE status.
         """
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
 
         # Create bracket order
         symbol = "MSFT"
@@ -268,7 +268,7 @@ class TestBracketOrderStatusProgression:
         """
         Test that bracket order doesn't trigger when price stays between stop and profit.
         """
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
 
         symbol = "NVDA"
         tick_initial = [PriceData(
@@ -320,7 +320,7 @@ class TestBracketOrderStatusProgression:
         """
         Test that bracket order triggers when price equals stop price (boundary condition).
         """
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
 
         symbol = "SPY"
         tick_initial = [PriceData(
@@ -365,7 +365,7 @@ class TestBracketOrderStatusProgression:
         """
         Test that bracket order triggers when price equals profit price (boundary condition).
         """
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
 
         symbol = "QQQ"
         tick_initial = [PriceData(

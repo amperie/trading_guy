@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 
 from trading.engines.base_engine import BaseEngine
@@ -29,6 +30,15 @@ class TickAggregationPassthroughEngine(BaseEngine):
         self._window_end_by_symbol: dict[str, datetime] = {}
         self._agg_by_symbol: dict[str, PriceData] = {}
 
+        # Cross-symbol batching: buffer completed aggregations until all
+        # expected symbols report for the same timestamp, or a timeout expires.
+        self.batch_symbols = cfg.get('batch_symbols', False)
+        self.expected_symbols: set[str] = set(cfg.get('expected_symbols', []))
+        self.batch_timeout_seconds: float = cfg.get('batch_timeout_seconds', 2.0)
+        self._batch_buffer: dict[datetime, list[PriceData]] = {}
+        self._batch_first_seen: dict[datetime, float] = {}
+        self._seen_symbols: set[str] = set()
+
     def finalize(self):
         pass
 
@@ -37,8 +47,12 @@ class TickAggregationPassthroughEngine(BaseEngine):
             self.on_tick(tick)
 
     def on_tick(self, tick: list[PriceData]) -> TickResults:
+        if self.batch_symbols:
+            self._flush_timed_out_batches()
+
         aggregated: list[PriceData] = []
         for pd in tick:
+            self._seen_symbols.add(pd.symbol)
             symbol = pd.symbol
             window_end = self._get_window_end(pd.timestamp)
 
@@ -63,9 +77,39 @@ class TickAggregationPassthroughEngine(BaseEngine):
                     aggregated.append(self._flush_symbol(symbol, window_end))
 
         aggregated = [a for a in aggregated if a is not None]
-        if aggregated:
-            return self.downstream_engine.on_tick(aggregated)
-        return TickResults(orders=[])
+
+        if not self.batch_symbols:
+            if aggregated:
+                return self.downstream_engine.on_tick(aggregated)
+            return TickResults(orders=[])
+
+        # Add completed aggregations to the batch buffer
+        for agg_pd in aggregated:
+            ts = agg_pd.timestamp
+            if ts not in self._batch_buffer:
+                self._batch_buffer[ts] = []
+                self._batch_first_seen[ts] = time.monotonic()
+            self._batch_buffer[ts].append(agg_pd)
+
+        return self._flush_ready_batches()
+
+    def _flush_timed_out_batches(self):
+        now = time.monotonic()
+        timed_out = [ts for ts, first in self._batch_first_seen.items()
+                     if now - first >= self.batch_timeout_seconds]
+        for ts in sorted(timed_out):
+            self.downstream_engine.on_tick(self._batch_buffer.pop(ts))
+            self._batch_first_seen.pop(ts)
+
+    def _flush_ready_batches(self) -> TickResults:
+        expected = self.expected_symbols or self._seen_symbols
+        last_result = TickResults(orders=[])
+        for ts in sorted(list(self._batch_buffer.keys())):
+            symbols_in_buffer = {pd.symbol for pd in self._batch_buffer[ts]}
+            if symbols_in_buffer >= expected:
+                last_result = self.downstream_engine.on_tick(self._batch_buffer.pop(ts))
+                self._batch_first_seen.pop(ts)
+        return last_result
 
     def _get_window_end(self, ts: datetime) -> datetime:
         if self.use_market_open:

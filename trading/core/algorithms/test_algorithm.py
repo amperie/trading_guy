@@ -3,11 +3,15 @@ import random
 import pandas as pd
 from trading.core.algorithm import Algorithm
 from trading.core.classes import PriceData, MarketSignal, SignalType
+from utils.logger import Logger
+
+logger = Logger().get_logger(__name__)
 
 
 class TestAlgorithm(Algorithm):
 
     def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
+        logger.debug(f"on_data_logic called with {len(data)} price data points")
         r = random.randint(0,100)
         if r > 50:
             signal = SignalType.BUY
@@ -15,6 +19,9 @@ class TestAlgorithm(Algorithm):
             signal = SignalType.SELL
 
         retval = [MarketSignal(signal, x.symbol, 100) for x in data]
+        symbols = [x.symbol for x in data]
+        logger.info(f"Generated {signal.name} signal for {symbols} (r={r})")
+        logger.debug(f"Returning {len(retval)} signals: {[(s.type.name, s.symbol, s.strength) for s in retval]}")
         return retval
 
 class ReadSignalsFromFile(Algorithm):

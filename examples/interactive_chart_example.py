@@ -7,7 +7,7 @@ with zoomable timeline, clickable legend, and detailed hover information.
 from pathlib import Path
 
 from trading.core.algorithms.test_algorithm import TestAlgorithm
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider
 from trading.engines.backtest_engine import BacktestingEngine
@@ -27,7 +27,7 @@ def main():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
@@ -91,7 +91,7 @@ def example_with_mlflow():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
@@ -135,7 +135,7 @@ def example_standalone_chart():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)

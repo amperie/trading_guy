@@ -9,7 +9,7 @@ from trading.core.classes import OrderType, OrderAction, Order, PriceData, Brack
 project_root = Path.cwd()
 sys.path.insert(0, str(project_root))
 
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from trading.core.algorithms.test_algorithm import TestAlgorithm
 from trading.data_providers.test_data_provider import TestDataProvider
@@ -19,7 +19,7 @@ project_root = Path.cwd()
 data_path = str(project_root / "data" / "test_data.csv")
 
 def market_orders():
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     o = Order(
             action=OrderAction.BUY,
             type=OrderType.MARKET,
@@ -52,7 +52,7 @@ def market_orders():
     pass
 
 def bracket_orders():
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     bo = BracketOrder.create_bracket_order(
         symbol="SPY",
         quantity=10,
@@ -75,7 +75,7 @@ def portfolio_orders():
     project_root = Path(__file__).parent.parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)

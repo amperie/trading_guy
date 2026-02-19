@@ -8,7 +8,7 @@ import pandas as pd
 
 from trading.analysis.analysis_engine import AnalysisEngine, Trade, PerformanceMetrics
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.classes import PriceData, MarketSignal, SignalType, OrderType, OrderAction
 
 
@@ -18,7 +18,7 @@ class TestAnalysisEngine:
     @pytest.fixture
     def setup_portfolio_with_trades(self):
         """Create a portfolio with some completed trades"""
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
         pf = SingleSymbolPortfolio(
             cfg={
                 'symbol': 'AAPL',

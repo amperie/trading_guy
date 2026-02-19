@@ -8,7 +8,7 @@ import pytest
 from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
 from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'SPY_UPRO_SPXU_5min_sorted.csv')
 DATA_EXISTS = os.path.exists(DATA_PATH)
@@ -22,10 +22,10 @@ class TestBracketHoldingPeriod:
     @pytest.fixture
     def backtest_results(self):
         """Run a backtest with bracket orders and 2-hour holding period."""
-        from trading.backtesting.run_backtest_ray import run_single_backtest
+        from trading.launchers.run_backtest_ray import run_single_backtest
         from trading.analysis import analysis_engine
 
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
         alg = SpyTrendSwitchAlgorithm({
             'spy_symbol': 'SPY',
             'upro_symbol': 'UPRO',

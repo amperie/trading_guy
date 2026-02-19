@@ -7,7 +7,7 @@ MLflow logging using the new run_full_analysis() method.
 from pathlib import Path
 
 from trading.core.algorithms.test_algorithm import TestAlgorithm
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider
 from trading.engines.backtest_engine import BacktestingEngine
@@ -27,7 +27,7 @@ def example_1_simple_analysis_with_mlflow():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
@@ -73,7 +73,7 @@ def example_2_analysis_without_mlflow():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
@@ -107,7 +107,7 @@ def example_3_analysis_with_local_files():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
@@ -153,7 +153,7 @@ def example_4_manual_mlflow_logging():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
 
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
@@ -214,7 +214,7 @@ def example_5_compare_strategies():
     for capital in capital_amounts:
         print(f"\nRunning backtest with ${capital} initial capital...")
 
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
         al = TestAlgorithm({"history_length": 10, "full_history": True})
         dp_cfg = {"path": data_path, "provider": "data_providers.test_data_provider.TestDataProvider"}
         dp = TestDataProvider(dp_cfg)

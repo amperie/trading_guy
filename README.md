@@ -197,12 +197,12 @@ class MyPortfolio(Portfolio):
 
 ```python
 from trading.engines.backtest_engine import BacktestingEngine
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.data_providers.test_data_provider import TestDataProvider
 from trading.analysis.analysis_engine import AnalysisEngine
 
 # Wire components
-om = BacktestingOM()
+om = BacktestingOrderManager()
 pf = MyPortfolio({"symbol": "SPY", "cash": 100000}, om, 100000, {}, True)
 algo = SmaCrossover({"history_length": 20})
 dp = TestDataProvider({"path": "data/SPY_5min.csv"})
@@ -266,7 +266,7 @@ Define a search space and let Ray Tune + Optuna find optimal parameters:
 
 ```python
 from ray import tune
-from trading.backtesting.run_backtest_ray import tune_backtest_hyperparameters
+from trading.launchers.run_backtest_ray import tune_backtest_hyperparameters
 
 best_config = tune_backtest_hyperparameters(
     symbol="SPY",

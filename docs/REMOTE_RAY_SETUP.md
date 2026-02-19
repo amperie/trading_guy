@@ -94,8 +94,9 @@ ray start --address='192.168.1.100:6379'  # Use head node IP
 ### Use Remote Cluster from Local Machine
 
 **Method 1: Use run_launchers_remote.py**
+
 ```python
-from trading.backtesting.run_launchers_remote import run_ray_spy_trend_macd_remote
+from trading.launchers.run_launchers_remote import run_ray_spy_trend_macd_remote
 
 # Replace with your actual Ray cluster address
 best_config = run_ray_spy_trend_macd_remote("ray://192.168.1.100:10001")

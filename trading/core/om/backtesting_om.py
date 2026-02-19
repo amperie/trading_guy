@@ -36,7 +36,7 @@ def _process_market_order(
     return order
 
 
-class BacktestingOM(OrderManager):
+class BacktestingOrderManager(OrderManager):
 
     def _cancel_order(self, order_id: str) -> Order:
         if order_id in self._pending_orders_by_id:

@@ -7,7 +7,7 @@ from trading.core.classes import OrderType, OrderAction, Order, PriceData
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from trading.engines.backtest_engine import BacktestingEngine
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from trading.core.algorithms.test_algorithm import TestAlgorithm
 from trading.data_providers.test_data_provider import TestDataProvider
@@ -16,7 +16,7 @@ def test_simulator():
     # Get absolute path to data file relative to project root
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     al = TestAlgorithm({"history_length": 10, "full_history": True})
     dp_cfg = {"path": data_path, "provider":"data_providers.test_data_provider.TestDataProvider"}
     dp = TestDataProvider(dp_cfg)
@@ -29,7 +29,7 @@ def test_simulator():
 def test_om():
     project_root = Path(__file__).parent.parent
     data_path = str(project_root / "data" / "test_data.csv")
-    om = BacktestingOM()
+    om = BacktestingOrderManager()
     o = Order(
             action=OrderAction.BUY,
             type=OrderType.MARKET,

@@ -9,7 +9,7 @@ from trading.engines.split_period_backtest_engine import SplitPeriodBacktestEngi
 from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
 from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider
-from trading.core.om.backtesting_om import BacktestingOM
+from trading.core.om.backtesting_om import BacktestingOrderManager
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'SPY_UPRO_SPXU_5min_sorted.csv')
 DATA_EXISTS = os.path.exists(DATA_PATH)
@@ -23,7 +23,7 @@ class TestSplitPeriodSimple:
     @pytest.fixture
     def engine_results(self):
         """Run a split-period backtest with MLflow disabled."""
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
         alg = SpyTrendSwitchAlgorithm({
             'spy_symbol': 'SPY',
             'upro_symbol': 'UPRO',
@@ -92,7 +92,7 @@ class TestSplitPeriodSimple:
 
     def test_date_validation_works(self):
         """Test that date validation rejects invalid dates."""
-        om = BacktestingOM()
+        om = BacktestingOrderManager()
         alg = SpyTrendSwitchAlgorithm()
         dp = TestDataProvider({'path': DATA_PATH, 'truncate': 0})
         pf = DualSymbolSwitchPortfolio({}, om, 1000.0, {}, True)

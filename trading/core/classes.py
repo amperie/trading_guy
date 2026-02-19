@@ -29,6 +29,14 @@ class OrderStatus(Enum):
     CANCELED = 2
     PENDING_SALE = 3
 
+class OrderTimeInForce(Enum):
+    DAY = 1 # For the day
+    GTC = 2 # Good til Canceled
+    IOC = 3 # Immediate or Cancel
+    FOK = 4 # Fill or Kill
+    OPG = 5 # At the open
+    CLS = 6 # At the close
+
 @dataclass
 class PriceData:
     symbol: str
@@ -77,6 +85,7 @@ class Order:
     quantity: int
     cash: float
     executed_datetime: Union[None, datetime] = None
+    time_in_force: OrderTimeInForce = OrderTimeInForce.GTC
     status: OrderStatus = OrderStatus.PENDING
     order_id: str = field(default_factory=lambda: f"local-{str(uuid.uuid4())}")
     tx_cost: float = 0.0

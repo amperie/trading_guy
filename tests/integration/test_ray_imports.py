@@ -21,7 +21,7 @@ class TestRayImports:
     def test_run_launchers_import(self):
         """Test that run_launchers module can be imported."""
         try:
-            from trading.backtesting.run_launchers import run_ray_spy_trend_macd
+            from trading.launchers.run_launchers import run_ray_spy_trend_macd
             assert run_ray_spy_trend_macd is not None
         except ImportError:
             pytest.skip("run_launchers module not available or missing ray dependency")
