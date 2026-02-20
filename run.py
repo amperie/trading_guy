@@ -85,10 +85,13 @@ def _build_components(cfg: dict):
     om = instantiate_from_string(om_path, cfg=om_cfg) if om_cfg else instantiate_from_string(om_path)
 
     # Algorithm
+    # Note: Algorithm.__init__ reads history_length from a keyword arg,
+    # not from cfg, so we pass it explicitly.
     al_section = cfg["algorithm"]
     al_path = al_section["algorithm"]
     al_cfg = {k: v for k, v in al_section.items() if k != "algorithm"}
-    al = instantiate_from_string(al_path, cfg=al_cfg)
+    history_length = al_cfg.pop("history_length", 0)
+    al = instantiate_from_string(al_path, cfg=al_cfg, history_length=history_length)
 
     # Portfolio
     pf_section = cfg["portfolio"]
@@ -179,10 +182,25 @@ def cmd_live(args: argparse.Namespace):
     # Propagate alpaca credentials to order_manager config if needed
     om_section = cfg.get("order_manager", {})
     if not om_section.get("api_key"):
-        om_section["api_key"] = alpaca_cfg.get("api_key", "")
+        om_section["api_key"] = alpaca_cfg["api_key"]
     if not om_section.get("secret_key"):
-        om_section["secret_key"] = alpaca_cfg.get("secret_key", "")
+        om_section["secret_key"] = alpaca_cfg["secret_key"]
     cfg["order_manager"] = om_section
+
+    # Propagate alpaca config to warmup data provider if needed
+    warmup = alpaca_cfg.get("warmup")
+    if warmup:
+        if not warmup.get("api_key"):
+            warmup["api_key"] = alpaca_cfg["api_key"]
+        if not warmup.get("secret_key"):
+            warmup["secret_key"] = alpaca_cfg["secret_key"]
+        if not warmup.get("symbols"):
+            warmup["symbols"] = alpaca_cfg.get("symbols_to_subscribe", [])
+
+    # Live mode doesn't use a top-level data_provider (warmup provider
+    # comes from the alpaca section instead). Remove any inherited from
+    # root config.yaml so _build_components doesn't try to instantiate it.
+    cfg.pop("data_provider", None)
 
     logger.info(f"Starting live trading with profile: {args.config}")
 

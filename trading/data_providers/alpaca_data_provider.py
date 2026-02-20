@@ -111,7 +111,35 @@ class AlpacaDataProvider(DataProvider):
         )
 
         bars = self.client.get_stock_bars(request_params)
-        df = bars.df.reset_index()
+        df = bars.df
+
+        if df.empty:
+            logger.warning(f"Alpaca returned no bars for {self.symbols}")
+            self.data = pd.DataFrame(columns=[
+                "timestamp", "symbol", "open", "high", "low",
+                "close", "volume", "trade_count", "vwap",
+            ])
+            return self.data
+
+        df = df.reset_index()
+        logger.debug(f"Alpaca raw columns after reset_index: {list(df.columns)}")
+
+        # Normalize timestamp column name (Alpaca SDK may vary)
+        if "timestamp" not in df.columns:
+            for candidate in ["Timestamp", "t", "datetime", "date"]:
+                if candidate in df.columns:
+                    df = df.rename(columns={candidate: "timestamp"})
+                    break
+            else:
+                # Last resort: use the first datetime column
+                dt_cols = df.select_dtypes(include=["datetime64[ns, UTC]", "datetime64[ns]", "datetimetz"]).columns
+                if len(dt_cols) > 0:
+                    df = df.rename(columns={dt_cols[0]: "timestamp"})
+                else:
+                    raise KeyError(
+                        f"Cannot find timestamp column in Alpaca response. "
+                        f"Columns: {list(df.columns)}"
+                    )
 
         # Normalize timestamps to EST (timezone-naive)
         df["timestamp"] = (
