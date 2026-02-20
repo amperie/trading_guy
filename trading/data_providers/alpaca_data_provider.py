@@ -31,6 +31,9 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 from trading.data_providers.data_provider import DataProvider
+from utils.logger import Logger
+
+logger = Logger().get_logger(__name__)
 
 
 # Map string names to TimeFrame objects
@@ -62,6 +65,7 @@ class AlpacaDataProvider(DataProvider):
         self.adjustment = self.cfg.get("adjustment", "split")
 
         self.client = StockHistoricalDataClient(self.api_key, self.secret_key)
+        logger.debug(f"AlpacaDataProvider initialized symbols={self.symbols} timeframe={timeframe_str} adjustment={self.adjustment}")
 
     def load_data(self):
         start = self.cfg.get("start_date", None)
@@ -73,6 +77,7 @@ class AlpacaDataProvider(DataProvider):
         if end is not None:
             end = pd.to_datetime(end).to_pydatetime()
 
+        logger.info(f"Fetching Alpaca bars: symbols={self.symbols} start={start} end={end} limit={limit}")
         self.data = self.fetch_bars(start=start, end=end, limit=limit)
 
     def fetch_bars(
@@ -124,5 +129,6 @@ class AlpacaDataProvider(DataProvider):
             if col not in df.columns:
                 df[col] = None
 
+        logger.info(f"Fetched {len(df)} bars for {self.symbols}: {df['timestamp'].min()} → {df['timestamp'].max()}")
         self.data = df
         return df

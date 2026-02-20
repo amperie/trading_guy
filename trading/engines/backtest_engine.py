@@ -61,10 +61,16 @@ class BacktestingEngine(BaseEngine):
 
             self.on_tick(tick)
 
+        logger.info(
+            f"Backtest complete: {iters} ticks processed"
+            + (f" | final_value={self.pf.total_value:.2f} cash={self.pf.cash:.2f} positions={list(self.pf.positions.keys())}" if self.pf else "")
+        )
+
     def on_tick(self, tick: list[PriceData]) -> TickResults:
         """
         Process one tick and return the portfolio's results.
         """
         market_signals = self.al.on_data(tick)
         ret_val = self.pf.process_market_signals_for_tick(market_signals, tick)
+        self._persist_tick(tick, market_signals, ret_val)
         return ret_val

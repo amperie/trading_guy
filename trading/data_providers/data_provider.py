@@ -38,6 +38,9 @@ from datetime import datetime
 
 from trading.core.classes import PriceData
 from utils.config_manager import ConfigManager
+from utils.logger import Logger
+
+logger = Logger().get_logger(__name__)
 
 
 class DataProvider(ABC):
@@ -176,7 +179,9 @@ class DataProvider(ABC):
                     print(f"{pd.symbol}: {pd.close}")
         """
         if self.data is None:
+            logger.debug("Data not loaded — calling load_data()")
             self.load_data()
+            logger.info(f"Data loaded: {len(self.data)} rows, {self.data['timestamp'].nunique()} ticks, symbols={list(self.data['symbol'].unique())}")
 
         tmp_data = self.data.set_index(['symbol',"timestamp"])
         # Get the range of date times to iterate through

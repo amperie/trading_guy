@@ -1,9 +1,16 @@
 import importlib
+from datetime import datetime
 from typing import Any, Union
 
 import pandas as pd
 
-from trading.core.classes import PriceData, MarketSignal
+from trading.core.classes import (
+    PriceData, MarketSignal, Order, BracketOrder,
+    OrderType, OrderAction, OrderStatus, OrderTimeInForce, SignalType,
+)
+from utils.logger import Logger
+
+logger = Logger().get_logger(__name__)
 
 
 def instantiate_from_string(full_path: str, *args, **kwargs) -> Any:
@@ -24,6 +31,7 @@ def instantiate_from_string(full_path: str, *args, **kwargs) -> Any:
             api_key='xyz'
         )
     """
+    logger.debug(f"Loading class: {full_path}")
     module_path, class_name = full_path.rsplit('.', 1)
     module = importlib.import_module(module_path)
     cls = getattr(module, class_name)
@@ -231,6 +239,178 @@ def aggregate_stock_data_custom(
     result = result.sort_values([timestamp_col, symbol_col]).reset_index(drop=True)
 
     return result
+
+
+def serialize_pricedata(pd_obj: PriceData) -> dict:
+    """Convert a PriceData object to a dictionary suitable for MongoDB storage.
+
+    Datetimes are kept as-is (pymongo handles them natively).
+
+    Args:
+        pd_obj: PriceData object to serialize.
+
+    Returns:
+        Dictionary with all PriceData fields.
+    """
+    return {
+        "symbol": pd_obj.symbol,
+        "timestamp": pd_obj.timestamp,
+        "open": pd_obj.open,
+        "high": pd_obj.high,
+        "low": pd_obj.low,
+        "close": pd_obj.close,
+        "volume": pd_obj.volume,
+        "trade_count": pd_obj.trade_count,
+        "vwap": pd_obj.vwap,
+        "exchange": pd_obj.exchange,
+    }
+
+
+def deserialize_pricedata(data: dict) -> PriceData:
+    """Convert a dictionary back to a PriceData object.
+
+    Args:
+        data: Dictionary with PriceData fields.
+
+    Returns:
+        PriceData object.
+    """
+    return PriceData(
+        symbol=data["symbol"],
+        timestamp=data["timestamp"],
+        open=data["open"],
+        high=data["high"],
+        low=data["low"],
+        close=data["close"],
+        volume=data["volume"],
+        trade_count=data.get("trade_count"),
+        vwap=data.get("vwap"),
+        exchange=data.get("exchange"),
+    )
+
+
+def serialize_order(order: Order) -> dict:
+    """Convert an Order or BracketOrder to a dictionary suitable for MongoDB storage.
+
+    Handles enum fields, child orders, and BracketOrder-specific fields.
+    Datetimes are kept as-is (pymongo handles them natively).
+
+    Args:
+        order: Order or BracketOrder object to serialize.
+
+    Returns:
+        Dictionary with all order fields.
+    """
+    result = {
+        "order_id": order.order_id,
+        "placed_datetime": order.placed_datetime,
+        "action": order.action.name,
+        "type": order.type.name,
+        "symbol": order.symbol,
+        "price": order.price,
+        "quantity": order.quantity,
+        "cash": order.cash,
+        "executed_datetime": order.executed_datetime,
+        "time_in_force": order.time_in_force.name,
+        "status": order.status.name,
+        "tx_cost": order.tx_cost,
+        "parent_id": order.parent_id,
+        "platform_id": order.platform_id,
+        "processed_by_portfolio": order.processed_by_portfolio,
+        "is_bracket": isinstance(order, BracketOrder),
+    }
+
+    # Serialize child orders
+    child_orders = {}
+    for name in order._child_orders:
+        child = order._child_orders_dict.get(name)
+        if child is not None:
+            child_orders[name] = serialize_order(child)
+        else:
+            child_orders[name] = None
+    result["child_orders"] = child_orders if child_orders else {}
+
+    # BracketOrder-specific fields
+    if isinstance(order, BracketOrder):
+        result["manual_sale"] = order.MANUAL_SALE
+        if order.SOLD_ORDER is not None:
+            result["sold_order_id"] = order.SOLD_ORDER.order_id
+        else:
+            result["sold_order_id"] = None
+
+    return result
+
+
+def deserialize_order(data: dict) -> Union[Order, BracketOrder]:
+    """Convert a dictionary back to an Order or BracketOrder object.
+
+    Args:
+        data: Dictionary with serialized order data.
+
+    Returns:
+        Order or BracketOrder object with all fields restored.
+    """
+    is_bracket = data.get("is_bracket", False)
+
+    if is_bracket:
+        order = BracketOrder(
+            placed_datetime=data["placed_datetime"],
+            action=OrderAction[data["action"]],
+            type=OrderType[data["type"]],
+            symbol=data["symbol"],
+            price=data["price"],
+            quantity=data["quantity"],
+            cash=data["cash"],
+            executed_datetime=data.get("executed_datetime"),
+            time_in_force=OrderTimeInForce[data["time_in_force"]],
+            status=OrderStatus[data["status"]],
+            order_id=data["order_id"],
+            tx_cost=data.get("tx_cost", 0.0),
+            parent_id=data.get("parent_id"),
+            platform_id=data.get("platform_id"),
+        )
+        order.processed_by_portfolio = data.get("processed_by_portfolio", False)
+        order.MANUAL_SALE = data.get("manual_sale", False)
+    else:
+        order = Order(
+            placed_datetime=data["placed_datetime"],
+            action=OrderAction[data["action"]],
+            type=OrderType[data["type"]],
+            symbol=data["symbol"],
+            price=data["price"],
+            quantity=data["quantity"],
+            cash=data["cash"],
+            executed_datetime=data.get("executed_datetime"),
+            time_in_force=OrderTimeInForce[data["time_in_force"]],
+            status=OrderStatus[data["status"]],
+            order_id=data["order_id"],
+            tx_cost=data.get("tx_cost", 0.0),
+            parent_id=data.get("parent_id"),
+            platform_id=data.get("platform_id"),
+        )
+        order.processed_by_portfolio = data.get("processed_by_portfolio", False)
+
+    # Restore child orders
+    child_orders_data = data.get("child_orders", {})
+    for name, child_data in child_orders_data.items():
+        if child_data is not None:
+            child = deserialize_order(child_data)
+            order.add_child_order(name, child)
+        else:
+            order.add_child_order(name, None)
+
+    # Link SOLD_ORDER for BracketOrder
+    if is_bracket:
+        sold_order_id = data.get("sold_order_id")
+        if sold_order_id is not None:
+            # Find the sold order among child orders
+            for name in order._child_orders:
+                child = order._child_orders_dict.get(name)
+                if child is not None and child.order_id == sold_order_id:
+                    order.SOLD_ORDER = child
+                    break
+
+    return order
 
 
 def serialize_market_signal(signal: MarketSignal) -> dict:

@@ -10,9 +10,12 @@ from trading.core.om.order_manager import OrderManager
 from trading.core.portfolio import Portfolio
 from trading.data_providers.data_provider import DataProvider
 from trading.engines.base_engine import BaseEngine, AsyncEngine
+from utils.logger import Logger
 
 # Load environment variables from .env file
 load_dotenv()
+
+logger = Logger().get_logger(__name__)
 
 api_key = os.getenv("ALPACA_API_KEY")
 secret_key = os.getenv("ALPACA_SECRET_KEY")
@@ -114,6 +117,8 @@ class AlpacaRealTimeEngine(AsyncEngine):
 
     async def _connect(self):
         # Open the connection to Alpaca
+        url_desc = f"override_url={self._override_url}" if self._override_url else "production feed (IEX)"
+        logger.info(f"Connecting to Alpaca WebSocket ({url_desc})")
         if self._override_url is not None:
             stream = StockDataStream(
                 api_key=self._api_key,
@@ -140,12 +145,18 @@ class AlpacaRealTimeEngine(AsyncEngine):
         if self._quote_subscribe:
             stream.subscribe_quotes(self._handle_quote, *self._symbols_to_subscribe)
 
+        logger.info(f"Subscribing to bars={self._bar_subscribe} quotes={self._quote_subscribe} trades={self._trades_subscribe} for {self._symbols_to_subscribe}")
+
         # Sync portfolio state from broker before streaming starts
         if self.pf is not None:
+            logger.info("Syncing portfolio state from broker...")
             self.pf._sync_from_broker()
+            logger.info(f"Portfolio sync complete: cash={self.pf.cash:.2f} positions={len(self.pf.positions)}")
         if self.om is not None and hasattr(self.om, 'sync_orders_from_broker'):
             order_sync_limit = self.pf.cfg.get("order_sync_limit", 0)
+            logger.info("Syncing orders from broker...")
             self.om.sync_orders_from_broker(limit=order_sync_limit)
+            logger.info(f"Order sync complete: {len(self.om.all_orders)} orders loaded")
 
         # Warm up algorithm history from historical data if configured
         warmup_cfg = self.cfg.get("warmup", None)
@@ -157,32 +168,37 @@ class AlpacaRealTimeEngine(AsyncEngine):
             # exactly the number of bars needed to fill the deque.
             if "limit" not in warmup_cfg and self.al.history_length > 0:
                 warmup_cfg["limit"] = self.al.history_length
+            logger.info(f"Warming up algorithm from provider {provider_path} (limit={warmup_cfg.get('limit')})")
             dp = instantiate_from_string(provider_path, cfg=warmup_cfg)
             self.warm_up(dp)
+            logger.info("Algorithm warmup complete")
 
         # stream.run() is a sync wrapper around asyncio.run(_run_forever()),
         # which can't be called from an already-running event loop.
         # Await the underlying coroutine directly since we're already async.
+        logger.info("Starting WebSocket stream (blocking)")
         await self.stream._run_forever()
 
     async def _disconnect(self):
         self.stream.stop()
 
     async def _handle_bar(self, bar):
-        print("BAR", bar.symbol, bar.timestamp, bar.open, bar.high, bar.low, bar.close, bar.volume)
+        logger.debug(f"BAR {bar.symbol} @ {bar.timestamp} O={bar.open} H={bar.high} L={bar.low} C={bar.close} V={bar.volume}")
         pd = PriceData.from_dict(bar.model_dump())
         await self.submit_tick([pd])
 
     async def _handle_quote(self, quote):
-        print("QUOTE", quote.symbol, quote.timestamp, quote.bid_price, quote.ask_price)
+        logger.error(f"QUOTE handler called but not implemented (symbol={quote.symbol})")
         raise NotImplementedError()
 
     async def _handle_trade(self, trade):
-        print("TRADE", trade.symbol, trade.timestamp, trade.price, trade.size)
+        logger.error(f"TRADE handler called but not implemented (symbol={trade.symbol})")
         raise NotImplementedError()
 
     def on_tick(self, tick: list[PriceData]) -> TickResults:
         market_signals = self.al.on_data(tick)
-        return self.pf.process_market_signals_for_tick(market_signals, tick)
+        ret_val = self.pf.process_market_signals_for_tick(market_signals, tick)
+        self._persist_tick(tick, market_signals, ret_val)
+        return ret_val
 
 

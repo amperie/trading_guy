@@ -5,6 +5,9 @@ import pandas as pd
 from pathlib import Path
 
 from trading.data_providers.data_provider import DataProvider
+from utils.logger import Logger
+
+logger = Logger().get_logger(__name__)
 
 class TestDataProvider(DataProvider):
 
@@ -52,7 +55,7 @@ class TestDataProvider(DataProvider):
             df = df.dropna(subset=numeric_columns)
             after_count = len(df)
             if before_count > after_count:
-                print(f"Warning: Dropped {before_count - after_count} rows with non-numeric price/volume data")
+                logger.warning(f"Dropped {before_count - after_count} rows with non-numeric price/volume data from {fp}")
 
         # Filter by date range if specified
         if start_date or end_date:
@@ -64,6 +67,7 @@ class TestDataProvider(DataProvider):
             df.drop(['timestamp_ts'], axis=1, inplace=True)
 
         self.data = df
+        logger.info(f"Loaded {len(self.data)} rows from {fp} ({self.data['timestamp'].nunique()} ticks, symbols={list(self.data['symbol'].unique())})")
 
     def _normalize_timestamps_to_est(self, timestamp_series: pd.Series) -> tuple[pd.Series, pd.Series]:
         """
@@ -110,7 +114,7 @@ class TestDataProvider(DataProvider):
         if not valid_mask.all():
             # Log warning about dropped rows
             dropped_count = (~valid_mask).sum()
-            print(f"Warning: Dropping {dropped_count} rows with malformed timestamps")
+            logger.warning(f"Dropping {dropped_count} rows with malformed timestamps from {self.cfg.get('path', 'unknown')}")
             # Filter to only valid timestamps
             parsed = parsed[valid_mask]
 
