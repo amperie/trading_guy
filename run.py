@@ -13,6 +13,9 @@ import copy
 import os
 import sys
 import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from utils.utils import instantiate_from_string
 from utils.logger import Logger
