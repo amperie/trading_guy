@@ -181,6 +181,7 @@ class Portfolio(ABC):
         self._sync_interval: int = self.cfg.get("sync_interval", 60)
         self._order_sync_limit: int = self.cfg.get("order_sync_limit", 0)
         self._tick_count: int = 0
+        self.buying_power: float = None
         # History data structures
         self.tick_history: dict[datetime, list[PriceData]] = {}
         self.value_history: dict[datetime, float] = {}
@@ -405,6 +406,9 @@ class Portfolio(ABC):
         old_cash = self.cash
         new_cash = state["cash"]
         self.cash = new_cash
+
+        if "buying_power" in state:
+            self.buying_power = state["buying_power"]
 
         broker_positions = state.get("positions", {})
         old_symbols = set(self.positions.keys())

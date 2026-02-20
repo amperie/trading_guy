@@ -32,7 +32,7 @@ def run_alpaca_fakepaca():
 
     pf_cfg = {
         "symbol": symbol,
-        "stop_pct": 1.0,
+        "stop_pct": 0.1,
         "profit_pct": 1.0,
         "sync_with_broker": True,
         "sync_interval": 1,

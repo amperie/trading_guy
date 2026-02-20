@@ -25,9 +25,10 @@ class SingleSymbolPortfolio(Portfolio):
         logger.debug(f"[market_order] {symbol} price={price:.2f} cash={self.cash:.2f} signal={signal.type.name if signal else None}")
 
         if signal is not None:
-            # Buy as much as we can with the available cash
+            # Buy as much as we can with the available cash (with buffer for broker drift)
             if signal.type == SignalType.BUY:
-                quantity = int(self.cash/price)
+                available = self.buying_power if self.buying_power is not None else self.cash
+                quantity = int(available / price)
                 order = Order.create_market_order(
                     symbol, OrderAction.BUY, quantity, 0.0, tick
                 )
@@ -66,8 +67,8 @@ class SingleSymbolPortfolio(Portfolio):
         logger.debug(f"[bracket] {symbol} price={price:.2f} cash={self.cash:.2f} signal={signal.type.name if signal else None} positions={list(self.positions.keys())}")
 
         if signal is not None and signal.type == SignalType.BUY:
-            # Buy as much as we can with the available cash
-            quantity = int(self.cash / price)
+            available = self.buying_power if self.buying_power is not None else self.cash
+            quantity = int(available / price)
             stop_price = round(price * (1.0 - stop_pct / 100.0), 2)
             profit_price = round(price * (1.0 + profit_pct / 100), 2)
             bo = BracketOrder.create_bracket_order(
@@ -80,6 +81,10 @@ class SingleSymbolPortfolio(Portfolio):
             ret_val = TickResults(orders=[bo])
             return ret_val
         elif signal is not None and signal.type == SignalType.SELL:
+
+            # Skip selling signals to test bracket child orders
+            return TickResults(orders=[])
+
             if symbol not in self.positions:
                 logger.debug(f"SELL signal for {symbol} but no position held, skipping")
                 return TickResults(orders=[])

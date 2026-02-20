@@ -1,0 +1,33 @@
+# python run.py backtest --config configs/example_backtest.yaml --no-mlflow --cash 50000
+# Shared CLI flags: --config, --symbol, --cash, --algorithm, --no-mlflow, --run-name
+# Backtest-only flag: --data
+# Loads profile YAML, deep-merges with root config.yaml (for logging/mlflow/state_store), then applies CLI overrides on top
+
+mode: backtest
+
+data_provider:
+  provider: "trading.data_providers.test_data_provider.TestDataProvider"
+  path: "../data/SPXU_5min.csv"
+  truncate: 0
+
+algorithm:
+  algorithm: "trading.core.algorithms.test_algorithm.TestAlgorithm"
+  history_length: 10
+
+portfolio:
+  portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
+  symbol: "SPXU"
+  cash: 100000
+  keep_history: true
+  stop_pct: 2
+  profit_pct: 5
+
+order_manager:
+  order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
+
+analysis:
+  enabled: true
+  log_to_mlflow: false
+  experiment_name: "Example Backtest"
+  run_name: "SPXU backtest"
+  description: "Example backtest with random test algorithm on SPXU 5min data"

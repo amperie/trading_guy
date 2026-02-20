@@ -382,6 +382,70 @@ class AlpacaOrderManager(OrderManager):
                 logger.warning(f"Failed to cancel Alpaca order {remote_id}: {exc}")
         return self._all_orders[order_id]
 
+    def _clamp_buy_to_buying_power(self, order: Order, current_tick: list = None) -> Order:
+        """Reduce BUY order quantity if it exceeds Alpaca buying power.
+
+        Queries the Alpaca account for current buying power and compares
+        against estimated order cost. If cost exceeds buying power, reduces
+        quantity to what the account can support. Updates order.quantity,
+        order.cash, and bracket child order quantities to stay in sync.
+
+        Args:
+            order: A BUY order (MARKET or BRACKET). Modified in-place.
+            current_tick: Current tick data used to estimate price.
+
+        Returns:
+            The (possibly adjusted) order.
+        """
+        price = self._get_price_from_tick(order.symbol, current_tick)
+        if price is None or price <= 0:
+            logger.debug(
+                f"No tick price for {order.symbol} — skipping buying power clamp"
+            )
+            return order
+
+        try:
+            account = self.client.get_account()
+            buying_power = float(account.buying_power)
+        except Exception as exc:
+            logger.warning(f"Could not fetch buying power for pre-submit check: {exc}")
+            return order
+
+        cost = order.quantity * price
+        if cost <= buying_power:
+            return order
+
+        new_qty = int(buying_power / price)
+        if new_qty <= 0:
+            logger.warning(
+                f"Buying power ${buying_power:,.2f} insufficient for even 1 share "
+                f"of {order.symbol} @ ${price:.2f} — order will likely be rejected"
+            )
+            return order
+
+        logger.info(
+            f"Clamping {order.symbol} BUY qty {order.quantity} -> {new_qty} "
+            f"(buying_power=${buying_power:,.2f}, est_price=${price:.2f})"
+        )
+        order.quantity = new_qty
+        order.cash = new_qty * price
+
+        if order.type == OrderType.BRACKET:
+            for name in order.get_child_order_names():
+                child = order.get_child_order(name)
+                if child is not None:
+                    child.quantity = new_qty
+
+        return order
+
+    @staticmethod
+    def _get_price_from_tick(symbol: str, current_tick: list) -> Optional[float]:
+        """Extract closing price for *symbol* from the current tick list."""
+        if not current_tick:
+            return None
+        pd = next((x for x in current_tick if x.symbol == symbol), None)
+        return pd.close if pd else None
+
     def _submit_order_to_backend(
             self, order: Order, current_tick: list = None,
             positions: dict[str, Position] = None, pf_cash: float = 0.0) -> Order:
@@ -402,7 +466,7 @@ class AlpacaOrderManager(OrderManager):
 
         Args:
             order: The Order or BracketOrder to submit.
-            current_tick: Current tick data (unused by Alpaca backend).
+            current_tick: Current tick data used for buying-power guard.
             positions: Current portfolio positions (unused).
             pf_cash: Current portfolio cash (unused).
 
@@ -415,6 +479,9 @@ class AlpacaOrderManager(OrderManager):
             ValueError: If a BRACKET order is missing STOP or PROFIT
                 child orders.
         """
+        if order.action == OrderAction.BUY:
+            self._clamp_buy_to_buying_power(order, current_tick)
+
         side = OrderSide.BUY if order.action == OrderAction.BUY else OrderSide.SELL
         tif = _ALPACA_TIF_MAP.get(order.time_in_force, TimeInForce.GTC)
 

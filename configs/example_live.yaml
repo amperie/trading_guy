@@ -1,0 +1,41 @@
+# python run.py live --config configs/example_live.yaml --cash 50000
+# Shared CLI flags: --config, --symbol, --cash, --algorithm, --no-mlflow, --run-name
+# Backtest-only flag: --data
+# Loads profile YAML, deep-merges with root config.yaml (for logging/mlflow/state_store), then applies CLI overrides on top
+
+mode: live
+
+algorithm:
+  algorithm: "trading.core.algorithms.test_algorithm.TestAlgorithm"
+  history_length: 10
+
+portfolio:
+  portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
+  symbol: "AAPL"
+  cash: 100000
+  keep_history: true
+  stop_pct: 2
+  profit_pct: 5
+  sync_with_broker: true
+  sync_interval: 60
+
+order_manager:
+  order_manager: "trading.core.om.alpaca_om.AlpacaOrderManager"
+  paper: true
+  time_in_force: "day"
+  # api_key and secret_key inherited from alpaca section below
+
+alpaca:
+  api_key: ""       # Or set ALPACA_API_KEY env var
+  secret_key: ""    # Or set ALPACA_SECRET_KEY env var
+  symbols_to_subscribe: ["AAPL"]
+  subscribe_to_bars: true
+  subscribe_to_quotes: false
+  subscribe_to_trades: false
+  warmup:
+    provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+    # limit auto-derived from algorithm's history_length
+
+analysis:
+  enabled: false
+  log_to_mlflow: false

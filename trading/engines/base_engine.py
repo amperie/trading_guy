@@ -76,6 +76,16 @@ class BaseEngine(ABC):
         the data provider's "limit" to the algorithm's history_length so
         exactly the right number of bars are fetched.
 
+    State persistence:
+        When a ``state_store`` section is present in the engine config and
+        ``enabled`` is True, the engine creates a TradingStateStore and
+        writes tick data, portfolio snapshots, signals, and orders to
+        MongoDB after each tick via ``_persist_tick()``.
+
+        Subclasses call ``_persist_tick(tick, signals, tick_results)`` at
+        the end of their ``on_tick()`` implementation. ``_init_state_store()``
+        is called during ``__init__`` and creates or resumes a session.
+
     Attributes:
         cfg (dict): Engine configuration dict.
         dp (DataProvider): Data source. Provides tick data via iterate().
@@ -87,6 +97,9 @@ class BaseEngine(ABC):
             via process_market_signals_for_tick().
         om (OrderManager): Order execution backend. Submits and tracks
             orders. Typically set on the Portfolio before engine starts.
+        state_store (TradingStateStore | None): MongoDB persistence layer.
+            None when state_store is not configured or disabled.
+        session_id (str | None): Current session ID in the state store.
 
     Example:
         class MyEngine(BaseEngine):
@@ -134,7 +147,77 @@ class BaseEngine(ABC):
         self.al = al
         self.om = om
         self.pf = pf
+        self.state_store = None
+        self.session_id = None
+        self._init_state_store()
         logger.debug(f"Engine initialized: {self.__class__.__name__} al={type(al).__name__ if al else None} pf={type(pf).__name__ if pf else None} om={type(om).__name__ if om else None}")
+
+    def _init_state_store(self):
+        """Initialize TradingStateStore from config if enabled."""
+        ss_cfg = self.cfg.get("state_store", {})
+        if not ss_cfg.get("enabled", False):
+            return
+
+        try:
+            from utils.trading_state_store import TradingStateStore
+        except ImportError:
+            logger.warning("pymongo not installed — state_store disabled")
+            return
+
+        uri = ss_cfg.get("connection_uri", "mongodb://localhost:27017")
+        db = ss_cfg.get("database", "trading")
+        self.state_store = TradingStateStore(connection_uri=uri, database=db)
+
+        # Create or resume session
+        session_id = ss_cfg.get("session_id")
+        if session_id and self.state_store.get_session(session_id):
+            self.session_id = session_id
+            logger.info(f"Resumed state_store session {session_id[:8]}...")
+        else:
+            self.session_id = self.state_store.create_session(
+                session_id=session_id,
+                name=ss_cfg.get("session_name", ""),
+                account_id=ss_cfg.get("account_id", ""),
+                metadata=ss_cfg.get("metadata", {}),
+            )
+            logger.info(f"Created state_store session {self.session_id[:8]}...")
+
+    def _persist_tick(
+        self,
+        tick: list[PriceData],
+        signals: list = None,
+        tick_results: 'TickResults' = None,
+    ):
+        """Write tick data to the state store (if enabled).
+
+        Called by subclass on_tick() implementations after processing.
+        Saves tick data, portfolio snapshot, signals, and upserts all orders.
+
+        Args:
+            tick: Current tick PriceData list.
+            signals: Signals generated this tick (may be empty/None).
+            tick_results: TickResults from portfolio processing.
+        """
+        if self.state_store is None or self.session_id is None:
+            return
+
+        timestamp = tick[0].timestamp if tick else None
+        if timestamp is None:
+            return
+
+        try:
+            self.state_store.save_tick(
+                self.session_id,
+                timestamp,
+                tick,
+                self.pf.cash if self.pf else 0.0,
+                self.pf.total_value if self.pf else 0.0,
+                signals,
+            )
+            if self.om:
+                self.state_store.save_orders(self.session_id, self.om.all_orders)
+        except Exception:
+            logger.exception("Failed to persist tick to state_store")
 
     def warm_up(self, data_provider: DataProvider):
         """Pre-populate the algorithm's price history from a DataProvider.
@@ -312,7 +395,7 @@ class AsyncEngine(BaseEngine):
         Sync entry point. Creates an event loop and runs start().
 
         Blocks until the data stream ends or the engine is stopped.
-        This is the typical entry point for scripts and launchers.
+    This is the typical entry point for scripts and launchers.
         """
         asyncio.run(self.start())
 

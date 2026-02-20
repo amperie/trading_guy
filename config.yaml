@@ -15,6 +15,15 @@ mlflow:
   run_name_prefix: ""  # Optional prefix for run names
   auto_log_system_info: true  # Automatically log system/environment info
 
+state_store:
+  enabled: false  # Master switch — nothing is written to MongoDB unless true
+  connection_uri: "mongodb://hp.lan:27017"  # Standard pymongo URI; auth example: mongodb://user:pass@host:port
+  database: "trading"  # MongoDB database name; 5 collections are created automatically (sessions, ticks, portfolio_snapshots, orders, signals)
+  session_id: null  # null = new UUID generated each run; paste a UUID here to resume/append to an existing session
+  session_name: ""  # Arbitrary label stored with the session; visible in list_sessions()
+  account_id: ""  # Groups sessions by account; filter with store.list_sessions(account_id=...)
+  metadata: {}  # Free-form dict stored on the session document (e.g. strategy params, notes)
+
 data_provider:
   provider: data_providers.test_data_provider.TestDataProvider
   path: "data/SPXU.csv"

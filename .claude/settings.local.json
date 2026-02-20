@@ -33,7 +33,10 @@
       "Bash(git -C \"E:\\\\Programming\\\\trading_guy\" add README.md)",
       "Bash(git -C \"E:\\\\Programming\\\\trading_guy\" commit -m \"$\\(cat <<''EOF''\nRewrite README with Mermaid architecture diagrams and image grid\n\nAdd 4 Mermaid diagrams \\(pipeline flowchart, tick loop sequence diagram,\norder state machine, Ray Tune optimization topology\\) and display all 7\nexample chart images in a 2-column table layout.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
       "WebFetch(domain:alpaca.markets)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "WebFetch(domain:docs.alpaca.markets)",
+      "Bash(test -f E:/Programming/trading_guy/data/test_data.csv)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []
