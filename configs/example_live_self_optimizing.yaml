@@ -1,0 +1,123 @@
+# Live trading with MACD RSI algorithm and weekly self-optimization
+#
+# Usage:
+#   python run.py live --config configs/example_live_self_optimizing.yaml
+#   python run.py live --config configs/example_live_self_optimizing.yaml --cash 50000
+#   python run.py live --config configs/example_live_self_optimizing.yaml --no-mlflow
+#
+# How it works:
+#   1. Starts a live Alpaca WebSocket stream (AlpacaRealTimeEngine)
+#   2. Trades using MACD RSI signals on SPY via SingleSymbolPortfolio
+#   3. Once per week, spawns a background thread that:
+#      a. Fetches the last 90 days of historical 5-minute bars from Alpaca
+#      b. Runs Ray Tune HPO (50 trials) on that rolling window
+#      c. Runs a baseline backtest with the current params on the same window
+#      d. If the HPO-best config improves annualized return by >= 5%,
+#         hot-swaps the algorithm and portfolio params via reconfigure()
+#   4. Trading continues uninterrupted during optimization (~minutes)
+#   5. Each optimization event is logged to MLflow
+#
+# Requirements:
+#   - alpaca-py, ray[tune], optuna
+#   - Alpaca API credentials (set below or via ALPACA_API_KEY / ALPACA_SECRET_KEY env vars)
+#   - MLflow server at http://hp.lan:8899 (for logging optimization events)
+#
+# Thread safety:
+#   - A threading.Lock prevents ticks from being processed mid-reconfigure
+#   - The lock is held for ~1ms during parameter swap — no noticeable latency
+
+mode: live
+
+# ---------------------------------------------------------------------------
+# Algorithm — MACD RSI with starting parameters (HPO may override weekly)
+# ---------------------------------------------------------------------------
+algorithm:
+  algorithm: "trading.core.algorithms.macd_rsi_algorithm.MacdRsiAlgorithm"
+  macd_fastperiod: 12
+  macd_slowperiod: 26
+  macd_signalperiod: 9
+  rsi_period: 14
+  extra_history_period: 200
+
+# ---------------------------------------------------------------------------
+# Portfolio — single-symbol with bracket orders
+# ---------------------------------------------------------------------------
+portfolio:
+  portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
+  symbol: "SPY"
+  cash: 10000
+  keep_history: true
+  stop_pct: 5.0
+  profit_pct: 10.0
+  sync_with_broker: true   # Periodically sync cash/positions from Alpaca
+  sync_interval: 60        # Sync every 60 ticks
+
+# ---------------------------------------------------------------------------
+# Order manager — Alpaca live/paper orders
+# ---------------------------------------------------------------------------
+order_manager:
+  order_manager: "trading.core.om.alpaca_om.AlpacaOrderManager"
+  paper: true              # Set to false for real money
+  time_in_force: "day"
+  # api_key and secret_key are propagated from the alpaca section below
+
+# ---------------------------------------------------------------------------
+# Alpaca connection — WebSocket streaming + warmup
+# ---------------------------------------------------------------------------
+alpaca:
+  api_key: ""              # Or set ALPACA_API_KEY env var
+  secret_key: ""           # Or set ALPACA_SECRET_KEY env var
+  symbols_to_subscribe: ["SPY"]
+  subscribe_to_bars: true
+  subscribe_to_quotes: false
+  subscribe_to_trades: false
+  warmup:
+    provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+    timeframe: "5Min"
+    # limit auto-derived from algorithm's history_length (extra_history_period + macd_slowperiod)
+    # api_key, secret_key, symbols auto-propagated from alpaca section
+
+# ---------------------------------------------------------------------------
+# Self-optimization — background HPO on a weekly schedule
+# ---------------------------------------------------------------------------
+optimization:
+  enabled: true
+  schedule: weekly                  # daily | weekly | monthly
+  rolling_window_days: 90           # Use last 90 days of data for HPO backtests
+  improvement_threshold_pct: 5.0    # Only reconfigure if improvement >= 5%
+  num_trials: 50                    # Ray Tune trials per optimization run
+  max_concurrent_trials: 8          # Parallel Ray workers
+
+  # Hyperparameter search space
+  search_space:
+    macd_fastperiod:    { type: uniform, low: 5, high: 100 }
+    macd_slowperiod:    { type: uniform, low: 50, high: 500 }
+    macd_signalperiod:  { type: uniform, low: 5, high: 100 }
+    rsi_period:         { type: uniform, low: 5, high: 100 }
+    stop_pct:           { type: uniform, low: 1.0, high: 20.0 }
+    profit_pct:         { type: uniform, low: 1.0, high: 25.0 }
+
+  # Which search_space keys go to which component
+  algorithm_param_keys:
+    - macd_fastperiod
+    - macd_slowperiod
+    - macd_signalperiod
+    - rsi_period
+  portfolio_param_keys:
+    - stop_pct
+    - profit_pct
+
+  # Historical data provider for fetching the rolling window during optimization
+  # Uses the same Alpaca API to pull 5-minute bars for the last 90 days
+  historical_data_provider:
+    provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+    symbols: ["SPY"]
+    timeframe: "5Min"
+    # api_key and secret_key auto-propagated from alpaca section
+
+# ---------------------------------------------------------------------------
+# Analysis — disabled for live (optimization events are logged to MLflow separately)
+# ---------------------------------------------------------------------------
+analysis:
+  enabled: false
+  log_to_mlflow: false

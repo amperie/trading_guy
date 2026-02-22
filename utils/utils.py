@@ -68,6 +68,39 @@ def trim_dictionary(dictionary: dict, keys_to_delete: list[str]) -> dict:
     return dictionary
 
 
+def parse_search_space(config_dict: dict) -> dict:
+    """Convert YAML search_space config to Ray Tune distributions.
+
+    Each entry should have a 'type' key and distribution-specific params:
+        - randint: {type: randint, low: 5, high: 50}
+        - uniform: {type: uniform, low: 1.0, high: 20.0}
+        - choice: {type: choice, values: [1, 2, 3]}
+        - loguniform: {type: loguniform, low: 1e-4, high: 1.0}
+
+    Args:
+        config_dict: Dictionary mapping parameter names to distribution specs.
+
+    Returns:
+        Dictionary mapping parameter names to Ray Tune sample objects.
+    """
+    from ray import tune
+
+    space = {}
+    for key, spec in config_dict.items():
+        t = spec["type"]
+        if t == "randint":
+            space[key] = tune.randint(spec["low"], spec["high"])
+        elif t == "uniform":
+            space[key] = tune.uniform(spec["low"], spec["high"])
+        elif t == "choice":
+            space[key] = tune.choice(spec["values"])
+        elif t == "loguniform":
+            space[key] = tune.loguniform(spec["low"], spec["high"])
+        else:
+            raise ValueError(f"Unknown search space type '{t}' for key '{key}'")
+    return space
+
+
 def aggregate_stock_data(
     df: pd.DataFrame,
     interval: str = '5min',

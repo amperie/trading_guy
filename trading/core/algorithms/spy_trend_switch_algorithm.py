@@ -108,3 +108,11 @@ class SpyTrendSwitchAlgorithm(Algorithm):
                 },
             )
         ]
+
+    def reconfigure(self, new_params: dict) -> None:
+        super().reconfigure(new_params)
+        for attr in ("fast_window", "slow_window"):
+            if attr in new_params:
+                setattr(self, attr, int(new_params[attr]))
+        if "strength_scale" in new_params:
+            self.strength_scale = new_params["strength_scale"]

@@ -556,3 +556,8 @@ class Portfolio(ABC):
             Return TickResults(orders=[]) if no orders should be placed.
         """
         raise NotImplementedError("process_market_signals_logic needs to be overridden")
+
+    def reconfigure(self, new_params: dict) -> None:
+        """Update portfolio config without losing cash/positions/history."""
+        self.cfg.update(new_params)
+        logger.info(f"{self.__class__.__name__} reconfigured: {new_params}")

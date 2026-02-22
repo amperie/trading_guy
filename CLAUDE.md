@@ -38,6 +38,7 @@ Each component is designed to be swappable via configuration, enabling easy test
 - Access price history via `self.price_history[symbol]` (deque of closing prices)
 - Access full PriceData history via `self.price_data_history[symbol]` (deque of PriceData objects)
 - History is automatically managed with configurable maxlen for memory efficiency
+- **`reconfigure(new_params)`**: Update algorithm parameters without losing price history. Subclasses override to also update cached instance variables (e.g. `self.macd_fastperiod`). All built-in algorithms (`MacdRsiAlgorithm`, `SpyTrendMACDAlgorithm`, `SpyTrendSwitchAlgorithm`, `MacdRsiAlgorithmWithStrengths`) have overrides.
 
 **DataProvider Base Class:**
 - All data providers inherit from `data_providers.data_provider.DataProvider`
@@ -53,6 +54,7 @@ Each component is designed to be swappable via configuration, enabling easy test
 - Automatically processes filled orders and updates positions/cash
 - Manages pending orders and queries OrderManager for status updates
 - Optional history tracking: `tick_history`, `cash_history`, `value_history` (enabled via `keep_history: true`)
+- **`reconfigure(new_params)`**: Update portfolio config without losing cash, positions, or history. `SingleSymbolPortfolio` and `DualSymbolSwitchPortfolio` read params like `stop_pct`/`profit_pct` from `self.cfg` each tick, so the base implementation is sufficient.
 - **Implementations:**
   - `SingleSymbolPortfolio` (core/pf/): Manages one symbol, buys with all available cash or sells all positions
 
@@ -150,6 +152,191 @@ Each component is designed to be swappable via configuration, enabling easy test
   )
   # View interactive chart in MLflow UI: http://hp.lan:8899
   ```
+
+**WalkForwardEngine (Self-Optimizing Backtest):**
+- Located in `trading/engines/walk_forward_engine.py`
+- Splits historical data into rolling optimization + out-of-sample trading windows
+- Re-optimizes parameters at each period boundary using Ray Tune HPO
+- **How it works:**
+  1. Computes period boundaries from DataProvider's date range
+  2. For each period: runs HPO on the optimization window, compares against current params, adopts if improvement exceeds threshold, then runs out-of-sample backtest on the trading window
+  3. Logs each period as a nested MLflow run under a parent aggregate run
+  4. Returns per-period metrics and aggregate statistics
+- **Data timeline:**
+  ```
+  |--- opt 90d ---|-- trade 30d --|
+                  |--- opt 90d ---|-- trade 30d --|
+                                  |--- opt 90d ---|-- trade 30d --|
+  ```
+- **Configuration (passed as `cfg` dict):**
+  ```yaml
+  walk_forward:
+    optimization_window_days: 90    # HPO lookback window
+    trading_window_days: 30         # Out-of-sample trading window
+    improvement_threshold_pct: 5.0  # Minimum improvement to adopt new params
+    num_trials: 50                  # Ray Tune HPO trials per period
+    max_concurrent_trials: 8        # Parallel HPO trials
+    search_space:                   # Parameters to optimize
+      macd_fast_period:  { type: randint, low: 5, high: 50 }
+      macd_slow_period:  { type: randint, low: 20, high: 200 }
+      stop_pct:          { type: uniform, low: 1.0, high: 20.0 }
+      profit_pct:        { type: uniform, low: 1.0, high: 25.0 }
+    algorithm_param_keys: [macd_fast_period, macd_slow_period]
+    portfolio_param_keys: [stop_pct, profit_pct]
+  experiment_name: "Walk Forward Backtest"
+  run_name: "WalkForward"
+  ```
+- **Search space types:** `randint`, `uniform`, `choice`, `loguniform` (parsed by `utils.utils.parse_search_space()`)
+- **Key methods:**
+  - `run()` → Executes the full walk-forward backtest, returns `{ periods: [...], aggregate: {...} }`
+  - `_compute_periods()` → Calculates optimization/trading window boundaries
+  - `_run_optimization(opt_dp)` → Runs HPO via `tune_backtest_hyperparameters()`
+  - `_run_period(...)` → Runs a single period: optimize, compare, decide, trade
+  - `_aggregate_results(period_results)` → Computes mean return, mean Sharpe, total trades, etc.
+- **MLflow output:**
+  - Parent run: `"{run_name}_aggregate"` — logs aggregate metrics + walk-forward config
+  - Nested runs (one per period): `"Period_{i}_{trade_start}_{trade_end}"` — logs period metrics, HPO best config, used config, adopted flag
+- **Example Usage:**
+  ```python
+  from trading.engines.walk_forward_engine import WalkForwardEngine
+  from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+  from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
+  from trading.data_providers.test_data_provider import TestDataProvider
+  from trading.core.om.backtesting_om import BacktestingOrderManager
+
+  # Instantiate components (used as templates — engine clones their types + configs)
+  om = BacktestingOrderManager()
+  alg = SpyTrendMACDAlgorithm({
+      "spy_symbol": "SPY", "upro_symbol": "UPRO", "spxu_symbol": "SPXU",
+      "macd_fast_period": 12, "macd_slow_period": 26, "macd_signal_period": 9,
+  })
+  dp = TestDataProvider({"path": "data/SPY_UPRO_SPXU_5min.csv", "truncate": 0})
+  pf = DualSymbolSwitchPortfolio(
+      {"upro_symbol": "UPRO", "spxu_symbol": "SPXU", "stop_pct": 5.0, "profit_pct": 10.0},
+      om, 1000.0, {}, True,
+  )
+
+  engine = WalkForwardEngine(
+      cfg={
+          "experiment_name": "SPY MACD Walk-Forward",
+          "run_name": "SPY_MACD_WF",
+          "walk_forward": {
+              "optimization_window_days": 90,
+              "trading_window_days": 30,
+              "improvement_threshold_pct": 5.0,
+              "num_trials": 50,
+              "max_concurrent_trials": 8,
+              "search_space": {
+                  "macd_fast_period":  {"type": "randint", "low": 5, "high": 50},
+                  "macd_slow_period":  {"type": "randint", "low": 20, "high": 200},
+                  "stop_pct":          {"type": "uniform", "low": 1.0, "high": 20.0},
+              },
+              "algorithm_param_keys": ["macd_fast_period", "macd_slow_period"],
+              "portfolio_param_keys": ["stop_pct"],
+          },
+      },
+      dp=dp, al=alg, om=om, pf=pf,
+  )
+
+  results = engine.run()
+  # results["periods"] — list of per-period dicts with metrics, trades, adopted flag, configs
+  # results["aggregate"] — dict with mean_return_pct, mean_sharpe_ratio, total_trades, etc.
+  ```
+- **Launcher shortcut:** `run_walk_forward_spy_trend_macd()` in `trading/launchers/run_launchers.py`
+
+**SelfOptimizingLiveEngine (Self-Optimizing Live Trading):**
+- Located in `trading/engines/self_optimizing_live_engine.py`
+- Wraps any `AsyncEngine` (e.g. `AlpacaRealTimeEngine`) and adds periodic background HPO
+- The inner engine continues trading while optimization runs in a background thread
+- When HPO finds parameters that improve on the current config by more than a threshold, the algorithm and portfolio are hot-swapped via `reconfigure()`
+- **How it works:**
+  1. Wraps the inner engine's `on_tick()` to add performance tracking and optimization scheduling
+  2. On each tick, checks if optimization is due (based on schedule: `daily`, `weekly`, `monthly`)
+  3. When due, spawns a background thread that: fetches historical data, runs HPO, runs baseline comparison, and reconfigures if improvement exceeds threshold
+  4. Uses a `threading.Lock` to prevent ticks from being processed mid-reconfigure (~1ms hold time)
+- **Thread safety:**
+  - `_hpo_lock` is acquired briefly during `reconfigure()` and during each `on_tick()`
+  - HPO runs in a daemon thread — does not block tick processing
+  - Only one optimization can run at a time (`_is_optimizing` flag)
+- **Configuration:**
+  ```yaml
+  optimization:
+    enabled: true
+    schedule: daily               # daily | weekly | monthly
+    rolling_window_days: 90       # Historical window for HPO backtests
+    improvement_threshold_pct: 5.0
+    num_trials: 50
+    max_concurrent_trials: 8
+    search_space:
+      macd_fast_period:  { type: randint, low: 5, high: 50 }
+      stop_pct:          { type: uniform, low: 1.0, high: 20.0 }
+    algorithm_param_keys: [macd_fast_period]
+    portfolio_param_keys: [stop_pct]
+    historical_data_provider:
+      provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+      symbols: ["SPY", "UPRO", "SPXU"]
+      timeframe: "5Min"
+  ```
+- **Key methods:**
+  - `run()` → Starts the inner engine (blocking, calls `inner.run()`)
+  - `start()` / `stop()` → Async lifecycle (calls `inner.start()` / `inner.stop()`)
+  - `_wrapped_on_tick(tick)` → Intercepts ticks for performance tracking + optimization scheduling
+  - `_run_optimization()` → Background thread: HPO → compare → reconfigure if improved
+  - `_create_historical_dp()` → Creates a DataProvider for the rolling historical window
+- **MLflow output:** Each optimization event is logged as a separate run with:
+  - Run name: `"HPO_{YYYYMMDD_HHMM}"`
+  - Params: best HPO config
+  - Metrics: `current_metric`, `best_metric`, `improvement_pct`
+  - Tag: `reconfigured=True/False`
+- **Example Usage:**
+  ```python
+  from trading.engines.self_optimizing_live_engine import SelfOptimizingLiveEngine
+  from trading.engines.alpaca_engine import AlpacaRealTimeEngine
+
+  # 1. Create and configure the inner live engine as usual
+  engine_cfg = {
+      "api_key": "PK...",
+      "secret_key": "...",
+      "symbols_to_subscribe": ["SPY", "UPRO", "SPXU"],
+      # ... other AlpacaRealTimeEngine config
+  }
+  inner_engine = AlpacaRealTimeEngine(cfg=engine_cfg, dp=None, al=algo, om=om, pf=pf)
+
+  # 2. Wrap with self-optimizing engine
+  optimization_cfg = {
+      "schedule": "daily",
+      "rolling_window_days": 90,
+      "improvement_threshold_pct": 5.0,
+      "num_trials": 50,
+      "max_concurrent_trials": 8,
+      "search_space": {
+          "macd_fast_period":  {"type": "randint", "low": 5, "high": 50},
+          "macd_slow_period":  {"type": "randint", "low": 20, "high": 200},
+          "stop_pct":          {"type": "uniform", "low": 1.0, "high": 20.0},
+      },
+      "algorithm_param_keys": ["macd_fast_period", "macd_slow_period"],
+      "portfolio_param_keys": ["stop_pct"],
+      "historical_data_provider": {
+          "provider": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "symbols": ["SPY", "UPRO", "SPXU"],
+          "timeframe": "5Min",
+      },
+  }
+  self_opt_engine = SelfOptimizingLiveEngine(inner_engine, optimization_cfg)
+
+  # 3. Run — inner engine streams live data, HPO runs in background on schedule
+  self_opt_engine.run()
+  ```
+
+**PerformanceTracker:**
+- Located in `utils/performance_tracker.py`
+- Tracks rolling portfolio value over a sliding time window
+- Used internally by `SelfOptimizingLiveEngine` to monitor live performance
+- **Key methods:**
+  - `update(timestamp, portfolio_value)` → Record a snapshot, prune entries older than window
+  - `annualized_return()` → Calculate annualized return over current window (returns `None` if < 2 data points)
+  - `num_observations` (property) → Number of value snapshots in window
+  - `latest_value` (property) → Most recent portfolio value
 
 **MLflowClient:**
 - Located in `utils/mlflow_client.py`
@@ -265,6 +452,8 @@ engines/                   # Execution engines
   simulator.py             # Backtesting engine (orchestrates data → algo → portfolio → OM)
   real_time.py             # Live trading engine (for production deployment)
   analysis_engine.py       # Comprehensive backtesting analysis engine (30+ metrics, visualizations, reports)
+  walk_forward_engine.py   # Walk-forward backtesting with rolling HPO re-optimization
+  self_optimizing_live_engine.py  # Live engine wrapper with periodic background HPO
 
 algorithms/                # Trading algorithm implementations
   test_algorithm.py        # Example algorithm (random buy/sell signals)
@@ -273,7 +462,8 @@ utils/                     # Shared utilities
   config_manager.py        # Singleton config loader (reads config.yaml)
   logger.py                # Singleton logger (configured via config.yaml)
   mlflow_client.py         # MLflow experiment tracking client (logs runs, metrics, artifacts)
-  utils.py                 # Helper functions (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, etc.)
+  performance_tracker.py   # Rolling portfolio performance tracker (used by SelfOptimizingLiveEngine)
+  utils.py                 # Helper functions (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, parse_search_space, etc.)
 
 tests/                     # Test suite (123 tests, 91 passing)
   README.md                # Comprehensive test suite documentation
@@ -613,6 +803,35 @@ signal = find_marketsignal_in_list("AAPL", signals)
 - Required columns: `timestamp`, `symbol`, `open`, `high`, `low`, `close`, `volume`
 - Optional columns: `trade_count`, `vwap`, `exchange`
 - Timestamps will be parsed and sorted automatically
+
+**6. Reconfiguring algorithms and portfolios at runtime:**
+- Call `algorithm.reconfigure({"macd_fast_period": 20})` to update params without losing price history
+- Call `portfolio.reconfigure({"stop_pct": 8.0})` to update params without losing cash/positions/history
+- Subclass overrides ensure cached instance vars are also updated (e.g. `self.macd_fast_period`)
+- Used by `WalkForwardEngine` and `SelfOptimizingLiveEngine` for hot-swapping optimized params
+- **When writing a new algorithm**: Override `reconfigure()` if your `__init__` caches config values into instance variables:
+  ```python
+  def reconfigure(self, new_params: dict) -> None:
+      super().reconfigure(new_params)
+      for attr in ("my_param_1", "my_param_2"):
+          if attr in new_params:
+              setattr(self, attr, new_params[attr])
+  ```
+
+**7. Search space configuration for HPO:**
+- `utils.utils.parse_search_space()` converts YAML dicts to Ray Tune distributions
+- Supported types: `randint`, `uniform`, `choice`, `loguniform`
+- Used by `WalkForwardEngine` and `SelfOptimizingLiveEngine` to parse config-driven search spaces
+- Example:
+  ```python
+  from utils.utils import parse_search_space
+  space = parse_search_space({
+      "fast_period": {"type": "randint", "low": 5, "high": 50},
+      "stop_pct":    {"type": "uniform", "low": 1.0, "high": 20.0},
+      "mode":        {"type": "choice", "values": ["aggressive", "conservative"]},
+  })
+  # space = {"fast_period": tune.randint(5, 50), "stop_pct": tune.uniform(1.0, 20.0), ...}
+  ```
 
 ### Data Aggregation Utilities
 

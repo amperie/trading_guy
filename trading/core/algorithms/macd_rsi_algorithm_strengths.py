@@ -177,3 +177,11 @@ class MacdRsiAlgorithmWithStrengths(Algorithm):
 
         return ret_val
 
+    def reconfigure(self, new_params: dict) -> None:
+        super().reconfigure(new_params)
+        for attr in ("macd_fastperiod", "macd_slowperiod", "macd_signalperiod", "rsi_period"):
+            if attr in new_params:
+                setattr(self, attr, new_params[attr])
+        if "feature_weights" in new_params:
+            self.feature_weights = new_params["feature_weights"]
+

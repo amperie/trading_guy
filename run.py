@@ -2,10 +2,11 @@
 Production launcher for backtesting and live trading.
 
 Usage:
-    python run.py backtest --config configs/example_backtest.yaml
-    python run.py backtest --config configs/example_backtest.yaml --symbol TSLA --cash 50000
-    python run.py live --config configs/example_live.yaml
-    python run.py live --config configs/example_live.yaml --symbol SPY --no-mlflow
+    python run.py backtest      --config configs/example_backtest.yaml
+    python run.py backtest      --config configs/example_backtest.yaml --symbol TSLA --cash 50000
+    python run.py live          --config configs/example_live.yaml
+    python run.py live          --config configs/example_live_self_optimizing.yaml
+    python run.py walk-forward  --config configs/example_walk_forward.yaml
 """
 
 import argparse
@@ -209,7 +210,60 @@ def cmd_live(args: argparse.Namespace):
     from trading.engines.alpaca_engine import AlpacaRealTimeEngine
 
     engine = AlpacaRealTimeEngine(cfg=alpaca_cfg, dp=dp, al=al, om=om, pf=pf)
+
+    # Wrap with SelfOptimizingLiveEngine if optimization is enabled
+    opt_cfg = cfg.get("optimization", {})
+    if opt_cfg.get("enabled", False):
+        from trading.engines.self_optimizing_live_engine import SelfOptimizingLiveEngine
+
+        # Propagate alpaca credentials to the historical data provider
+        hist_dp = opt_cfg.get("historical_data_provider", {})
+        if hist_dp and not hist_dp.get("api_key"):
+            hist_dp["api_key"] = alpaca_cfg["api_key"]
+        if hist_dp and not hist_dp.get("secret_key"):
+            hist_dp["secret_key"] = alpaca_cfg["secret_key"]
+
+        logger.info(
+            f"Self-optimization enabled: schedule={opt_cfg.get('schedule', 'daily')}, "
+            f"window={opt_cfg.get('rolling_window_days', 90)}d"
+        )
+        engine = SelfOptimizingLiveEngine(engine, opt_cfg)
+
     engine.run()
+
+
+def cmd_walk_forward(args: argparse.Namespace):
+    """Run a walk-forward backtest from a config profile."""
+    cfg = _load_config(args.config)
+    cfg = _apply_cli_overrides(cfg, args)
+
+    logger.info(f"Starting walk-forward backtest with profile: {args.config}")
+
+    dp, al, om, pf = _build_components(cfg)
+
+    # Build engine config from walk_forward section + analysis/MLflow settings
+    engine_cfg = dict(cfg.get("walk_forward", {}))
+
+    # Nest the walk_forward settings under the key the engine expects
+    engine_cfg = {
+        "walk_forward": cfg.get("walk_forward", {}),
+        "experiment_name": cfg.get("analysis", {}).get("experiment_name", "Walk Forward Backtest"),
+        "run_name": cfg.get("analysis", {}).get("run_name", "WalkForward"),
+        "description": cfg.get("analysis", {}).get("description", ""),
+    }
+
+    from trading.engines.walk_forward_engine import WalkForwardEngine
+
+    engine = WalkForwardEngine(cfg=engine_cfg, dp=dp, al=al, om=om, pf=pf)
+    results = engine.run()
+
+    agg = results.get("aggregate", {})
+    logger.info("Walk-forward complete:")
+    for key, val in agg.items():
+        if isinstance(val, float):
+            logger.info(f"  {key}: {val:.4f}")
+        else:
+            logger.info(f"  {key}: {val}")
 
 
 def main():
@@ -221,6 +275,8 @@ def main():
             "  python run.py backtest --config configs/example_backtest.yaml\n"
             "  python run.py backtest --config configs/example_backtest.yaml --symbol TSLA --cash 50000\n"
             "  python run.py live --config configs/example_live.yaml\n"
+            "  python run.py live --config configs/example_live_self_optimizing.yaml\n"
+            "  python run.py walk-forward --config configs/example_walk_forward.yaml\n"
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -240,8 +296,13 @@ def main():
     bt.set_defaults(func=cmd_backtest)
 
     # -- live subcommand --
-    live = subparsers.add_parser("live", parents=[shared], help="Run live trading")
+    live = subparsers.add_parser("live", parents=[shared], help="Run live trading (wraps with self-optimization if optimization.enabled is true)")
     live.set_defaults(func=cmd_live)
+
+    # -- walk-forward subcommand --
+    wf = subparsers.add_parser("walk-forward", parents=[shared], help="Run walk-forward backtest with rolling HPO re-optimization")
+    wf.add_argument("--data", help="Override data provider path")
+    wf.set_defaults(func=cmd_walk_forward)
 
     args = parser.parse_args()
     args.func(args)

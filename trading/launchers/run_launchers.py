@@ -538,6 +538,117 @@ def run_split_period_spy_trend_macd():
     return results
 
 
+def run_walk_forward_spy_trend_macd():
+    """
+    Run walk-forward backtest for SpyTrendMACDAlgorithm.
+
+    Splits data into rolling 90-day optimization + 30-day trading windows,
+    re-optimizing MACD parameters and stop/profit percentages at each boundary.
+    """
+    from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+    from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
+    from trading.data_providers.test_data_provider import TestDataProvider
+    from trading.core.om.backtesting_om import BacktestingOrderManager
+    from trading.engines.walk_forward_engine import WalkForwardEngine
+
+    # Algorithm configuration (default MACD parameters — HPO will override)
+    alg_cfg = {
+        "spy_symbol": "SPY",
+        "upro_symbol": "UPRO",
+        "spxu_symbol": "SPXU",
+        "macd_fast_period": 12,
+        "macd_slow_period": 26,
+        "macd_signal_period": 9,
+        "strength_scale": 20.0,
+    }
+
+    # Portfolio configuration
+    pf_cfg = {
+        "upro_symbol": "UPRO",
+        "spxu_symbol": "SPXU",
+        "min_signal_strength": 0,
+        "stop_pct": 5.0,
+        "profit_pct": 10.0,
+        "holding_period_hours": 2,
+    }
+
+    # Data provider configuration
+    dp_cfg = {
+        "path": "../data/SPY_UPRO_SPXU_5min.csv",
+        "truncate": 0,
+    }
+
+    # Walk-forward + engine configuration
+    engine_cfg = {
+        "experiment_name": "SPY MACD Walk-Forward",
+        "run_name": "SPY_MACD_WalkForward",
+        "description": "Walk-forward optimization for SPY MACD trend switching strategy",
+        "walk_forward": {
+            "optimization_window_days": 90,
+            "trading_window_days": 30,
+            "improvement_threshold_pct": 5.0,
+            "num_trials": 50,
+            "max_concurrent_trials": 8,
+            "search_space": {
+                "macd_fast_period":  {"type": "randint", "low": 5, "high": 50},
+                "macd_slow_period":  {"type": "randint", "low": 20, "high": 200},
+                "macd_signal_period": {"type": "randint", "low": 3, "high": 30},
+                "stop_pct":          {"type": "uniform", "low": 1.0, "high": 20.0},
+                "profit_pct":        {"type": "uniform", "low": 1.0, "high": 25.0},
+            },
+            "algorithm_param_keys": [
+                "macd_fast_period", "macd_slow_period", "macd_signal_period",
+            ],
+            "portfolio_param_keys": ["stop_pct", "profit_pct"],
+        },
+    }
+
+    # Instantiate components (used as templates by WalkForwardEngine)
+    om = BacktestingOrderManager()
+    alg = SpyTrendMACDAlgorithm(alg_cfg)
+    dp = TestDataProvider(dp_cfg)
+    pf = DualSymbolSwitchPortfolio(pf_cfg, om, 1000.0, {}, True)
+
+    # Create and run walk-forward engine
+    engine = WalkForwardEngine(
+        cfg=engine_cfg,
+        dp=dp,
+        al=alg,
+        om=om,
+        pf=pf,
+    )
+
+    print("=" * 80)
+    print("RUNNING WALK-FORWARD BACKTEST (MACD-BASED)")
+    print("=" * 80)
+    print()
+    print(f"Optimization window: {engine_cfg['walk_forward']['optimization_window_days']} days")
+    print(f"Trading window:      {engine_cfg['walk_forward']['trading_window_days']} days")
+    print(f"HPO trials:          {engine_cfg['walk_forward']['num_trials']}")
+    print(f"Threshold:           {engine_cfg['walk_forward']['improvement_threshold_pct']}%")
+    print()
+
+    results = engine.run()
+
+    # Print summary
+    print()
+    print("=" * 80)
+    print("WALK-FORWARD SUMMARY")
+    print("=" * 80)
+    agg = results["aggregate"]
+    for key, val in agg.items():
+        if isinstance(val, float):
+            print(f"  {key}: {val:.4f}")
+        else:
+            print(f"  {key}: {val}")
+    print("=" * 80)
+    print("MLflow UI: http://hp.lan:8899")
+    print(f"Experiment: {engine_cfg['experiment_name']}")
+    print("=" * 80)
+
+    return results
+
+
 if __name__ == "__main__":
     run_ray_spy_trend_macd()
     # run_split_period_spy_trend_macd()

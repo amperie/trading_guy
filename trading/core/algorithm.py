@@ -233,3 +233,12 @@ class Algorithm(ABC):
             strategy has no signal for this tick.
         """
         raise NotImplementedError("on_data_logic needs to be overriden")
+
+    def reconfigure(self, new_params: dict) -> None:
+        """Update algorithm parameters without losing price history.
+
+        Updates self.cfg and logs the change. Subclasses should override
+        to also update their instance variables (e.g. self.macd_fastperiod).
+        """
+        self.cfg.update(new_params)
+        logger.info(f"{self.__class__.__name__} reconfigured: {new_params}")
