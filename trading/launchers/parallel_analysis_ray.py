@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 import ray
 
-from trading.core.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
+from trading.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
 from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider

@@ -12,7 +12,7 @@ def run_alpaca_fakepaca():
     FAKEPACA is Alpaca's simulated symbol that streams data outside market
     hours, useful for end-to-end testing of the live pipeline.
     """
-    from trading.core.algorithms.test_algorithm import TestAlgorithm
+    from trading.algorithms.test_algorithm import TestAlgorithm
     from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
     from trading.core.om.alpaca_om import AlpacaOrderManager
     from trading.engines.alpaca_engine import AlpacaRealTimeEngine
@@ -32,12 +32,15 @@ def run_alpaca_fakepaca():
 
     pf_cfg = {
         "symbol": symbol,
-        "stop_pct": 0.1,
+        "stop_pct": 1.0,
         "profit_pct": 1.0,
         "sync_with_broker": True,
         "sync_interval": 1,
         "order_sync_limit": 10,
     }
+
+    from utils.config_manager import ConfigManager
+    root_cfg = ConfigManager().config
 
     engine_cfg = {
         "api_key": api_key,
@@ -48,6 +51,10 @@ def run_alpaca_fakepaca():
         "subscribe_to_trades": False,
         # "override_url": "wss://stream.data.alpaca.markets/v2/test",
     }
+
+    # Inherit state_store config from root config.yaml
+    if "state_store" in root_cfg:
+        engine_cfg["state_store"] = root_cfg["state_store"]
 
     om_cfg = {
         "api_key": api_key,

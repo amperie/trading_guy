@@ -10,7 +10,7 @@ The actual implementations are in core.ta.analyzer.TechnicalAnalyzer.
 """
 
 from typing import Optional, Tuple
-from trading.core.ta import TechnicalAnalyzer
+from trading.ta import TechnicalAnalyzer
 
 
 def calculate_ema(prices: list, period: int) -> Optional[float]:

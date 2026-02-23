@@ -80,7 +80,7 @@ def run_optimization(ray_address: str, num_samples: int = 5000, max_concurrent: 
     # Import here to ensure Ray is initialized first
     from trading.launchers.run_backtest_ray import tune_backtest_hyperparameters
     from ray import tune
-    from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+    from trading.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager

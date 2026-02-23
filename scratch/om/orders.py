@@ -11,7 +11,7 @@ sys.path.insert(0, str(project_root))
 
 from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from trading.core.algorithms.test_algorithm import TestAlgorithm
+from trading.algorithms.test_algorithm import TestAlgorithm
 from trading.data_providers.test_data_provider import TestDataProvider
 
 

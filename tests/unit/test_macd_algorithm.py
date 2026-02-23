@@ -5,7 +5,7 @@ Converted from root-level test_macd_algorithm.py script.
 import pytest
 from datetime import datetime, timedelta
 
-from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+from trading.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
 from trading.core.classes import PriceData
 
 

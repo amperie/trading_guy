@@ -25,7 +25,7 @@ def run_ray_spy_trend_macd_remote(ray_address: str = "ray://192.168.1.100:10001"
     """
     from run_backtest_ray import tune_backtest_hyperparameters
     from ray import tune
-    from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+    from trading.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager

@@ -4,7 +4,7 @@ Converted from root-level test_ema_function.py script.
 """
 import pytest
 
-from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
+from trading.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
 
 
 class TestEmaFunction:

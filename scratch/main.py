@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from trading.engines.backtest_engine import BacktestingEngine
 from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
-from trading.core.algorithms.test_algorithm import TestAlgorithm
+from trading.algorithms.test_algorithm import TestAlgorithm
 from trading.data_providers.test_data_provider import TestDataProvider
 
 def test_simulator():
@@ -47,7 +47,7 @@ def test_om():
     pass
 
 def test_indicators():
-    from trading.core.ta import TechnicalAnalyzer
+    from trading.ta import TechnicalAnalyzer
 
     data = [
         1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 12.0,

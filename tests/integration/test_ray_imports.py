@@ -10,7 +10,7 @@ class TestRayImports:
 
     def test_spy_trend_macd_algorithm_import(self):
         """Test that SpyTrendMACDAlgorithm can be imported."""
-        from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+        from trading.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
         assert SpyTrendMACDAlgorithm is not None
 
     def test_dual_symbol_switch_portfolio_import(self):

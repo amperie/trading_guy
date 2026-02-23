@@ -1,7 +1,7 @@
 from typing import Dict, Any
 from trading.core.algorithm import Algorithm
 from trading.core.classes import PriceData, MarketSignal, SignalType
-from trading.core.ta.analyzer import TechnicalAnalyzer
+from trading.ta.analyzer import TechnicalAnalyzer
 
 momentum_default_params = {
     "macd_fastperiod": 12,
@@ -184,4 +184,3 @@ class MacdRsiAlgorithmWithStrengths(Algorithm):
                 setattr(self, attr, new_params[attr])
         if "feature_weights" in new_params:
             self.feature_weights = new_params["feature_weights"]
-

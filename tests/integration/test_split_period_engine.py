@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import patch
 
 from trading.engines.split_period_backtest_engine import SplitPeriodBacktestEngine
-from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
+from trading.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
 from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
 from trading.data_providers.test_data_provider import TestDataProvider
 from trading.core.om.backtesting_om import BacktestingOrderManager

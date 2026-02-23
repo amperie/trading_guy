@@ -8,7 +8,7 @@ def run_ray_macd_rsi():
     """
     from run_backtest_ray import tune_backtest_hyperparameters
     from ray import tune
-    from trading.core.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
+    from trading.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
     from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager
@@ -81,7 +81,7 @@ def run_ray_spy_trend_switch():
     """
     from run_backtest_ray import tune_backtest_hyperparameters
     from ray import tune
-    from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
+    from trading.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager
@@ -175,7 +175,7 @@ def run_ray_spy_trend_macd():
     """
     from run_backtest_ray import tune_backtest_hyperparameters
     from ray import tune
-    from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+    from trading.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager
@@ -251,7 +251,7 @@ def run_ray_spy_trend_macd():
 
 
 def run_single_spy_trend_switch():
-    from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
+    from trading.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager
@@ -306,7 +306,7 @@ def run_split_period_spy_trend_switch():
     Both periods start fresh with the same initial cash and use identical parameters.
     Results are logged to MLflow with validation run including training metrics for comparison.
     """
-    from trading.core.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
+    from trading.algorithms.spy_trend_switch_algorithm import SpyTrendSwitchAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager
@@ -425,7 +425,7 @@ def run_split_period_spy_trend_macd():
     - MACD > Signal = Bullish -> UPRO
     - MACD < Signal = Bearish -> SPXU
     """
-    from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+    from trading.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager
@@ -545,7 +545,7 @@ def run_walk_forward_spy_trend_macd():
     Splits data into rolling 90-day optimization + 30-day trading windows,
     re-optimizing MACD parameters and stop/profit percentages at each boundary.
     """
-    from trading.core.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
+    from trading.algorithms.spy_trend_macd_algorithm import SpyTrendMACDAlgorithm
     from trading.core.pf.dual_symbol_switch_portfolio import DualSymbolSwitchPortfolio
     from trading.data_providers.test_data_provider import TestDataProvider
     from trading.core.om.backtesting_om import BacktestingOrderManager

@@ -6,7 +6,7 @@ including the dataclass return types.
 """
 
 import pytest
-from trading.core.ta import TechnicalAnalyzer, RSI, MACD, EMA
+from trading.ta import TechnicalAnalyzer, RSI, MACD, EMA
 
 
 class TestTechnicalAnalyzerRSI:

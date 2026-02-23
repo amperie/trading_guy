@@ -5,7 +5,7 @@ Provides dataclasses and calculation methods for common technical indicators
 including MACD, RSI, Bollinger Bands, Stochastic, ATR, ADX, CCI, and Williams %R.
 """
 
-from trading.core.ta.analyzer import (
+from trading.ta.analyzer import (
     TechnicalAnalyzer,
     MACD,
     RSI,

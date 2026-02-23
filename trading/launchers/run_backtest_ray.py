@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Type
 
 from trading.core.algorithm import Algorithm
-from trading.core.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
+from trading.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
 from trading.core.om.backtesting_om import BacktestingOrderManager
 from trading.core.om.order_manager import OrderManager
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
@@ -348,7 +348,7 @@ def run_single_backtest(
             - report: Formatted text report string
 
     Example:
-        from trading.core.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
+        from trading.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
         from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
         from trading.data_providers.test_data_provider import TestDataProvider
         from trading.core.om.backtesting_om import BacktestingOM
