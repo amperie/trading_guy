@@ -1,0 +1,90 @@
+# Live trading with SPY MACD trend switching between UPRO (bull) and SPXU (bear)
+#
+# Usage:
+#   python run.py live --config configs/example_live_spy_trend_macd.yaml
+#   python run.py live --config configs/example_live_spy_trend_macd.yaml --cash 5000
+#
+# Strategy:
+#   SpyTrendMACDAlgorithm watches SPY's MACD indicator:
+#     - MACD line > Signal line  ->  Bullish  ->  BUY UPRO (3x leveraged long)
+#     - MACD line < Signal line  ->  Bearish  ->  BUY SPXU (3x leveraged short)
+#   Only emits a signal when the regime flips (crossover).
+#
+#   DualSymbolSwitchPortfolio receives BUY signals and:
+#     - Enters with a bracket order (stop-loss + profit-taker)
+#     - Never holds both UPRO and SPXU at the same time
+#     - Enforces a holding period before allowing a switch
+#     - On regime flip: triggers manual sale of current position, buys new target next tick
+#
+# Requirements:
+#   - alpaca-py (pip install alpaca-py)
+#   - Alpaca API credentials (set below or via ALPACA_API_KEY / ALPACA_SECRET_KEY env vars)
+#   - Must subscribe to all three symbols: SPY (for signals), UPRO and SPXU (for trading)
+
+mode: live
+
+# ---------------------------------------------------------------------------
+# Algorithm — SPY MACD trend detection
+# Watches SPY price history and computes MACD crossover to determine regime
+# ---------------------------------------------------------------------------
+algorithm:
+  algorithm: "trading.core.algorithms.spy_trend_macd_algorithm.SpyTrendMACDAlgorithm"
+  spy_symbol: "SPY"
+  upro_symbol: "UPRO"
+  spxu_symbol: "SPXU"
+  macd_fast_period: 12       # Fast EMA period (standard: 12)
+  macd_slow_period: 26       # Slow EMA period (standard: 26)
+  macd_signal_period: 9      # Signal line EMA period (standard: 9)
+  strength_scale: 20.0       # Multiplier for signal strength (larger histogram = stronger)
+
+# ---------------------------------------------------------------------------
+# Portfolio — dual-symbol switch with bracket orders
+# Switches between UPRO and SPXU, one position at a time
+# ---------------------------------------------------------------------------
+portfolio:
+  portfolio: "trading.core.pf.dual_symbol_switch_portfolio.DualSymbolSwitchPortfolio"
+  upro_symbol: "UPRO"
+  spxu_symbol: "SPXU"
+  cash: 10000
+  keep_history: true
+  min_signal_strength: 0     # Accept any signal strength (0 = no filter)
+  stop_pct: 5.0              # Stop-loss: exit if price drops 5% from entry
+  profit_pct: 10.0           # Profit-taker: exit if price rises 10% from entry
+  holding_period_hours: 2    # Minimum hours to hold before allowing a switch
+  tx_cost: 0.0               # Transaction cost per order (0 for commission-free)
+  sync_with_broker: true     # Periodically sync cash/positions from Alpaca
+  sync_interval: 60          # Sync every 60 ticks
+
+# ---------------------------------------------------------------------------
+# Order manager — Alpaca live/paper orders
+# ---------------------------------------------------------------------------
+order_manager:
+  order_manager: "trading.core.om.alpaca_om.AlpacaOrderManager"
+  paper: true                # Set to false for real money trading
+  time_in_force: "day"
+  # api_key and secret_key are propagated from the alpaca section below
+
+# ---------------------------------------------------------------------------
+# Alpaca connection — WebSocket streaming + algorithm warmup
+# Must subscribe to SPY (for MACD signals) plus UPRO and SPXU (for trading)
+# ---------------------------------------------------------------------------
+alpaca:
+  api_key: ""                # Or set ALPACA_API_KEY env var
+  secret_key: ""             # Or set ALPACA_SECRET_KEY env var
+  symbols_to_subscribe: ["SPY", "UPRO", "SPXU"]
+  subscribe_to_bars: true
+  subscribe_to_quotes: false
+  subscribe_to_trades: false
+  warmup:
+    provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+    symbols: ["SPY", "UPRO", "SPXU"]
+    timeframe: "1Min"
+    # limit auto-derived from algorithm's history_length (macd_slow_period + macd_signal_period = 35)
+    # api_key, secret_key auto-propagated from alpaca section
+
+# ---------------------------------------------------------------------------
+# Analysis — disabled for live trading
+# ---------------------------------------------------------------------------
+analysis:
+  enabled: false
+  log_to_mlflow: false
