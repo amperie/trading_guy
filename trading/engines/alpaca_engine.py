@@ -161,16 +161,57 @@ class AlpacaRealTimeEngine(AsyncEngine):
             from utils.utils import instantiate_from_string
             warmup_cfg = dict(warmup_cfg)  # don't mutate original
             provider_path = warmup_cfg.pop("provider")
-            # Default limit to the algorithm's history_length so we fetch
-            # exactly the number of bars needed to fill the deque.
-            # Multiply by the number of symbols because the Alpaca API
-            # limit is the total bar count across all symbols, not per-symbol.
+            # Propagate Alpaca credentials and symbols into warmup config
+            warmup_cfg.setdefault("api_key", self._api_key)
+            warmup_cfg.setdefault("secret_key", self._secret_key)
+            warmup_cfg.setdefault("symbols", list(self._symbols_to_subscribe))
+
+            # Compute a start_date if not provided, so the API looks back far enough.
+            # Without start_date, Alpaca defaults to "beginning of current day" which
+            # has far too few bars for large history_length values.
+            if "start_date" not in warmup_cfg and self.al.history_length > 0:
+                from datetime import datetime, timedelta
+                timeframe = warmup_cfg.get("timeframe", "Minute")
+                bars_needed = self.al.history_length
+                # Estimate calendar days needed based on timeframe
+                # (trading day ~ 6.5 hours = 390 minutes, ~252 trading days/year)
+                MINUTES_PER_TRADING_DAY = 390
+                if timeframe == "Minute":
+                    trading_days = (bars_needed / MINUTES_PER_TRADING_DAY) + 1
+                elif timeframe == "Hour":
+                    trading_days = (bars_needed / 6.5) + 1
+                elif timeframe == "Day":
+                    trading_days = bars_needed + 1
+                elif timeframe == "Week":
+                    trading_days = bars_needed * 5 + 5
+                elif timeframe == "Month":
+                    trading_days = bars_needed * 22 + 22
+                else:
+                    trading_days = bars_needed  # fallback
+                # Convert trading days to calendar days (roughly 5/7 ratio, plus buffer)
+                calendar_days = int(trading_days * 7 / 5) + 5
+                start_dt = datetime.now() - timedelta(days=calendar_days)
+                warmup_cfg["start_date"] = start_dt.strftime("%Y-%m-%d")
+
+            # Also set limit as a cap: total bars across all symbols
+            # (Alpaca API limit is total across symbols, not per-symbol)
             if "limit" not in warmup_cfg and self.al.history_length > 0:
                 num_symbols = len(warmup_cfg.get("symbols", self._symbols_to_subscribe))
                 warmup_cfg["limit"] = self.al.history_length * max(num_symbols, 1)
             logger.info(f"Warming up algorithm from provider {provider_path} (limit={warmup_cfg.get('limit')})")
             dp = instantiate_from_string(provider_path, cfg=warmup_cfg)
-            self.warm_up(dp)
+            ticks = list(dp.iterate())
+            if ticks:
+                self.al.warm_up(ticks)
+                # Seed portfolio previous_price from the last warmup tick so that
+                # _update_pf_value doesn't crash when the first live bar only
+                # contains a subset of subscribed symbols.
+                if self.pf is not None:
+                    for pd in ticks[-1]:
+                        self.pf.previous_price[pd.symbol] = pd.close
+                    logger.info(f"Seeded portfolio previous_price for {list(self.pf.previous_price.keys())}")
+            else:
+                logger.warning("Warmup returned no ticks — algorithm history not populated")
             logger.info("Algorithm warmup complete")
 
         # stream.run() is a sync wrapper around asyncio.run(_run_forever()),

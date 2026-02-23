@@ -103,9 +103,9 @@ class DataProvider(ABC):
         """
         cm = ConfigManager()
         if cfg is None:
-            self.cfg = cm.get("data_provider")
+            self.cfg = cm.get("data_provider") or {}
         else:
-            self.cfg = {**cm.get("data_provider"), **cfg}
+            self.cfg = {**(cm.get("data_provider") or {}), **cfg}
         self.data = None
 
     @abstractmethod
