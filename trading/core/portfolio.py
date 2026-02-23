@@ -468,14 +468,14 @@ class Portfolio(ABC):
             TickResults containing the list of new orders submitted this tick.
         """
         if len(signals) > 0:
-            logger.debug(f"Tick {tick[0].timestamp}: Processing {len(signals)} signals - Symbols: {[s.symbol for s in signals]}")
+            logger.info(f"Tick {tick[0].timestamp}: Processing {len(signals)} signals - Symbols: {[s.symbol for s in signals]}")
 
         # Before processing new signals, update all pending orders, portfolio value and positions
         # get the list of order IDs that changed status since last tick
         changed_orders = self.om.update_pending_orders(tick, self.positions, self.cash)
 
         if len(changed_orders) > 0:
-            logger.debug(f"Pending orders updated: {len(changed_orders)} orders changed status")
+            logger.info(f"Pending orders updated: {len(changed_orders)} orders changed status")
 
         # Update the portfolio to reflect orders that changed status
         processed_orders = self._update_pf_from_changed_orders(changed_orders)
@@ -503,12 +503,12 @@ class Portfolio(ABC):
         submitted_orders = self.om.submit_orders(orders, tick, self.positions, self.cash)
 
         if len(submitted_orders) > 0:
-            logger.debug(f"Submitted {len(submitted_orders)} new orders to OrderManager")
+            logger.info(f"Submitted {len(submitted_orders)} new orders to OrderManager")
 
         # Process any new orders that were filled immediately
         filled_orders = [o.order_id for o in submitted_orders if o.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}]
         if filled_orders:
-            logger.debug(f"{len(filled_orders)} orders filled immediately on submission")
+            logger.info(f"{len(filled_orders)} orders filled immediately on submission")
         self._update_pf_from_changed_orders(filled_orders)
 
         # Update portfolio value based on current tick, positions and cash

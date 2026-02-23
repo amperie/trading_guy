@@ -224,7 +224,7 @@ class AlpacaRealTimeEngine(AsyncEngine):
         self.stream.stop()
 
     async def _handle_bar(self, bar):
-        logger.debug(f"BAR {bar.symbol} @ {bar.timestamp} O={bar.open} H={bar.high} L={bar.low} C={bar.close} V={bar.volume}")
+        logger.info(f"BAR {bar.symbol} @ {bar.timestamp} O={bar.open} H={bar.high} L={bar.low} C={bar.close} V={bar.volume}")
         pd = PriceData.from_dict(bar.model_dump())
         await self.submit_tick([pd])
 

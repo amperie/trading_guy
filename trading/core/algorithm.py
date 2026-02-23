@@ -214,7 +214,7 @@ class Algorithm(ABC):
         self._update_history(data)
         signals = self.on_data_logic(data)
         if signals:
-            logger.debug(f"Signals generated: {[(s.type.name, s.symbol, s.strength) for s in signals]}")
+            logger.info(f"Signals generated: {[(s.type.name, s.symbol, s.strength) for s in signals]}")
         return signals
 
     @abstractmethod
