@@ -275,6 +275,7 @@ class TradingStateStore:
         cash: float,
         total_value: float,
         signals: list[MarketSignal] = None,
+        positions: dict = None,
     ):
         """Save tick data, portfolio snapshot, and signals for one timestamp.
 
@@ -285,6 +286,7 @@ class TradingStateStore:
             cash: Portfolio cash after this tick.
             total_value: Portfolio total value after this tick.
             signals: MarketSignal list from this tick (may be empty/None).
+            positions: Portfolio positions dict {symbol: Position} (may be empty/None).
         """
         # Tick data (one document per symbol)
         for pd_obj in tick:
@@ -296,12 +298,25 @@ class TradingStateStore:
                 upsert=True,
             )
 
+        # Build positions data from current tick prices
+        positions_data = {}
+        if positions:
+            prices = {pd_obj.symbol: pd_obj.close for pd_obj in tick}
+            for symbol, pos in positions.items():
+                price = prices.get(symbol)
+                positions_data[symbol] = {
+                    "quantity": pos.quantity,
+                    "price": price,
+                    "market_value": pos.quantity * price if price else 0,
+                }
+
         # Portfolio snapshot
         snap = {
             "session_id": session_id,
             "timestamp": timestamp,
             "cash": cash,
             "total_value": total_value,
+            "positions": positions_data,
         }
         self._snapshots.replace_one(
             {"session_id": session_id, "timestamp": timestamp},

@@ -213,6 +213,7 @@ class BaseEngine(ABC):
                 self.pf.cash if self.pf else 0.0,
                 self.pf.total_value if self.pf else 0.0,
                 signals,
+                self.pf.positions if self.pf else {},
             )
             if self.om:
                 self.state_store.save_orders(self.session_id, self.om.all_orders)
