@@ -7,6 +7,78 @@ from pathlib import Path
 from utils.config_manager import ConfigManager
 
 
+class ColorFormatter(logging.Formatter):
+    """Formatter that adds ANSI color codes based on log level."""
+
+    COLORS = {
+        logging.DEBUG: "\033[36m",      # Cyan
+        logging.INFO: "\033[32m",       # Green
+        logging.WARNING: "\033[33m",    # Yellow
+        logging.ERROR: "\033[31m",      # Red
+        logging.CRITICAL: "\033[1;31m", # Bold Red
+    }
+    RESET = "\033[0m"
+
+    COLOR_NAMES = {
+        "red": "\033[31m",
+        "bold_red": "\033[1;31m",
+        "green": "\033[32m",
+        "yellow": "\033[33m",
+        "blue": "\033[34m",
+        "magenta": "\033[35m",
+        "cyan": "\033[36m",
+        "white": "\033[37m",
+    }
+
+    def format(self, record):
+        msg = super().format(record)
+        override = getattr(record, "color", None)
+        if override:
+            color = self.COLOR_NAMES.get(override, "")
+        else:
+            color = self.COLORS.get(record.levelno, "")
+        return f"{color}{msg}{self.RESET}" if color else msg
+
+
+class ColorLogger:
+    """Wrapper around logging.Logger that supports a ``color`` keyword argument."""
+
+    def __init__(self, logger: logging.Logger):
+        self._logger = logger
+
+    def __getattr__(self, name):
+        return getattr(self._logger, name)
+
+    def _log_with_color(self, method_name, msg, *args, **kwargs):
+        color = kwargs.pop("color", None)
+        extra = kwargs.pop("extra", None) or {}
+        if color:
+            extra["color"] = color
+        getattr(self._logger, method_name)(msg, *args, extra=extra, **kwargs)
+
+    def debug(self, msg, *args, **kwargs):
+        self._log_with_color("debug", msg, *args, **kwargs)
+
+    def info(self, msg, *args, **kwargs):
+        self._log_with_color("info", msg, *args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        self._log_with_color("warning", msg, *args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        self._log_with_color("error", msg, *args, **kwargs)
+
+    def critical(self, msg, *args, **kwargs):
+        self._log_with_color("critical", msg, *args, **kwargs)
+
+    def log(self, level, msg, *args, **kwargs):
+        color = kwargs.pop("color", None)
+        extra = kwargs.pop("extra", None) or {}
+        if color:
+            extra["color"] = color
+        self._logger.log(level, msg, *args, extra=extra, **kwargs)
+
+
 class Logger:
     """
     Singleton logger that configures itself from config.yaml.
@@ -63,7 +135,7 @@ class Logger:
 
         if log_to_console:
             console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setFormatter(logging.Formatter(log_format))
+            console_handler.setFormatter(ColorFormatter(log_format))
             handlers.append(console_handler)
 
         if log_to_file and log_filename:
@@ -104,6 +176,6 @@ class Logger:
             except OSError:
                 pass
 
-    def get_logger(self, name: str) -> logging.Logger:
+    def get_logger(self, name: str) -> ColorLogger:
         """Get a logger instance for a specific module."""
-        return logging.getLogger(name)
+        return ColorLogger(logging.getLogger(name))
