@@ -111,29 +111,26 @@ class AlpacaRealTimeEngine(AsyncEngine):
 
         self._quote_subscribe = cfg.get("subscribe_to_quotes", True)
         self._trades_subscribe = cfg.get("subscribe_to_trades", False)
-        self._quote_subscribe = cfg.get("subscribe_to_trades", False)
         self._override_url = cfg.get("override_url", None)
         self.stream = None
 
     async def _connect(self):
         # Open the connection to Alpaca
-        url_desc = f"override_url={self._override_url}" if self._override_url else "production feed (IEX)"
+        url_desc = f"override_url={self._override_url}" if self._override_url else "production feed (SIP)"
         logger.info(f"Connecting to Alpaca WebSocket ({url_desc})")
         if self._override_url is not None:
             stream = StockDataStream(
                 api_key=self._api_key,
                 secret_key=self._secret_key,
                 url_override=self._override_url,
-                feed=DataFeed.IEX,
-                # or DataFeed.SIP if you have SIP access
+                feed=DataFeed.SIP,
                 raw_data=False
             )
         else:
             stream = StockDataStream(
                 api_key=self._api_key,
                 secret_key=self._secret_key,
-                feed=DataFeed.IEX,
-                # or DataFeed.SIP if you have SIP access
+                feed=DataFeed.SIP,
                 raw_data=False
             )
         self.stream = stream
@@ -166,8 +163,11 @@ class AlpacaRealTimeEngine(AsyncEngine):
             provider_path = warmup_cfg.pop("provider")
             # Default limit to the algorithm's history_length so we fetch
             # exactly the number of bars needed to fill the deque.
+            # Multiply by the number of symbols because the Alpaca API
+            # limit is the total bar count across all symbols, not per-symbol.
             if "limit" not in warmup_cfg and self.al.history_length > 0:
-                warmup_cfg["limit"] = self.al.history_length
+                num_symbols = len(warmup_cfg.get("symbols", self._symbols_to_subscribe))
+                warmup_cfg["limit"] = self.al.history_length * max(num_symbols, 1)
             logger.info(f"Warming up algorithm from provider {provider_path} (limit={warmup_cfg.get('limit')})")
             dp = instantiate_from_string(provider_path, cfg=warmup_cfg)
             self.warm_up(dp)

@@ -2,7 +2,10 @@ from typing import Dict, Any
 
 from trading.core.algorithm import Algorithm
 from trading.core.classes import PriceData, MarketSignal, SignalType
+from utils.logger import Logger
 from utils.utils import find_pricedata_in_list
+
+logger = Logger().get_logger(__name__)
 
 
 class SpyTrendMACDAlgorithm(Algorithm):

@@ -180,19 +180,20 @@ class Algorithm(ABC):
         return self.full_history
 
     def warm_up(self, historical_ticks: list[list[PriceData]]):
-        """Pre-populate price history without generating signals.
+        """Pre-populate price history and internal algorithm state.
 
-        Feeds each tick through _update_history() so the algorithm has
-        sufficient history from the very first live tick. Not @final —
-        subclasses can extend this to initialize additional state (e.g.
-        indicator objects, rolling calculations).
+        Feeds each tick through on_data() (the full pipeline: history
+        update + on_data_logic()) so that algorithm-specific internal
+        state (e.g. indicator histories, rolling calculations) is built
+        up automatically. Generated signals are discarded since warmup
+        runs before the engine loop.
 
         Args:
             historical_ticks: List of ticks (each tick is a list[PriceData])
                 in chronological order, as returned by DataProvider.iterate().
         """
         for tick in historical_ticks:
-            self._update_history(tick)
+            self.on_data(tick)  # full pipeline, signals discarded
         logger.info(f"Algorithm warmed up with {len(historical_ticks)} historical ticks")
 
     @final

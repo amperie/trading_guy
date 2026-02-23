@@ -1,48 +1,20 @@
 logging:
   level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
   console: true
-  file_logging: false  # Set to true to enable daily-rotating file output
-  folder: "logs"  # Folder for log files
-  filename: "trading.log"  # Base filename; date suffix added on rotation
-  retention_days: 7  # How many days of log files to keep
+  file_logging: false
+  folder: "logs"
+  filename: "trading.log"
+  retention_days: 7
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 mlflow:
-  enabled: true  # Enable/disable MLflow tracking
-  tracking_uri: "http://hp.lan:8899"  # MLflow tracking server URI
-  experiment_name: "Trading Backtest"  # Default experiment name
-  artifact_location: null  # Custom artifact storage location (null = default)
-  run_name_prefix: ""  # Optional prefix for run names
-  auto_log_system_info: true  # Automatically log system/environment info
+  enabled: true
+  tracking_uri: "http://hp.lan:8899"
+  experiment_name: "Trading Backtest"
+  auto_log_system_info: true
 
 state_store:
-  enabled: true  # Master switch — nothing is written to MongoDB unless true
-  connection_uri: "mongodb://hp.lan:27017"  # Standard pymongo URI; auth example: mongodb://user:pass@host:port
-  database: "trading"  # MongoDB database name; 5 collections are created automatically (sessions, ticks, portfolio_snapshots, orders, signals)
-  session_id: "debug"  # null = new UUID generated each run; paste a UUID here to resume/append to an existing session
-  session_name: ""  # Arbitrary label stored with the session; visible in list_sessions()
-  account_id: ""  # Groups sessions by account; filter with store.list_sessions(account_id=...)
-  metadata: {}  # Free-form dict stored on the session document (e.g. strategy params, notes)
-
-data_provider:
-  provider: data_providers.test_data_provider.TestDataProvider
-  path: "data/SPXU.csv"
-  truncate: 0
-simulator:
-  data_provider:
-    provider: "data_providers.test_data_provider.TestDataProvider"
-    path: "data/test_data.csv"
-    truncate: 200
-  algorithm:
-    algorithm: "algorithms.test_algorithm.TestAlgorithm"
-    # Algorithm specific configs go here
-  order_manager:
-    order_manager: "core.order_manager.OrderManager"
-    # OM specific config goes here
-  portfolio:
-    portfolio: "core.portfolio.Portfolio"
-    keep_history: true
-    # PF specific config here
-  alpaca:
-    api_key: ""
-    secret_key: ""
+  enabled: true
+  connection_uri: "mongodb://hp.lan:27017"
+  database: "trading_hp"
+  session_id: "live_SPY_UPRO_SPXU"  # null = new UUID each run; paste a UUID to resume a session

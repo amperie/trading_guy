@@ -168,17 +168,30 @@ class BaseEngine(ABC):
         db = ss_cfg.get("database", "trading")
         self.state_store = TradingStateStore(connection_uri=uri, database=db)
 
+        # Build algo/portfolio metadata
+        algo_portfolio_meta = {
+            "algorithm_class": f"{type(self.al).__module__}.{type(self.al).__name__}" if self.al else None,
+            "algorithm_config": self.al.cfg if self.al else None,
+            "portfolio_class": f"{type(self.pf).__module__}.{type(self.pf).__name__}" if self.pf else None,
+            "portfolio_config": self.pf.cfg if self.pf else None,
+        }
+
         # Create or resume session
         session_id = ss_cfg.get("session_id")
         if session_id and self.state_store.get_session(session_id):
             self.session_id = session_id
+            self.state_store.update_session(session_id, {
+                f"metadata.{k}": v for k, v in algo_portfolio_meta.items()
+            })
             logger.info(f"Resumed state_store session {session_id[:8]}...")
         else:
+            metadata = ss_cfg.get("metadata", {})
+            metadata.update(algo_portfolio_meta)
             self.session_id = self.state_store.create_session(
                 session_id=session_id,
                 name=ss_cfg.get("session_name", ""),
                 account_id=ss_cfg.get("account_id", ""),
-                metadata=ss_cfg.get("metadata", {}),
+                metadata=metadata,
             )
             logger.info(f"Created state_store session {self.session_id[:8]}...")
 

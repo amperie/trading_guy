@@ -256,6 +256,10 @@ class TradingStateStore:
         """Return the session document or None."""
         return self._sessions.find_one({"_id": session_id})
 
+    def update_session(self, session_id: str, update: dict) -> None:
+        """Update fields on an existing session document."""
+        self._sessions.update_one({"_id": session_id}, {"$set": update})
+
     def list_sessions(self, account_id: str = None) -> list[dict]:
         """List sessions, optionally filtered by account_id."""
         query = {}

@@ -58,7 +58,9 @@
       "Bash(cmd.exe /c \"del \"\"E:\\\\Programming\\\\trading_guy\\\\main.py\"\"\")",
       "Bash(cmd.exe /c \"del \"\"\\\\\\\\?\\\\E:\\\\Programming\\\\trading_guy\\\\nul\"\"\")",
       "Bash(powershell.exe -Command \"Test-Path ''E:\\\\Programming\\\\trading_guy\\\\main.py''\")",
-      "Bash(powershell.exe -Command \"Test-Path ''E:\\\\Programming\\\\trading_guy\\\\nul''\")"
+      "Bash(powershell.exe -Command \"Test-Path ''E:\\\\Programming\\\\trading_guy\\\\nul''\")",
+      "Bash(.venv/Scripts/pip:*)",
+      "Bash(.venv/Scripts/python:*)"
     ],
     "deny": [],
     "ask": []
