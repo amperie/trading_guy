@@ -253,7 +253,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
             else:
                 # Holding period not elapsed → Ignore signal
                 # Let bracket exit naturally via stop/profit
-                logger.debug(f"Holding period in force for: {current_symbol} - Target = {target})
+                logger.debug(f"Holding period in force for: {current_symbol} - Target = {target}")
                 pass
 
         return TickResults(orders=orders)
