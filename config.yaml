@@ -6,6 +6,11 @@ logging:
   filename: "trading.log"
   retention_days: 7
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  quiet_loggers:
+    - websockets.client
+    - pymongo
+    - pymongo.connection
+    - pymongo.serverSelection
 
 mlflow:
   enabled: true

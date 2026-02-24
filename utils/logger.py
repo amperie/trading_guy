@@ -161,6 +161,11 @@ class Logger:
             force=True
         )
 
+        # Quiet down noisy third-party loggers
+        quiet_loggers = config.get("logging.quiet_loggers", [])
+        for name in quiet_loggers:
+            logging.getLogger(name).setLevel(logging.INFO)
+
     def _cleanup_old_logs(self, log_path: Path):
         """Delete rotated log files older than retention_days."""
         import time

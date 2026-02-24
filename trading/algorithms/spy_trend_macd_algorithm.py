@@ -171,6 +171,7 @@ class SpyTrendMACDAlgorithm(Algorithm):
         # Calculate MACD components
         macd_result = self._calculate_macd(history)
         if macd_result is None:
+            logger.debug(f"MACD calculation failed for {self.spy_symbol}")
             return []
 
         macd_line, signal_line, histogram = macd_result
@@ -179,9 +180,11 @@ class SpyTrendMACDAlgorithm(Algorithm):
         # MACD > Signal → Bullish → UPRO
         # MACD < Signal → Bearish → SPXU
         target = self.upro_symbol if macd_line >= signal_line else self.spxu_symbol
+        logger.debug(f"Calculated target for {self.spy_symbol}: {target} (MACD: {macd_line}, Signal: {signal_line}, Histogram: {histogram})")
 
         # Only emit signal when target changes (regime flip)
         if target == self._last_target:
+            logger.debug(f"Skipping signal for {self.spy_symbol} - {target} - no target change")
             return []
 
         # Calculate signal strength based on histogram magnitude
