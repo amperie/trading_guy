@@ -3,7 +3,9 @@ from trading.core.classes import MarketSignal, PriceData, SignalType, OrderActio
 
 from typing import Optional
 from datetime import datetime
+from utils.utils import Logger
 
+logger = Logger().get_logger(__name__)
 
 class DualSymbolSwitchPortfolio(Portfolio):
     """
@@ -163,6 +165,10 @@ class DualSymbolSwitchPortfolio(Portfolio):
                             tx_cost=self.tx_cost,
                             current_tick=tick
                         )
+                        logger.debug(
+                            f"Switching position to {pending_target} - qty: {qty}, "
+                            f"entry price: {entry_price}, profit_pct: {self.profit_pct}, "
+                            f"stop_pct: {self.stop_pct}")
 
                         # Track entry time
                         self._symbol_entry_time[pending_target] = current_timestamp
@@ -202,6 +208,11 @@ class DualSymbolSwitchPortfolio(Portfolio):
                     current_tick=tick
                 )
 
+                logger.debug(
+                    f"No Current position, entering position for {target} - qty: {qty}, "
+                    f"entry price: {entry_price}, profit_pct: {self.profit_pct}, "
+                    f"stop_pct: {self.stop_pct}")
+
                 # Track entry time for holding period
                 self._symbol_entry_time[target] = current_timestamp
 
@@ -214,6 +225,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
         # Case B: Holding same symbol → Ignore (don't add to position)
         elif current_symbol == target:
             # Already holding target, no action needed
+            logger.debug(f"Skipping position switch for {target} - already holding")
             pass
 
         # Case C: Different symbol → Switch if holding period elapsed
@@ -226,6 +238,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
                 if active_bracket is not None:
                     # Trigger manual sale
                     active_bracket.MANUAL_SALE = True
+                    logger.debug(f"Holding period elapsed, triggering manual sale for {current_symbol}")
 
                     # Queue next target for next tick
                     self._pending_target = target
@@ -240,6 +253,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
             else:
                 # Holding period not elapsed → Ignore signal
                 # Let bracket exit naturally via stop/profit
+                logger.debug(f"Holding period in force for: {current_symbol} - Target = {target})
                 pass
 
         return TickResults(orders=orders)
