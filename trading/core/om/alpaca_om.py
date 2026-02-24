@@ -514,6 +514,8 @@ class AlpacaOrderManager(OrderManager):
         else:
             raise NotImplementedError("AlpacaOrderManager supports MARKET and BRACKET orders only")
 
+        logger.info(f"Local order to Alpaca: {order}")
+        logger.info(f"Submitting order request to Alpaca: {req}")
         alpaca_order = self.client.submit_order(order_data=req)
         order.platform_id = str(alpaca_order.id)
         self._local_to_remote[order.order_id] = order.platform_id
