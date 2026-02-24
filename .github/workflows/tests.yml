@@ -8,25 +8,29 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12']
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python 3.13
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: '3.13'
+        python-version: ${{ matrix.python-version }}
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e .
-        pip install pytest pytest-cov
+        pip install -r tests/requirements.txt
+        pip install pandas pyyaml
 
-    - name: Run unit tests
+    - name: Run tests with pytest
       run: |
-        pytest tests/unit/ -v --cov=core --cov=data_providers --cov=engines --cov=algorithms --cov=utils --cov-report=xml --cov-report=term
+        pytest tests/ -v --cov=core --cov=data_providers --cov=engines --cov=algorithms --cov-report=xml --cov-report=term
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -45,16 +49,24 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.13'
+        python-version: '3.11'
 
     - name: Install linting tools
       run: |
         python -m pip install --upgrade pip
-        pip install flake8
+        pip install flake8 black isort mypy
 
     - name: Lint with flake8
       run: |
-        # Fail on syntax errors and undefined names
+        # Stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # All other issues as warnings only
+        # Exit-zero treats all errors as warnings
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+
+    - name: Check code formatting with black
+      run: |
+        black --check --diff .
+
+    - name: Check import ordering with isort
+      run: |
+        isort --check-only --diff .
