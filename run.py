@@ -24,6 +24,8 @@ from utils.logger import Logger
 import logging
 logging.getLogger("websockets.client").setLevel(logging.INFO)
 logging.getLogger("pymongo.connection").setLevel(logging.INFO)
+logging.getLogger("pymongo.serverSelection").setLevel(logging.INFO)
+logging.getLogger("pymongo.*").setLevel(logging.INFO)
 
 logger = Logger().get_logger(__name__)
 
