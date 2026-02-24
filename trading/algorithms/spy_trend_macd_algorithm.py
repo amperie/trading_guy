@@ -53,7 +53,6 @@ class SpyTrendMACDAlgorithm(Algorithm):
         self.strength_scale = cfg["strength_scale"]
 
         self._last_target = None
-        self._macd_history = []  # Store MACD line values for signal line calculation
 
     def _ema(self, values, window: int) -> float | None:
         """
@@ -86,7 +85,10 @@ class SpyTrendMACDAlgorithm(Algorithm):
 
     def _calculate_macd(self, history) -> tuple[float, float, float] | None:
         """
-        Calculate MACD indicator components.
+        Calculate MACD indicator components from price history in one shot.
+
+        Walks through all prices computing running fast and slow EMAs,
+        then computes a signal line as the EMA of the resulting MACD values.
 
         Args:
             history: Price history (deque or list)
@@ -94,37 +96,42 @@ class SpyTrendMACDAlgorithm(Algorithm):
         Returns:
             Tuple of (macd_line, signal_line, histogram) or None if insufficient data
         """
-        # Need enough history for slow EMA
-        if len(history) < self.macd_slow_period:
+        min_required = self.macd_slow_period + self.macd_signal_period
+        if len(history) < min_required:
             return None
 
-        # Calculate MACD line = Fast EMA - Slow EMA
-        fast_ema = self._ema(history, self.macd_fast_period)
-        slow_ema = self._ema(history, self.macd_slow_period)
+        prices = list(history)
+        fast_k = 2.0 / (self.macd_fast_period + 1)
+        slow_k = 2.0 / (self.macd_slow_period + 1)
+        signal_k = 2.0 / (self.macd_signal_period + 1)
 
-        if fast_ema is None or slow_ema is None:
+        # Seed fast EMA with SMA of first fast_period prices
+        fast_ema = sum(prices[:self.macd_fast_period]) / self.macd_fast_period
+        # Seed slow EMA with SMA of first slow_period prices
+        slow_ema = sum(prices[:self.macd_slow_period]) / self.macd_slow_period
+
+        # Advance fast EMA to align with slow EMA start point
+        for i in range(self.macd_fast_period, self.macd_slow_period):
+            fast_ema = prices[i] * fast_k + fast_ema * (1 - fast_k)
+
+        # First MACD value at index slow_period - 1
+        macd_values = [fast_ema - slow_ema]
+
+        # Continue computing MACD for remaining prices
+        for i in range(self.macd_slow_period, len(prices)):
+            fast_ema = prices[i] * fast_k + fast_ema * (1 - fast_k)
+            slow_ema = prices[i] * slow_k + slow_ema * (1 - slow_k)
+            macd_values.append(fast_ema - slow_ema)
+
+        if len(macd_values) < self.macd_signal_period:
             return None
 
-        macd_line = fast_ema - slow_ema
+        # Compute signal line as EMA of MACD values
+        signal_line = sum(macd_values[:self.macd_signal_period]) / self.macd_signal_period
+        for i in range(self.macd_signal_period, len(macd_values)):
+            signal_line = macd_values[i] * signal_k + signal_line * (1 - signal_k)
 
-        # Store MACD line value for signal line calculation
-        self._macd_history.append(macd_line)
-
-        # Keep only necessary history for signal line calculation
-        max_history = self.macd_signal_period * 2
-        if len(self._macd_history) > max_history:
-            self._macd_history = self._macd_history[-max_history:]
-
-        # Calculate Signal line = EMA of MACD line
-        if len(self._macd_history) < self.macd_signal_period:
-            return None
-
-        signal_line = self._ema(self._macd_history, self.macd_signal_period)
-
-        if signal_line is None:
-            return None
-
-        # Calculate histogram = MACD line - Signal line
+        macd_line = macd_values[-1]
         histogram = macd_line - signal_line
 
         return macd_line, signal_line, histogram

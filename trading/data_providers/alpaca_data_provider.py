@@ -101,17 +101,43 @@ class AlpacaDataProvider(DataProvider):
             DataFrame with columns: timestamp, symbol, open, high, low,
             close, volume, trade_count, vwap
         """
-        request_params = StockBarsRequest(
-            symbol_or_symbols=self.symbols,
-            timeframe=self.timeframe,
-            start=start,
-            end=end,
-            limit=limit,
-            adjustment=self.adjustment,
-        )
-
-        bars = self.client.get_stock_bars(request_params)
-        df = bars.df
+        # When multiple symbols are requested, fetch each symbol individually.
+        # The Alpaca API applies `limit` to the total response across all
+        # symbols, not per-symbol, so a single multi-symbol call can starve
+        # some tickers of data.  Per-symbol calls guarantee each gets the
+        # full `limit`.
+        if len(self.symbols) > 1:
+            dfs = []
+            for sym in self.symbols:
+                req = StockBarsRequest(
+                    symbol_or_symbols=[sym],
+                    timeframe=self.timeframe,
+                    start=start,
+                    end=end,
+                    limit=limit,
+                    adjustment=self.adjustment,
+                )
+                sym_bars = self.client.get_stock_bars(req)
+                sym_df = sym_bars.df
+                if not sym_df.empty:
+                    dfs.append(sym_df)
+                else:
+                    logger.warning(f"Alpaca returned no bars for {sym}")
+            if dfs:
+                df = pd.concat(dfs)
+            else:
+                df = pd.DataFrame()
+        else:
+            request_params = StockBarsRequest(
+                symbol_or_symbols=self.symbols,
+                timeframe=self.timeframe,
+                start=start,
+                end=end,
+                limit=limit,
+                adjustment=self.adjustment,
+            )
+            bars = self.client.get_stock_bars(request_params)
+            df = bars.df
 
         if df.empty:
             logger.warning(f"Alpaca returned no bars for {self.symbols}")

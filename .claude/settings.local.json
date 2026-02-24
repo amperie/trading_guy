@@ -60,7 +60,9 @@
       "Bash(powershell.exe -Command \"Test-Path ''E:\\\\Programming\\\\trading_guy\\\\main.py''\")",
       "Bash(powershell.exe -Command \"Test-Path ''E:\\\\Programming\\\\trading_guy\\\\nul''\")",
       "Bash(.venv/Scripts/pip:*)",
-      "Bash(.venv/Scripts/python:*)"
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(.venv/Scripts/python.exe -m pip:*)",
+      "Bash(.venv1/Scripts/pip show:*)"
     ],
     "deny": [],
     "ask": []

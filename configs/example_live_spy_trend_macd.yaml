@@ -32,9 +32,9 @@ algorithm:
   spy_symbol: "SPY"
   upro_symbol: "UPRO"
   spxu_symbol: "SPXU"
-  macd_fast_period: 2214      # Fast EMA period (standard: 12)
-  macd_slow_period: 1716     # Slow EMA period (standard: 26)
-  macd_signal_period: 1722     # Signal line EMA period (standard: 9)
+  macd_fast_period: 12      # Fast EMA period (standard: 12)
+  macd_slow_period: 26     # Slow EMA period (standard: 26)
+  macd_signal_period: 9     # Signal line EMA period (standard: 9)
   strength_scale: 20.0       # Multiplier for signal strength (larger histogram = stronger)
 
 # ---------------------------------------------------------------------------

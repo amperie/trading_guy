@@ -193,11 +193,10 @@ class AlpacaRealTimeEngine(AsyncEngine):
                 start_dt = datetime.now() - timedelta(days=calendar_days)
                 warmup_cfg["start_date"] = start_dt.strftime("%Y-%m-%d")
 
-            # Also set limit as a cap: total bars across all symbols
-            # (Alpaca API limit is total across symbols, not per-symbol)
+            # Set limit per symbol — AlpacaDataProvider fetches each symbol
+            # individually, so limit applies per-symbol, not across all.
             if "limit" not in warmup_cfg and self.al.history_length > 0:
-                num_symbols = len(warmup_cfg.get("symbols", self._symbols_to_subscribe))
-                warmup_cfg["limit"] = self.al.history_length * max(num_symbols, 1)
+                warmup_cfg["limit"] = self.al.history_length
             logger.info(f"Warming up algorithm from provider {provider_path} (limit={warmup_cfg.get('limit')})")
             dp = instantiate_from_string(provider_path, cfg=warmup_cfg)
             ticks = list(dp.iterate())
