@@ -1,14 +1,42 @@
 from trading.core.portfolio import Portfolio
 from trading.core.classes import MarketSignal, PriceData, SignalType, OrderAction, Order, TickResults, BracketOrder, OrderType, OrderStatus
-from utils.utils import find_pricedata_in_list
+
 from typing import Optional
 from datetime import datetime
 
 
 class DualSymbolSwitchPortfolio(Portfolio):
     """
-    Switch portfolio between UPRO and SPXU with next-bar execution.
-    Uses BUY signals for the target symbol and never holds both at once.
+    Switch portfolio between two leveraged ETFs (e.g. UPRO/SPXU) using
+    bracket orders with stop-loss and profit-taker exits.
+
+    Designed for use with SpyTrendMACDAlgorithm which emits BUY signals
+    for the target symbol based on SPY MACD regime. Never holds both
+    symbols simultaneously.
+
+    Strategy flow:
+        1. No position + BUY signal → enter target with bracket order
+        2. Holding same symbol + BUY signal → ignore (no pyramiding)
+        3. Holding different symbol + BUY signal → if holding period
+           elapsed, trigger manual sale and queue switch for next tick
+        4. Bracket stop/profit triggers → exit immediately regardless
+           of holding period
+
+    Live trading support:
+        Uses self.get_price(symbol, tick) for price lookups, which falls
+        back to the cached previous_price when the target symbol is not
+        in the current tick. This is essential for live trading via
+        AlpacaRealTimeEngine where each websocket bar event produces a
+        tick with only one symbol.
+
+    Config keys:
+        upro_symbol (str): Bullish symbol (default: "UPRO")
+        spxu_symbol (str): Bearish symbol (default: "SPXU")
+        stop_pct (float): Stop-loss percentage (default: 5.0)
+        profit_pct (float): Profit-taker percentage (default: 10.0)
+        tx_cost (float): Transaction cost per order (default: 0.0)
+        holding_period_hours (float): Minimum hours before switching (default: 2)
+        min_signal_strength (int): Minimum signal strength to act on (default: 0)
     """
 
     def __init__(self, cfg: dict = None, order_manager=None, starting_cash: float = 0.0,
@@ -121,10 +149,9 @@ class DualSymbolSwitchPortfolio(Portfolio):
             # Check if previous position is closed
             if current_symbol is None:  # Position exited
                 pending_target = self._pending_target
-                pd = find_pricedata_in_list(pending_target, tick)
+                entry_price = self.get_price(pending_target, tick)
 
-                if pd is not None:
-                    entry_price = pd.close
+                if entry_price is not None:
                     qty = int(self.cash / entry_price)
 
                     if qty > 0:
@@ -158,12 +185,11 @@ class DualSymbolSwitchPortfolio(Portfolio):
 
         # Case A: No current position → Enter immediately
         if current_symbol is None:
-            pd = find_pricedata_in_list(target, tick)
-            if pd is None:
+            entry_price = self.get_price(target, tick)
+            if entry_price is None:
                 return TickResults(orders=[])
 
             # Create bracket order
-            entry_price = pd.close
             qty = int(self.cash / entry_price)
 
             if qty > 0:

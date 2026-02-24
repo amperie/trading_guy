@@ -62,7 +62,11 @@
       "Bash(.venv/Scripts/pip:*)",
       "Bash(.venv/Scripts/python:*)",
       "Bash(.venv/Scripts/python.exe -m pip:*)",
-      "Bash(.venv1/Scripts/pip show:*)"
+      "Bash(.venv1/Scripts/pip show:*)",
+      "Bash(.venv1/Scripts/pip list:*)",
+      "Bash(.venv1/Scripts/python:*)",
+      "Bash(.venv1/Scripts/python.exe:*)",
+      "Bash(git status:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,7 +1,7 @@
 [project]
 name = "trading-guy"
 version = "0.1.0"
-description = "Add your description here"
+description = "Modular event-driven trading framework for backtesting and live trading with Ray Tune HPO and MLflow tracking"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

@@ -36,12 +36,14 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 - `iterate()` yields `list[PriceData]` per timestamp, auto-detects chronological order, groups by timestamp
 
 **Portfolio** (`core.portfolio.Portfolio`):
-- Override `process_tick_market_signals_logic(signals, tick) -> list[Order]`
-- Tracks: `cash`, `positions`, `total_value`, `orders`, `pending_orders_by_id`, `orders_by_id`
-- History (when `keep_history: true`): `tick_history`, `cash_history`, `value_history`
-- `process_tick_market_signals()` auto-calls `_process_pending_orders()` first
+- Override `process_tick_market_signals_logic(signals, tick) -> TickResults`
+- `get_price(symbol, tick) -> float | None` — `@final` price lookup: checks tick first, falls back to `self.previous_price` cache. Essential for live trading where ticks contain single symbols.
+- Tracks: `cash`, `positions`, `total_value`, `previous_price`
+- History (when `keep_history: true`): `tick_history`, `cash_history`, `value_history`, `signals_history`
+- `process_market_signals_for_tick()` is `@final` — auto-calls OM pending order updates, broker sync, portfolio value update
 - `reconfigure(new_params)` preserves cash/positions/history
 - Impl: `SingleSymbolPortfolio` (core/pf/) — buys with all cash, sells all positions
+- Impl: `DualSymbolSwitchPortfolio` (core/pf/) — switches between two symbols (e.g. UPRO/SPXU) with bracket orders, holding periods, and manual sale switching
 
 **OrderManager** (`core.order_manager.OrderManager`):
 - Override three backend methods:
@@ -91,7 +93,7 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 ### Utilities
 
 - `utils.utils`: `instantiate_from_string()`, `find_pricedata_in_list()`, `find_marketsignal_in_list()`, `aggregate_stock_data(df, interval)`, `parse_search_space()`
-- `utils/logger.py`: `Logger().get_logger(__name__)` — configured via `config.yaml` logging section
+- `utils/logger.py`: `Logger().get_logger(__name__)` — configured via `config.yaml` logging section. Supports per-call color override: `logger.info("msg", color="magenta")`. Colors: red, bold_red, green, yellow, blue, magenta, cyan, white
 - `utils/mlflow_client.py`: `MLflowClient.from_config()` — tracking at `http://hp.lan:8899`. Context manager `start_run()`, log params/metrics/artifacts/charts/text/json/html
 - `utils/performance_tracker.py`: Rolling portfolio value tracker used by SelfOptimizingLiveEngine
 
@@ -125,13 +127,17 @@ utils/
   mlflow_client.py         # MLflow tracking client
   performance_tracker.py   # Rolling performance tracker
   utils.py                 # Helpers (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, parse_search_space)
-tests/                     # 91/123 passing (74%)
+tests/
   unit/
     test_aggregate_stock_data.py      # 18/18
     test_indicators.py                # 66/66
     test_technical_analyzer.py        # 20/20
     test_bracket_order_progression.py # 6/6
-    test_portfolio.py                 # needs fixtures
+    test_portfolio.py                 # 26/26
+    test_get_price.py                 # 11/11 — Portfolio.get_price() tick-or-cache lookup
+    test_dual_symbol_switch_portfolio.py  # 21/21 — DualSymbolSwitchPortfolio + live trading fallback
+    test_macd_calculation.py          # 23/23 — one-shot MACD calculation, EMA, signal generation, reconfigure
+    test_macd_algorithm.py            # 6/6
     test_analysis_engine.py           # needs fixtures
 scratch/                   # Notebooks and experiments
 data/                      # Sample CSV data files
@@ -143,7 +149,7 @@ data/                      # Sample CSV data files
 pytest tests/ -v                    # All tests
 pytest tests/unit/ -v               # Unit tests only
 # Only passing suites:
-pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py -v
+pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py tests/unit/test_portfolio.py tests/unit/test_get_price.py tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py tests/unit/test_macd_algorithm.py -v
 # Coverage:
 pytest tests/ --cov=core --cov=utils --cov-report=html
 ```

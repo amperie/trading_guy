@@ -64,6 +64,11 @@ class Portfolio(ABC):
           sync, order submission, portfolio value tracking, history recording).
         - Use self.cash and self.positions for position sizing decisions.
         - Use self.om (OrderManager) for order creation helpers if needed.
+        - Use self.get_price(symbol, tick) to look up a symbol's closing
+          price. It checks the current tick first, then falls back to
+          self.previous_price (the last known price cached by
+          _update_pf_value on every tick). This is essential for live
+          trading where each tick may only contain one symbol.
         - Return a TickResults(orders=[...]) from your strategy method.
           Zero-quantity orders are filtered out automatically.
 
@@ -117,8 +122,10 @@ class Portfolio(ABC):
                 orders = []
                 for signal in signals:
                     if signal.type == SignalType.BUY:
-                        pd = find_pricedata_in_list(signal.symbol, tick)
-                        qty = int(self.cash / pd.close)
+                        price = self.get_price(signal.symbol, tick)
+                        if price is None:
+                            continue
+                        qty = int(self.cash / price)
                         if qty > 0:
                             order = Order.create_market_order(
                                 signal.symbol, OrderAction.BUY, qty, 0.0, tick)
@@ -189,6 +196,24 @@ class Portfolio(ABC):
         self.signals_history: dict[datetime, list[MarketSignal]] = {}
 
         logger.info(f"Portfolio initialized - Cash: ${self.cash:,.2f}, Positions: {len(starting_positions or {})}, History: {keep_history}")
+
+    @final
+    def get_price(self, symbol: str, tick: list[PriceData]) -> float | None:
+        """
+        Get the closing price for a symbol from the current tick, falling back
+        to the last known price from self.previous_price.
+
+        Args:
+            symbol: The symbol to look up.
+            tick: List of PriceData for the current tick.
+
+        Returns:
+            The closing price, or None if no price has ever been seen.
+        """
+        pd = find_pricedata_in_list(symbol, tick)
+        if pd is not None:
+            return pd.close
+        return self.previous_price.get(symbol)
 
     @final
     def _update_pf_value(self, current_tick: list[PriceData]) -> float:

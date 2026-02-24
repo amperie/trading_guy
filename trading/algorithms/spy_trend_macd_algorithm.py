@@ -18,10 +18,33 @@ class SpyTrendMACDAlgorithm(Algorithm):
     - Histogram = MACD Line - Signal Line
 
     Trading Logic:
-    - MACD Line > Signal Line → Bullish → BUY UPRO
-    - MACD Line < Signal Line → Bearish → BUY SPXU
+    - MACD Line > Signal Line -> Bullish -> BUY UPRO
+    - MACD Line < Signal Line -> Bearish -> BUY SPXU
 
-    Emits a BUY signal for the target symbol when the regime flips.
+    Emits a BUY signal for the target symbol only when the regime flips
+    (i.e. _last_target changes). Consecutive ticks in the same regime
+    produce no signals.
+
+    MACD Calculation:
+        Uses a one-shot stateless calculation (_calculate_macd) that walks
+        through the entire price history deque computing running fast and
+        slow EMAs, then derives the signal line as an EMA of the MACD
+        values. This avoids mutable per-tick state and is deterministic
+        for any given history window.
+
+    Signal Strength:
+        Based on |histogram| / price * strength_scale, clamped to [1, 100].
+
+    Config keys:
+        spy_symbol (str): Symbol to watch for MACD (default: "SPY")
+        upro_symbol (str): Bullish target (default: "UPRO")
+        spxu_symbol (str): Bearish target (default: "SPXU")
+        macd_fast_period (int): Fast EMA period (default: 12)
+        macd_slow_period (int): Slow EMA period (default: 26)
+        macd_signal_period (int): Signal line EMA period (default: 9)
+        strength_scale (float): Histogram-to-strength multiplier (default: 20.0)
+
+    Minimum history required: macd_slow_period + macd_signal_period bars.
     """
 
     default_cfg = {

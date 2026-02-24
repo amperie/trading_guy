@@ -5,6 +5,7 @@ Usage:
     python run.py backtest      --config configs/example_backtest.yaml
     python run.py backtest      --config configs/example_backtest.yaml --symbol TSLA --cash 50000
     python run.py live          --config configs/example_live.yaml
+    python run.py live          --config configs/example_live.yaml --alpaca-override-url wss://stream.data.alpaca.markets/v2/test
     python run.py live          --config configs/example_live_self_optimizing.yaml
     python run.py walk-forward  --config configs/example_walk_forward.yaml
 """
@@ -75,6 +76,9 @@ def _apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
 
     if getattr(args, "run_name", None):
         cfg.setdefault("analysis", {})["run_name"] = args.run_name
+
+    if getattr(args, "alpaca_override_url", None):
+        cfg.setdefault("alpaca", {})["override_url"] = args.alpaca_override_url
 
     return cfg
 
@@ -299,6 +303,7 @@ def main():
 
     # -- live subcommand --
     live = subparsers.add_parser("live", parents=[shared], help="Run live trading (wraps with self-optimization if optimization.enabled is true)")
+    live.add_argument("--alpaca-override-url", dest="alpaca_override_url", help="Override Alpaca WebSocket URL (e.g. wss://stream.data.alpaca.markets/v2/test)")
     live.set_defaults(func=cmd_live)
 
     # -- walk-forward subcommand --

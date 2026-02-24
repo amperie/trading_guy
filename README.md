@@ -45,7 +45,7 @@ Each component is independent and swappable. Configure or replace any piece with
 |---|---|
 | **DataProvider** | Loads market data and yields `PriceData` ticks grouped by timestamp. Ships with a CSV reader; subclass for other sources. |
 | **Algorithm** | Receives ticks + price history, emits `MarketSignal` objects (BUY / SELL with strength and metadata). |
-| **Portfolio** | Converts signals into `Order` objects based on cash, positions, and risk rules. |
+| **Portfolio** | Converts signals into `Order` objects based on cash, positions, and risk rules. Provides `get_price(symbol, tick)` for safe price lookup with fallback to cached prices (essential for live trading). |
 | **OrderManager** | Executes orders against a backend — `BacktestingOM` fills instantly; `AlpacaOM` routes to a live broker. |
 | **BacktestingEngine** | Drives the tick loop: DataProvider &#8594; Algorithm &#8594; Portfolio &#8594; OrderManager. |
 | **AnalysisEngine** | Extracts trades, computes 30+ metrics, generates charts, and logs everything to MLflow. |
@@ -160,7 +160,7 @@ Override `process_tick_market_signals_logic()`. It receives signals and the curr
 from trading.core.portfolio import Portfolio
 from trading.core.classes import (MarketSignal, PriceData, Order, OrderAction,
                                    SignalType, BracketOrder, TickResults)
-from utils.utils import find_marketsignal_in_list, find_pricedata_in_list
+from utils.utils import find_marketsignal_in_list
 
 
 class MyPortfolio(Portfolio):
@@ -170,15 +170,16 @@ class MyPortfolio(Portfolio):
 
         symbol = self.cfg['symbol']
         signal = find_marketsignal_in_list(symbol, signals)
-        pd = find_pricedata_in_list(symbol, tick)
+        # get_price checks tick first, falls back to cached previous_price
+        price = self.get_price(symbol, tick)
 
-        if pd is None or signal is None:
+        if price is None or signal is None:
             return TickResults(orders=[])
 
         if signal.type == SignalType.BUY:
-            quantity = int(self.cash / pd.close)
+            quantity = int(self.cash / price)
             order = BracketOrder.create_bracket_order(
-                symbol, pd.close * 1.06, pd.close * 0.97,
+                symbol, price * 1.06, price * 0.97,
                 quantity, 0.0, tick
             )
             return TickResults(orders=[order])
@@ -410,27 +411,29 @@ engine.run()
 trading/
   core/
     algorithm.py                  # Algorithm base class (subclass this)
-    portfolio.py                  # Portfolio base class (subclass this)
+    portfolio.py                  # Portfolio base class (subclass this) — includes get_price()
     classes.py                    # PriceData, MarketSignal, Order, Position, BracketOrder
-    algorithms/                   # Strategy implementations
     pf/                           # Portfolio implementations
+      single_symbol_portfolio.py  #   Single-asset bracket order portfolio
+      dual_symbol_switch_portfolio.py  #   Dual-symbol switching (e.g. UPRO/SPXU)
     om/                           # OrderManager implementations
+      backtesting_om.py           #   Instant fills for backtesting
     ta/                           # Technical analysis (EMA, MACD, RSI)
-  data_providers/                 # CSV reader and base class
+  algorithms/                     # Strategy implementations
+    spy_trend_macd_algorithm.py   #   SPY MACD trend → UPRO/SPXU signal
+  data_providers/                 # CSV reader, Alpaca API, and base class
   engines/
-    backtest_engine.py            # Main backtesting loop
-    split_period_backtest_engine.py  # Train/validation split
+    simulator.py                  # Main backtesting engine
+    analysis_engine.py            # 30+ metrics, charts, MLflow integration
+    walk_forward_engine.py        # Walk-forward rolling HPO + backtest
+    self_optimizing_live_engine.py  # Live engine with background HPO
     alpaca_engine.py              # Live trading with Alpaca
-  backtesting/
-    run_backtest_ray.py           # Ray Tune parallel optimization
-    run_launchers.py              # Ready-made launcher functions
-  analysis/
-    analysis_engine.py            # Metrics, charts, MLflow integration
 utils/
   config_manager.py               # Singleton YAML config loader
-  logger.py                       # Singleton logger
+  logger.py                       # Singleton logger with per-call color support
   mlflow_client.py                # MLflow experiment tracking
-  utils.py                        # Helpers
+  performance_tracker.py          # Rolling portfolio value tracker
+  utils.py                        # Helpers (instantiate_from_string, find_pricedata_in_list, etc.)
 tests/                            # Unit and integration tests
 data/                             # Market data CSV files
 examples/                         # Example scripts and chart images
@@ -445,6 +448,13 @@ docs/                             # Setup guides
 pytest tests/                    # All tests
 pytest tests/unit/ -v            # Unit tests with verbose output
 pytest tests/ --cov=trading      # With coverage report
+
+# Core passing suites (~170 tests):
+pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py \
+  tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py \
+  tests/unit/test_portfolio.py tests/unit/test_get_price.py \
+  tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py \
+  tests/unit/test_macd_algorithm.py -v
 ```
 
 ---
