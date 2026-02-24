@@ -581,6 +581,50 @@ class AlpacaOrderManager(OrderManager):
             order.time_in_force = alpaca_tif
 
         if order.type == OrderType.BRACKET:
+            # --- MANUAL_SALE handling (symbol switch) ---
+            if order.status == OrderStatus.PENDING_SALE and order.MANUAL_SALE and order.get_child_order("MANUAL_ORDER") is None:
+                # Cancel the bracket order on Alpaca (cancels both legs)
+                try:
+                    self.client.cancel_order_by_id(remote_id)
+                except Exception as exc:
+                    logger.warning(f"Failed to cancel Alpaca bracket for manual sale: {exc}")
+
+                # Submit a standalone market SELL
+                tif = _ALPACA_TIF_MAP.get(order.time_in_force, TimeInForce.GTC)
+                sell_req = MarketOrderRequest(
+                    symbol=order.symbol,
+                    qty=order.quantity,
+                    side=OrderSide.SELL,
+                    time_in_force=tif,
+                )
+                try:
+                    alpaca_sell = self.client.submit_order(order_data=sell_req)
+                    mo = Order.create_market_order(
+                        order.symbol, OrderAction.SELL, order.quantity, order.tx_cost,
+                        current_tick
+                    )
+                    mo.platform_id = str(alpaca_sell.id)
+                    mo.status = OrderStatus.PENDING
+                    self._local_to_remote[mo.order_id] = mo.platform_id
+                    self._all_orders[mo.order_id] = mo
+
+                    order.add_child_order("MANUAL_ORDER", mo)
+                    order.SOLD_ORDER = mo
+                    order.status = OrderStatus.FILLED
+
+                    so = order.get_child_order("STOP")
+                    po = order.get_child_order("PROFIT")
+                    if so:
+                        so.status = OrderStatus.CANCELED
+                    if po:
+                        po.status = OrderStatus.CANCELED
+
+                    logger.info(f"Manual sale submitted to Alpaca for {order.symbol} qty={order.quantity}")
+                except Exception as exc:
+                    logger.error(f"Failed to submit manual sale to Alpaca: {exc}")
+
+                return order
+
             # Entry fill -> move to PENDING_SALE to update portfolio buy.
             if status == "filled" and order.status == OrderStatus.PENDING:
                 order.status = OrderStatus.PENDING_SALE
