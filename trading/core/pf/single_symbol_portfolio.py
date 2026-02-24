@@ -69,8 +69,8 @@ class SingleSymbolPortfolio(Portfolio):
         if signal is not None and signal.type == SignalType.BUY:
             available = self.buying_power if self.buying_power is not None else self.cash
             quantity = int(available / price)
-            stop_price = round(price * (1.0 - stop_pct / 100.0), 2)
-            profit_price = round(price * (1.0 + profit_pct / 100), 2)
+            stop_price = price * (1.0 - stop_pct / 100.0)
+            profit_price = price * (1.0 + profit_pct / 100)
             bo = BracketOrder.create_bracket_order(
                 symbol, profit_price, stop_price,
                 quantity, 0.0, tick

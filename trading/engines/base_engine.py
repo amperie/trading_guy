@@ -154,7 +154,11 @@ class BaseEngine(ABC):
 
     def _init_state_store(self):
         """Initialize TradingStateStore from config if enabled."""
-        ss_cfg = self.cfg.get("state_store", {})
+        ss_cfg = self.cfg.get("state_store")
+        if ss_cfg is None:
+            # Fall back to root config.yaml via singleton ConfigManager
+            from utils.config_manager import ConfigManager
+            ss_cfg = ConfigManager().get("state_store") or {}
         if not ss_cfg.get("enabled", False):
             return
 

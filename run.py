@@ -157,14 +157,9 @@ def cmd_backtest(args: argparse.Namespace):
 
     dp, al, om, pf = _build_components(cfg)
 
-    # Engine-level config (state_store, etc.)
-    engine_cfg = {}
-    if "state_store" in cfg:
-        engine_cfg["state_store"] = cfg["state_store"]
-
     from trading.engines.backtest_engine import BacktestingEngine
 
-    engine = BacktestingEngine(cfg=engine_cfg, dp=dp, al=al, om=om, pf=pf)
+    engine = BacktestingEngine(cfg={}, dp=dp, al=al, om=om, pf=pf)
     engine.run()
 
     logger.info(

@@ -175,6 +175,9 @@ class BracketOrder(Order):
             List of orders starting with the main order, stop and profit take
         """
 
+        high_sell_price = round(high_sell_price, 2)
+        low_sell_price = round(low_sell_price, 2)
+
         if current_tick is not None:
             # Find the PriceData for this symbol
             pd = next((x for x in current_tick if x.symbol == symbol), None)

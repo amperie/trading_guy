@@ -157,8 +157,8 @@ class DualSymbolSwitchPortfolio(Portfolio):
                     if qty > 0:
                         bo = BracketOrder.create_bracket_order(
                             symbol=pending_target,
-                            high_sell_price=round(entry_price * (1.0 + self.profit_pct / 100.0), 2),
-                            low_sell_price=round(entry_price * (1.0 - self.stop_pct / 100.0), 2),
+                            high_sell_price=entry_price * (1.0 + self.profit_pct / 100.0),
+                            low_sell_price=entry_price * (1.0 - self.stop_pct / 100.0),
                             quantity=qty,
                             tx_cost=self.tx_cost,
                             current_tick=tick
@@ -195,8 +195,8 @@ class DualSymbolSwitchPortfolio(Portfolio):
             if qty > 0:
                 bo = BracketOrder.create_bracket_order(
                     symbol=target,
-                    high_sell_price=round(entry_price * (1.0 + self.profit_pct / 100.0), 2),
-                    low_sell_price=round(entry_price * (1.0 - self.stop_pct / 100.0), 2),
+                    high_sell_price=entry_price * (1.0 + self.profit_pct / 100.0),
+                    low_sell_price=entry_price * (1.0 - self.stop_pct / 100.0),
                     quantity=qty,
                     tx_cost=self.tx_cost,
                     current_tick=tick

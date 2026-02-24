@@ -52,10 +52,6 @@ def run_alpaca_fakepaca():
         # "override_url": "wss://stream.data.alpaca.markets/v2/test",
     }
 
-    # Inherit state_store config from root config.yaml
-    if "state_store" in root_cfg:
-        engine_cfg["state_store"] = root_cfg["state_store"]
-
     om_cfg = {
         "api_key": api_key,
         "secret_key": secret_key,
