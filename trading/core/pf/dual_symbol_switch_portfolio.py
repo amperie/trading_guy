@@ -236,15 +236,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
                 active_bracket = self._find_active_bracket(current_symbol)
 
                 if active_bracket is not None:
-                    # Trigger manual sale
-                    active_bracket.MANUAL_SALE = True
                     logger.debug(f"Holding period elapsed, triggering manual sale for {current_symbol}")
-
-                    # Trigger OM immediately to process the manual sale on this tick
-                    self.om.update_order_status(active_bracket, tick, self.positions, self.cash)
-                    # If the sell filled instantly (backtesting), apply to portfolio now
-                    if active_bracket.status == OrderStatus.FILLED:
-                        self._update_pf_from_changed_orders([active_bracket.order_id])
 
                     # Queue next target for next tick
                     self._pending_target = target
@@ -254,8 +246,8 @@ class DualSymbolSwitchPortfolio(Portfolio):
                     if current_symbol in self._symbol_entry_time:
                         del self._symbol_entry_time[current_symbol]
 
-                    # Note: No orders created this tick
-                    # Manual sale will process, then next tick we'll buy
+                    # Request manual sale — base class handles OM calls and portfolio updates
+                    return TickResults(orders=orders, trigger_manual_sales=[active_bracket])
             else:
                 # Holding period not elapsed → Ignore signal
                 # Let bracket exit naturally via stop/profit

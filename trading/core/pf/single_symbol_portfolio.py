@@ -93,11 +93,12 @@ class SingleSymbolPortfolio(Portfolio):
                 symbol, OrderAction.SELL, qty, 0.0, tick
             )
             signal.metadata['order_id'] = so.order_id
-            # Cancel all other pending bracket orders so there isn't a race condition on sales
-            self.om.cancel_all_pending_orders(OrderType.BRACKET)
             logger.info(f"SELL {symbol} qty={qty} price={price:.2f} order_id={so.order_id} (canceled pending brackets)")
             logger.debug(f"SELL details: position_qty={qty} order={so}")
-            return TickResults(orders=[so])
+            return TickResults(
+                orders=[so],
+                cancel_pending_order_types=[OrderType.BRACKET]
+            )
         else:
             logger.debug(f"No actionable signal for {symbol}: signal={signal.type.name if signal else 'None'}")
             return TickResults(orders=[])

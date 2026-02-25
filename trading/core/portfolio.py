@@ -34,7 +34,7 @@ Broker synchronization:
     startup via _sync_from_broker(). For backtesting, the sync is
     a no-op since BacktestingOM.get_broker_account_state() returns None.
 """
-from trading.core.classes import MarketSignal, Order, PriceData, Position, OrderStatus, OrderAction, OrderType
+from trading.core.classes import MarketSignal, Order, PriceData, Position, OrderStatus, OrderAction, OrderType, BracketOrder
 from trading.core.classes import TickResults
 from trading.core.om.order_manager import OrderManager
 from utils.logger import Logger
@@ -516,6 +516,18 @@ class Portfolio(ABC):
         all_orders_tr = self.process_tick_market_signals_logic(
             signals, tick
         )
+
+        # Process manual sale requests from subclass
+        for bracket in all_orders_tr.trigger_manual_sales:
+            bracket.MANUAL_SALE = True
+            self.om.update_order_status(bracket, tick, self.positions, self.cash)
+            if bracket.status == OrderStatus.FILLED:
+                self._update_pf_from_changed_orders([bracket.order_id])
+
+        # Cancel pending orders by type as requested by subclass
+        for order_type in all_orders_tr.cancel_pending_order_types:
+            self.om.cancel_all_pending_orders(order_type)
+
         all_orders = all_orders_tr.orders
 
         # Remove 0 quantity orders
