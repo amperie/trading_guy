@@ -154,7 +154,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
                 entry_price = self.get_price(pending_target, tick)
 
                 if entry_price is not None:
-                    qty = int(self.cash / entry_price)
+                    qty = int(self.cash * 0.99 / entry_price)
 
                     if qty > 0:
                         bo = BracketOrder.create_bracket_order(
@@ -196,7 +196,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
                 return TickResults(orders=[])
 
             # Create bracket order
-            qty = int(self.cash / entry_price)
+            qty = int(self.cash * 0.99 / entry_price)
 
             if qty > 0:
                 bo = BracketOrder.create_bracket_order(

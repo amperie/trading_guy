@@ -58,7 +58,7 @@ class TestBasicEntry:
         order = result.orders[0]
         assert isinstance(order, BracketOrder)
         assert order.symbol == "UPRO"
-        assert order.quantity == 200  # 10000 / 50
+        assert order.quantity == 198  # int(10000 * 0.99 / 50)
 
     def test_entry_uses_all_cash(self):
         pf = _make_pf(cash=5000.0)
@@ -66,9 +66,9 @@ class TestBasicEntry:
         sig = _buy_signal("SPXU")
         pf.process_market_signals_for_tick([sig], tick)
 
-        assert pf.cash < 1.0  # spent ~all cash
+        assert pf.cash < 60.0  # spent ~all cash (1% reserve)
         assert "SPXU" in pf.positions
-        assert pf.positions["SPXU"].quantity == 200
+        assert pf.positions["SPXU"].quantity == 198  # int(5000 * 0.99 / 25)
 
     def test_no_signal_no_order(self):
         pf = _make_pf()
@@ -131,7 +131,7 @@ class TestGetPriceFallbackInLiveTrading:
         result = pf.process_market_signals_for_tick([sig], tick)
         assert len(result.orders) == 1
         assert result.orders[0].symbol == "UPRO"
-        assert result.orders[0].quantity == 200  # 10000 / 50
+        assert result.orders[0].quantity == 198  # int(10000 * 0.99 / 50)
 
     def test_process_tick_market_signals_uses_get_price(self):
         """Verify that the portfolio's signal processing calls get_price
@@ -227,7 +227,7 @@ class TestBracketTriggers:
         pf.process_market_signals_for_tick([], tick1)
 
         assert pf.cash > cash_after_buy
-        assert pf.positions["UPRO"].quantity == 0
+        assert "UPRO" not in pf.positions
 
     def test_stop_loss_closes_position(self):
         pf = _make_pf(profit_pct=20.0, stop_pct=10.0)
@@ -242,7 +242,7 @@ class TestBracketTriggers:
         tick1 = _tick(("UPRO", 44.0), ts=ts1)
         pf.process_market_signals_for_tick([], tick1)
 
-        assert pf.positions["UPRO"].quantity == 0
+        assert "UPRO" not in pf.positions
         assert pf.cash < 10000.0  # took a loss
 
 
@@ -281,20 +281,20 @@ class TestSymbolSwitch:
         pf = _make_pf(cash=10000.0)
         ts = datetime(2024, 1, 1, 10, 0)
 
-        # Buy UPRO at $50 → 200 shares, cash ≈ 0
+        # Buy UPRO at $50 → 198 shares (int(10000 * 0.99 / 50)), leftover $100
         tick0 = _tick(("UPRO", 50.0), ("SPXU", 20.0), ts=ts)
         pf.process_market_signals_for_tick([_buy_signal("UPRO")], tick0)
-        assert pf.positions["UPRO"].quantity == 200
-        assert pf.cash < 1.0  # all cash spent
+        assert pf.positions["UPRO"].quantity == 198
+        assert pf.cash < 110.0  # ~all cash spent (1% reserve)
 
         # Signal SPXU → triggers manual sell of UPRO at $55
         ts1 = ts + timedelta(minutes=1)
         tick1 = _tick(("UPRO", 55.0), ("SPXU", 20.0), ts=ts1)
         pf.process_market_signals_for_tick([_buy_signal("SPXU")], tick1)
 
-        # After manual sale: UPRO position cleared, cash = 200 * 55 = 11000
-        assert pf.positions["UPRO"].quantity == 0
-        assert pf.cash == 200 * 55.0  # $11,000
+        # After manual sale: UPRO position cleared, cash = 100 + 198 * 55 = 10990
+        assert "UPRO" not in pf.positions
+        assert pf.cash == 10990.0
 
         # Next tick: buy SPXU with the recovered cash
         ts2 = ts1 + timedelta(minutes=1)
@@ -303,9 +303,9 @@ class TestSymbolSwitch:
 
         assert len(result.orders) == 1
         assert result.orders[0].symbol == "SPXU"
-        # 11000 / 20 = 550 shares of SPXU
-        assert pf.positions["SPXU"].quantity == 550
-        assert pf.cash < 1.0  # all cash reinvested
+        # int(10990 * 0.99 / 20) = 544 shares of SPXU
+        assert pf.positions["SPXU"].quantity == 544
+        assert pf.cash < 120.0  # ~all cash reinvested
 
     def test_manual_sale_at_loss_credits_reduced_cash(self):
         """Manual sale at a lower price credits the reduced proceeds."""
@@ -321,8 +321,8 @@ class TestSymbolSwitch:
         tick1 = _tick(("UPRO", 46.0), ("SPXU", 20.0), ts=ts1)
         pf.process_market_signals_for_tick([_buy_signal("SPXU")], tick1)
 
-        assert pf.positions["UPRO"].quantity == 0
-        assert pf.cash == 200 * 46.0  # $9,200 (lost $800)
+        assert "UPRO" not in pf.positions
+        assert pf.cash == 9208.0  # 100 + 198 * 46
 
     def test_manual_sale_with_tx_cost(self):
         """Transaction costs are deducted from the manual sale proceeds."""
@@ -343,7 +343,7 @@ class TestSymbolSwitch:
         # Cash = leftover + (qty * 50) - tx_cost
         expected_cash = cash_after_buy + (upro_qty * 50.0) - 5.0
         assert pf.cash == expected_cash
-        assert pf.positions["UPRO"].quantity == 0
+        assert "UPRO" not in pf.positions
 
     def test_strongest_signal_wins(self):
         pf = _make_pf()

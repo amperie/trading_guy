@@ -311,10 +311,13 @@ class Portfolio(ABC):
 
         self.cash = self.cash + order.cash - order.tx_cost
         self.positions[order.symbol].quantity -= order.quantity
+        if self.positions[order.symbol].quantity == 0:
+            del self.positions[order.symbol]
         order.processed_by_portfolio = True
 
         logger.info(f"SELL executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} (Proceeds: ${order.cash - order.tx_cost:,.2f})")
-        logger.debug(f"Cash after SELL: ${self.cash:,.2f}, Remaining position: {self.positions[order.symbol].quantity}")
+        remaining_qty = self.positions[order.symbol].quantity if order.symbol in self.positions else 0
+        logger.debug(f"Cash after SELL: ${self.cash:,.2f}, Remaining position: {remaining_qty}")
 
     @final
     def _update_pf_from_order(self, order_id: str) -> Order:

@@ -382,7 +382,7 @@ class AlpacaOrderManager(OrderManager):
                 logger.warning(f"Failed to cancel Alpaca order {remote_id}: {exc}")
         return self._all_orders[order_id]
 
-    def _clamp_buy_to_buying_power(self, order: Order, current_tick: list = None) -> Order:
+    def _clamp_buy_to_buying_power(self, order: Order, current_tick: list = None, pf_cash: float = 0.0) -> Order:
         """Reduce BUY order quantity if it exceeds Alpaca buying power.
 
         Queries the Alpaca account for current buying power and compares
@@ -393,11 +393,18 @@ class AlpacaOrderManager(OrderManager):
         Args:
             order: A BUY order (MARKET or BRACKET). Modified in-place.
             current_tick: Current tick data used to estimate price.
+            pf_cash: Portfolio cash used as fallback to derive implied price
+                when the target symbol is absent from current_tick.
 
         Returns:
             The (possibly adjusted) order.
         """
         price = self._get_price_from_tick(order.symbol, current_tick)
+        if (price is None or price <= 0) and pf_cash > 0 and order.quantity > 0:
+            price = pf_cash / order.quantity
+            logger.debug(
+                f"No tick price for {order.symbol} — using implied price ${price:.4f} from pf_cash"
+            )
         if price is None or price <= 0:
             logger.debug(
                 f"No tick price for {order.symbol} — skipping buying power clamp"
@@ -480,7 +487,7 @@ class AlpacaOrderManager(OrderManager):
                 child orders.
         """
         if order.action == OrderAction.BUY:
-            self._clamp_buy_to_buying_power(order, current_tick)
+            self._clamp_buy_to_buying_power(order, current_tick, pf_cash)
 
         side = OrderSide.BUY if order.action == OrderAction.BUY else OrderSide.SELL
         tif = _ALPACA_TIF_MAP.get(order.time_in_force, TimeInForce.GTC)
@@ -838,8 +845,13 @@ def _update_exit_order_from_leg(order: BracketOrder, leg) -> Order:
     order_type = _enum_val(getattr(leg, "order_type", ""))
     if "stop" in order_type:
         exit_order = order.get_child_order("STOP")
+        other_order = order.get_child_order("PROFIT")
     else:
         exit_order = order.get_child_order("PROFIT")
+        other_order = order.get_child_order("STOP")
+
+    if other_order is not None:
+        other_order.status = OrderStatus.CANCELED
 
     if exit_order is None:
         exit_order = Order(

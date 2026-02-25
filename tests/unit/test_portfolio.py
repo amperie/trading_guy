@@ -88,7 +88,7 @@ class TestPortfolioBracketOrders:
         # Verify profit was taken
         assert pf.cash > cash_after_buy, "Cash should increase after profit-taker triggers"
         # Position should be sold
-        assert pf.positions["AAPL"].quantity < quantity_bought or pf.positions["AAPL"].quantity == 0
+        assert "AAPL" not in pf.positions or pf.positions["AAPL"].quantity < quantity_bought
 
     def test_bracket_order_stop_loss_trigger(self):
         """Test that bracket order stop-loss triggers correctly"""

@@ -247,10 +247,12 @@ class OrderManager(ABC):
             # and register it as its own order for later analysis reasons
             if order.type == OrderType.BRACKET and order.status == OrderStatus.FILLED:
                 so = order.SOLD_ORDER
-                # TODO: so could be None - need a check for this
-                logger.debug(f"Bracket exit via {so.type.name}: {so.order_id} {so.symbol} price={so.price} qty={so.quantity}")
-                self._filled_orders_by_id[so.order_id] = so
-                self._all_orders[so.order_id] = so
+                if so is not None:
+                    logger.debug(f"Bracket exit via {so.type.name}: {so.order_id} {so.symbol} price={so.price} qty={so.quantity}")
+                    self._filled_orders_by_id[so.order_id] = so
+                    self._all_orders[so.order_id] = so
+                else:
+                    logger.error(f"BRACKET FILLED with no SOLD_ORDER: {order.order_id}")
 
     @final
     def _update_all_order_lists(self):
@@ -276,9 +278,11 @@ class OrderManager(ABC):
                 # and register it as its own order for later analysis reasons
                 if order.type == OrderType.BRACKET and order.status == OrderStatus.FILLED:
                     so = order.SOLD_ORDER
-                    # TODO: so could be None. Need to do a check
-                    self._filled_orders_by_id[so.order_id] = so
-                    self._all_orders[so.order_id] = so
+                    if so is not None:
+                        self._filled_orders_by_id[so.order_id] = so
+                        self._all_orders[so.order_id] = so
+                    else:
+                        logger.error(f"BRACKET FILLED with no SOLD_ORDER: {order.order_id}")
 
         return trim_dictionary(self._pending_orders_by_id, orders)
 
