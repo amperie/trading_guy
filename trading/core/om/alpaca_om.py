@@ -715,7 +715,7 @@ class AlpacaOrderManager(OrderManager):
             List of order_id strings for orders whose status changed.
         """
         changed = []
-        for order in orders.values():
+        for order in list(orders.values()):
             original_status = order.status
             self._update_order_status_from_backend(order, current_tick, positions, pf_cash)
             if order.status != original_status:
