@@ -276,6 +276,75 @@ class TestSymbolSwitch:
         assert result.orders[0].symbol == "SPXU"
         assert "SPXU" in pf.positions and pf.positions["SPXU"].quantity > 0
 
+    def test_manual_sale_credits_cash_correctly(self):
+        """Manual sale must credit sell proceeds to cash before buying next symbol."""
+        pf = _make_pf(cash=10000.0)
+        ts = datetime(2024, 1, 1, 10, 0)
+
+        # Buy UPRO at $50 → 200 shares, cash ≈ 0
+        tick0 = _tick(("UPRO", 50.0), ("SPXU", 20.0), ts=ts)
+        pf.process_market_signals_for_tick([_buy_signal("UPRO")], tick0)
+        assert pf.positions["UPRO"].quantity == 200
+        assert pf.cash < 1.0  # all cash spent
+
+        # Signal SPXU → triggers manual sell of UPRO at $55
+        ts1 = ts + timedelta(minutes=1)
+        tick1 = _tick(("UPRO", 55.0), ("SPXU", 20.0), ts=ts1)
+        pf.process_market_signals_for_tick([_buy_signal("SPXU")], tick1)
+
+        # After manual sale: UPRO position cleared, cash = 200 * 55 = 11000
+        assert pf.positions["UPRO"].quantity == 0
+        assert pf.cash == 200 * 55.0  # $11,000
+
+        # Next tick: buy SPXU with the recovered cash
+        ts2 = ts1 + timedelta(minutes=1)
+        tick2 = _tick(("UPRO", 55.0), ("SPXU", 20.0), ts=ts2)
+        result = pf.process_market_signals_for_tick([_buy_signal("SPXU")], tick2)
+
+        assert len(result.orders) == 1
+        assert result.orders[0].symbol == "SPXU"
+        # 11000 / 20 = 550 shares of SPXU
+        assert pf.positions["SPXU"].quantity == 550
+        assert pf.cash < 1.0  # all cash reinvested
+
+    def test_manual_sale_at_loss_credits_reduced_cash(self):
+        """Manual sale at a lower price credits the reduced proceeds."""
+        pf = _make_pf(cash=10000.0)
+        ts = datetime(2024, 1, 1, 10, 0)
+
+        # Buy UPRO at $50 → 200 shares
+        tick0 = _tick(("UPRO", 50.0), ("SPXU", 20.0), ts=ts)
+        pf.process_market_signals_for_tick([_buy_signal("UPRO")], tick0)
+
+        # Signal SPXU → manual sell UPRO at $46 (loss, but above stop at $45)
+        ts1 = ts + timedelta(minutes=1)
+        tick1 = _tick(("UPRO", 46.0), ("SPXU", 20.0), ts=ts1)
+        pf.process_market_signals_for_tick([_buy_signal("SPXU")], tick1)
+
+        assert pf.positions["UPRO"].quantity == 0
+        assert pf.cash == 200 * 46.0  # $9,200 (lost $800)
+
+    def test_manual_sale_with_tx_cost(self):
+        """Transaction costs are deducted from the manual sale proceeds."""
+        pf = _make_pf(cash=10000.0, tx_cost=5.0)
+        ts = datetime(2024, 1, 1, 10, 0)
+
+        # Buy UPRO at $50 → qty = floor((10000 - 5) / 50) = 199
+        tick0 = _tick(("UPRO", 50.0), ("SPXU", 20.0), ts=ts)
+        pf.process_market_signals_for_tick([_buy_signal("UPRO")], tick0)
+        upro_qty = pf.positions["UPRO"].quantity
+        cash_after_buy = pf.cash
+
+        # Signal SPXU → manual sell UPRO at $50 (flat)
+        ts1 = ts + timedelta(minutes=1)
+        tick1 = _tick(("UPRO", 50.0), ("SPXU", 20.0), ts=ts1)
+        pf.process_market_signals_for_tick([_buy_signal("SPXU")], tick1)
+
+        # Cash = leftover + (qty * 50) - tx_cost
+        expected_cash = cash_after_buy + (upro_qty * 50.0) - 5.0
+        assert pf.cash == expected_cash
+        assert pf.positions["UPRO"].quantity == 0
+
     def test_strongest_signal_wins(self):
         pf = _make_pf()
         tick = _tick(("UPRO", 50.0), ("SPXU", 20.0))

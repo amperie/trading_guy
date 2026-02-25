@@ -242,8 +242,9 @@ class DualSymbolSwitchPortfolio(Portfolio):
 
                     # Trigger OM immediately to process the manual sale on this tick
                     self.om.update_order_status(active_bracket, tick, self.positions, self.cash)
-                    # Apply the fill to portfolio cash/positions immediately
-                    self._update_pf_from_changed_orders([active_bracket.order_id])
+                    # If the sell filled instantly (backtesting), apply to portfolio now
+                    if active_bracket.status == OrderStatus.FILLED:
+                        self._update_pf_from_changed_orders([active_bracket.order_id])
 
                     # Queue next target for next tick
                     self._pending_target = target
