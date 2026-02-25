@@ -50,7 +50,7 @@ portfolio:
   min_signal_strength: 0     # Accept any signal strength (0 = no filter)
   stop_pct: 13.8              # Stop-loss: exit if price drops 5% from entry
   profit_pct: 17.4          # Profit-taker: exit if price rises 10% from entry
-  holding_period_hours: 2    # Minimum hours to hold before allowing a switch
+  holding_period_hours: 0    # Minimum hours to hold before allowing a switch
   tx_cost: 0.0               # Transaction cost per order (0 for commission-free)
   sync_with_broker: true     # Periodically sync cash/positions from Alpaca
   sync_interval: 60          # Sync every 60 ticks

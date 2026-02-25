@@ -237,6 +237,11 @@ class Portfolio(ABC):
         """
         logger.debug(f"Updating portfolio value - Cash: ${self.cash:,.2f}, Positions: {len(self.positions)}")
         retval = self.cash
+        # Cache prices for ALL symbols in the tick, not just held positions.
+        # This ensures get_price() fallback works for symbols we're about to enter
+        # (e.g. switching from SPXU to UPRO when the tick only contains SPY data).
+        for pd_item in current_tick:
+            self.previous_price[pd_item.symbol] = pd_item.close
         for p in self.positions.keys():
             sp = find_pricedata_in_list(p, current_tick)
             if sp is None and p not in self.previous_price:
