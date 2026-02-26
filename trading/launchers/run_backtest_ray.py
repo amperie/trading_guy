@@ -125,7 +125,7 @@ def run_backtest_core(
     dp = data_provider_class(dp_cfg)
     pf = portfolio_class(pf_cfg, om, starting_cash, {}, True)
 
-    sim = BacktestingEngine({}, dp, al, om, pf)
+    sim = BacktestingEngine({"state_store": {"enabled": False}}, dp, al, om, pf)
     sim.run()
 
     print(f"\nAnalyzing results for run {run_name}")

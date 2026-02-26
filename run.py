@@ -8,6 +8,8 @@ Usage:
     python run.py live          --config configs/example_live.yaml --alpaca-override-url wss://stream.data.alpaca.markets/v2/test
     python run.py live          --config configs/example_live_self_optimizing.yaml
     python run.py walk-forward  --config configs/example_walk_forward.yaml
+    python run.py hpo           --config configs/example_hpo.yaml
+    python run.py hpo           --config configs/example_hpo.yaml --num-samples 50 --max-concurrent-trials 4
 """
 
 import argparse
@@ -23,6 +25,14 @@ from utils.utils import instantiate_from_string
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
+
+def _import_class(dotted_path: str):
+    """Import and return a class from a dotted module path without instantiating it."""
+    import importlib
+    module_path, class_name = dotted_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -265,6 +275,75 @@ def cmd_walk_forward(args: argparse.Namespace):
             logger.info(f"  {key}: {val}")
 
 
+def cmd_hpo(args: argparse.Namespace):
+    """Run standalone Ray Tune HPO from a config profile."""
+    cfg = _load_config(args.config)
+    cfg = _apply_cli_overrides(cfg, args)
+
+    # CLI overrides for HPO-specific settings
+    hpo_cfg = cfg.setdefault("hpo", {})
+    if getattr(args, "num_samples", None) is not None:
+        hpo_cfg["num_samples"] = args.num_samples
+    if getattr(args, "max_concurrent_trials", None) is not None:
+        hpo_cfg["max_concurrent_trials"] = args.max_concurrent_trials
+
+    logger.info(f"Starting HPO with profile: {args.config}")
+
+    # Extract classes (do NOT instantiate — tune_backtest_hyperparameters needs the class itself)
+    al_section = cfg["algorithm"]
+    pf_section = cfg["portfolio"]
+    dp_section = cfg["data_provider"]
+    om_section = cfg["order_manager"]
+
+    al_class = _import_class(al_section["algorithm"])
+    pf_class = _import_class(pf_section["portfolio"])
+    dp_class = _import_class(dp_section["provider"])
+    om_class = _import_class(om_section["order_manager"])
+
+    # Build base configs (strip the class-path keys and positional constructor args)
+    base_al_cfg = {k: v for k, v in al_section.items() if k not in ("algorithm", "history_length")}
+    base_pf_cfg = {k: v for k, v in pf_section.items() if k not in ("portfolio", "cash", "keep_history")}
+    base_dp_cfg = {k: v for k, v in dp_section.items() if k != "provider"}
+
+    starting_cash = pf_section.get("cash", 10000.0)
+    analysis_cfg = cfg.get("analysis", {})
+
+    base_backtest_cfg = {
+        "starting_cash":   starting_cash,
+        "experiment_name": analysis_cfg.get("experiment_name", "HPO"),
+        "run_name":        analysis_cfg.get("run_name", "HPO_Run"),
+        "description":     analysis_cfg.get("description", ""),
+        "symbol":          base_pf_cfg.get("symbol") or base_pf_cfg.get("upro_symbol", ""),
+    }
+
+    # Parse search space (YAML dict → Ray Tune distributions)
+    from utils.utils import parse_search_space
+    search_space = parse_search_space(hpo_cfg.get("search_space", {}))
+
+    from trading.launchers.run_backtest_ray import tune_backtest_hyperparameters
+
+    best_config = tune_backtest_hyperparameters(
+        symbol=base_backtest_cfg["symbol"],
+        algorithm_class=al_class,
+        portfolio_class=pf_class,
+        data_provider_class=dp_class,
+        order_manager_class=om_class,
+        base_algorithm_config=base_al_cfg,
+        base_portfolio_config=base_pf_cfg,
+        base_data_provider_config=base_dp_cfg,
+        base_backtest_config=base_backtest_cfg,
+        search_space=search_space,
+        algorithm_param_keys=hpo_cfg.get("algorithm_param_keys", []),
+        portfolio_param_keys=hpo_cfg.get("portfolio_param_keys", []),
+        num_samples=hpo_cfg.get("num_samples", 50),
+        max_concurrent_trials=hpo_cfg.get("max_concurrent_trials", 8),
+    )
+
+    logger.info("HPO complete. Best config:")
+    for k, v in best_config.items():
+        logger.info(f"  {k}: {v}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Trading framework launcher",
@@ -276,6 +355,8 @@ def main():
             "  python run.py live --config configs/example_live.yaml\n"
             "  python run.py live --config configs/example_live_self_optimizing.yaml\n"
             "  python run.py walk-forward --config configs/example_walk_forward.yaml\n"
+            "  python run.py hpo --config configs/example_hpo.yaml\n"
+            "  python run.py hpo --config configs/example_hpo.yaml --num-samples 50 --max-concurrent-trials 4\n"
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -303,6 +384,13 @@ def main():
     wf = subparsers.add_parser("walk-forward", parents=[shared], help="Run walk-forward backtest with rolling HPO re-optimization")
     wf.add_argument("--data", help="Override data provider path")
     wf.set_defaults(func=cmd_walk_forward)
+
+    # -- hpo subcommand --
+    hpo_p = subparsers.add_parser("hpo", parents=[shared], help="Run standalone Ray Tune hyperparameter optimization over a single date range")
+    hpo_p.add_argument("--data", help="Override data provider path")
+    hpo_p.add_argument("--num-samples", dest="num_samples", type=int, help="Override hpo.num_samples (total Ray Tune trials)")
+    hpo_p.add_argument("--max-concurrent-trials", dest="max_concurrent_trials", type=int, help="Override hpo.max_concurrent_trials (parallel Ray workers)")
+    hpo_p.set_defaults(func=cmd_hpo)
 
     args = parser.parse_args()
     args.func(args)

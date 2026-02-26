@@ -159,14 +159,14 @@ def run_ray_spy_trend_macd():
     based on SPY MACD trend signals.
 
     Optimized Parameters:
-    - macd_fast_period: Fast EMA period (5-2500, standard: 12)
-    - macd_slow_period: Slow EMA period (20-5000, standard: 26)
-    - macd_signal_period: Signal line EMA period (5-2000, standard: 9)
-    - strength_scale: Signal strength multiplier (fixed: 5.0)
+    - macd_fast_period: Fast EMA period (5-50, standard: 12)
+    - macd_slow_period: Slow EMA period (20-200, standard: 26)
+    - macd_signal_period: Signal line EMA period (3-30, standard: 9)
     - stop_pct: Stop-loss percentage for bracket orders (1-20%, standard: 5%)
     - profit_pct: Profit-taker percentage for bracket orders (1-25%, standard: 10%)
 
     Fixed Parameters:
+    - strength_scale: 20.0 (not tuned)
     - min_signal_strength: 0 (accept all signals)
     - holding_period_hours: 2 hours
 
@@ -185,6 +185,7 @@ def run_ray_spy_trend_macd():
         "spy_symbol": "SPY",
         "upro_symbol": "UPRO",
         "spxu_symbol": "SPXU",
+        "strength_scale": 20.0,         # Fixed: not tuned
     }
 
     base_pf_cfg = {
@@ -195,7 +196,7 @@ def run_ray_spy_trend_macd():
     }
 
     base_dp_cfg = {
-        "path": "../data/SPY_UPRO_SPXU_5min.csv",
+        "path": "../data/SPY_UPRO_SPXU_1min.csv",
         "truncate": 10000000,
         "start_date": "01/01/2022",
     }
@@ -211,10 +212,9 @@ def run_ray_spy_trend_macd():
     # Search space (parameters to optimize)
     search_space = {
         # MACD Algorithm Parameters
-        "macd_fast_period": tune.randint(5, 2500),        # Fast EMA: 5-2500 periods (standard: 12)
-        "macd_slow_period": tune.randint(20, 5000),       # Slow EMA: 20-5000 periods (standard: 26)
-        "macd_signal_period": tune.randint(5, 2000),      # Signal line: 5-2000 periods (standard: 9)
-        "strength_scale": tune.uniform(5.0, 5.0),         # Signal strength multiplier: 5.0 (fixed)
+        "macd_fast_period": tune.randint(5, 3000),          # Fast EMA: 5-50 periods (standard: 12)
+        "macd_slow_period": tune.randint(20, 3000),        # Slow EMA: 20-200 periods (standard: 26)
+        "macd_signal_period": tune.randint(3, 3000),        # Signal line: 3-30 periods (standard: 9)
 
         # Portfolio Parameters (Bracket Orders)
         "stop_pct": tune.uniform(1.0, 20.0),              # Stop-loss percentage: 1-20% (standard: 5%)
@@ -222,7 +222,7 @@ def run_ray_spy_trend_macd():
     }
 
     # Specify which hyperparameters go to which component
-    algorithm_param_keys = ["macd_fast_period", "macd_slow_period", "macd_signal_period", "strength_scale"]
+    algorithm_param_keys = ["macd_fast_period", "macd_slow_period", "macd_signal_period"]
     portfolio_param_keys = ["stop_pct", "profit_pct"]
 
     # Run optimization
@@ -242,7 +242,7 @@ def run_ray_spy_trend_macd():
         algorithm_param_keys=algorithm_param_keys,
         portfolio_param_keys=portfolio_param_keys,
 
-        num_samples=5000,
+        num_samples=200,
         max_concurrent_trials=8,
     )
 

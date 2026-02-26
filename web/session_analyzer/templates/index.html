@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trading Session Analyzer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;500;700&family=Space+Grotesk:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero" data-animate>
+        <div class="hero-top">
+          <div>
+            <p class="eyebrow">Mongo Session Intelligence</p>
+            <h1>Trading Session Analyzer</h1>
+            <p class="subtitle">
+              Pull a session from MongoDB, map the equity curve, and benchmark
+              against SPY in a single view.
+            </p>
+          </div>
+          <div class="session-input">
+            <label for="sessionId">Session ID</label>
+            <div class="session-controls">
+              <input id="sessionId" type="text" placeholder="paste session_id" />
+              <button id="loadBtn">Analyze</button>
+            </div>
+            <p id="status" class="status">Waiting for a session.</p>
+          </div>
+        </div>
+        <div class="hero-meta">
+          <div class="meta-card">
+            <p class="meta-label">Account</p>
+            <p id="metaAccount" class="meta-value">--</p>
+          </div>
+          <div class="meta-card">
+            <p class="meta-label">Session Name</p>
+            <p id="metaName" class="meta-value">--</p>
+          </div>
+          <div class="meta-card">
+            <p class="meta-label">Created</p>
+            <p id="metaCreated" class="meta-value">--</p>
+          </div>
+          <div class="meta-card">
+            <p class="meta-label">Orders</p>
+            <p id="metaOrders" class="meta-value">--</p>
+          </div>
+        </div>
+      </header>
+
+      <section class="grid metrics" data-animate>
+        <div class="metric-card">
+          <p class="metric-label">Total Return</p>
+          <p id="metricReturn" class="metric-value">--</p>
+          <p id="metricAlpha" class="metric-sub">Alpha vs SPY: --</p>
+        </div>
+        <div class="metric-card">
+          <p class="metric-label">Annualized Return</p>
+          <p id="metricAnnualized" class="metric-value">--</p>
+          <p id="metricOutperformance" class="metric-sub">--</p>
+        </div>
+        <div class="metric-card">
+          <p class="metric-label">Sharpe / Sortino</p>
+          <p id="metricSharpe" class="metric-value">--</p>
+          <p id="metricSortino" class="metric-sub">--</p>
+        </div>
+        <div class="metric-card">
+          <p class="metric-label">Max Drawdown</p>
+          <p id="metricDrawdown" class="metric-value">--</p>
+          <p id="metricCalmar" class="metric-sub">--</p>
+        </div>
+        <div class="metric-card">
+          <p class="metric-label">Win Rate</p>
+          <p id="metricWinRate" class="metric-value">--</p>
+          <p id="metricProfitFactor" class="metric-sub">--</p>
+        </div>
+        <div class="metric-card">
+          <p class="metric-label">Trades</p>
+          <p id="metricTrades" class="metric-value">--</p>
+          <p id="metricAvgTrade" class="metric-sub">--</p>
+        </div>
+      </section>
+
+      <section class="grid charts" data-animate>
+        <div class="panel wide">
+          <div class="panel-header">
+            <h2>Equity Curve vs SPY</h2>
+            <div class="panel-actions">
+              <button id="exportEquity">Export Equity CSV</button>
+              <button id="exportJson">Export JSON</button>
+            </div>
+          </div>
+          <canvas id="equityChart"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Drawdown</h2>
+            <p class="panel-note">Peak-to-trough depth</p>
+          </div>
+          <canvas id="drawdownChart"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Returns Distribution</h2>
+            <p class="panel-note">Daily returns</p>
+          </div>
+          <canvas id="returnsChart"></canvas>
+        </div>
+      </section>
+
+      <section class="grid charts" data-animate>
+        <div class="panel wide">
+          <div class="panel-header">
+            <h2>Symbol Price Tape</h2>
+            <div id="symbolFilters" class="symbol-filters"></div>
+          </div>
+          <canvas id="symbolChart"></canvas>
+        </div>
+      </section>
+
+      <section class="grid tables" data-animate>
+        <div class="panel wide">
+          <div class="panel-header">
+            <h2>Trade Blotter</h2>
+            <p class="panel-note">Filled trades extracted from orders</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Entry</th>
+                  <th>Exit</th>
+                  <th>Qty</th>
+                  <th>PnL</th>
+                  <th>PnL %</th>
+                  <th>Duration (hrs)</th>
+                  <th>Exit Type</th>
+                </tr>
+              </thead>
+              <tbody id="tradeRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

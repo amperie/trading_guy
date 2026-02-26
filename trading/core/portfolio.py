@@ -382,7 +382,7 @@ class Portfolio(ABC):
                 order.processed_by_portfolio = False
                 logger.info(
                     f"BRACKET order {order.symbol} - Initial BUY filled, awaiting STOP/PROFIT trigger "
-                    f"at ${order.get_child_order("STOP").price:.2f}///${order.get_child_order("PROFIT").price:.2f}"
+                    f"at ${order.get_child_order('STOP').price:.2f}///${order.get_child_order('PROFIT').price:.2f}"
                 )
                 return order
             elif status == OrderStatus.FILLED:
