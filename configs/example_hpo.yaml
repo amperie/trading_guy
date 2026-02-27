@@ -22,7 +22,7 @@ mode: hpo
 # ---------------------------------------------------------------------------
 data_provider:
   provider: "trading.data_providers.test_data_provider.TestDataProvider"
-  path: "data/SPY_SPXU_UPRO_1min.csv"
+  path: "../data/SPY_SPXU_UPRO_1min.csv"
   start_date: "01/01/2022"
   truncate: 0  # 0 = use all data
 
@@ -66,9 +66,9 @@ hpo:
   # Search space — parameter ranges explored by Ray Tune + Optuna
   # Supported types: randint, uniform, choice, loguniform
   search_space:
-    macd_fast_period:   { type: randint, low: 50,   high: 3000  }
-    macd_slow_period:   { type: randint, low: 200,  high: 2000 }
-    macd_signal_period: { type: randint, low: 30,   high: 3000  }
+    macd_fast_period:   { type: randint, low: 3000,   high: 6000  }
+    macd_slow_period:   { type: randint, low: 2000,  high: 4000 }
+    macd_signal_period: { type: randint, low: 3000,   high: 6000  }
     stop_pct:           { type: uniform, low: 1.0, high: 20.0 }
     profit_pct:         { type: uniform, low: 1.0, high: 25.0 }
 

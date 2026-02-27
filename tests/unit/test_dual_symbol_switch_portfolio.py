@@ -382,3 +382,128 @@ class TestEntryTimeTracking:
         pf.process_market_signals_for_tick([_buy_signal("SPXU")], tick1)
 
         assert "UPRO" not in pf._symbol_entry_time
+
+
+# ---------------------------------------------------------------------------
+# Deferred bracket order protection — no double-submit when price data missing
+# ---------------------------------------------------------------------------
+
+def _spy_only_tick(ts=None):
+    """Tick containing only SPY — UPRO and SPXU are absent."""
+    if ts is None:
+        ts = datetime(2024, 1, 1, 10, 0)
+    return [PriceData("SPY", ts, 450.0, 450.0, 450.0, 450.0, 10000)]
+
+
+class TestDeferredBracketOrderProtection:
+    """
+    When a BRACKET order stays PENDING (submitted but no price data in tick),
+    subsequent ticks with the same BUY signal must not submit a second bracket.
+
+    Without this guard, two PENDING brackets would each calculate quantity
+    against the full cash balance and both try to buy — causing the second fill
+    to overdraw the portfolio.
+    """
+
+    def _pf_with_cached_upro(self, price=50.0, cash=10000.0):
+        """Portfolio pre-seeded with a cached UPRO price but no position."""
+        pf = _make_pf(cash=cash)
+        pf.previous_price["UPRO"] = price
+        return pf
+
+    def test_find_active_bracket_returns_pending_order(self):
+        """_find_active_bracket must return PENDING brackets, not only PENDING_SALE."""
+        pf = self._pf_with_cached_upro()
+
+        # Tick with no UPRO → bracket submitted but stays PENDING
+        pf.process_market_signals_for_tick([_buy_signal("UPRO")], _spy_only_tick())
+
+        found = pf._find_active_bracket("UPRO")
+        assert found is not None, "_find_active_bracket should find the PENDING bracket"
+        assert found.status == OrderStatus.PENDING
+
+    def test_find_active_bracket_returns_none_when_no_bracket(self):
+        pf = _make_pf()
+        assert pf._find_active_bracket("UPRO") is None
+
+    def test_no_second_bracket_when_first_is_pending(self):
+        """Second tick with same BUY signal must not produce another bracket."""
+        pf = self._pf_with_cached_upro()
+
+        ts0 = datetime(2024, 1, 1, 10, 0)
+        pf.process_market_signals_for_tick([_buy_signal("UPRO")], _spy_only_tick(ts=ts0))
+        count_after_tick1 = len(pf.om.pending_orders_by_id)
+
+        ts1 = datetime(2024, 1, 1, 10, 1)
+        result2 = pf.process_market_signals_for_tick([_buy_signal("UPRO")], _spy_only_tick(ts=ts1))
+        count_after_tick2 = len(pf.om.pending_orders_by_id)
+
+        assert count_after_tick1 == count_after_tick2 == 1
+        assert len(result2.orders) == 0
+
+    def test_no_accumulation_across_many_missing_ticks(self):
+        """Many consecutive ticks with missing price data never accumulate brackets."""
+        pf = self._pf_with_cached_upro()
+
+        for i in range(6):
+            ts = datetime(2024, 1, 1, 10, i)
+            pf.process_market_signals_for_tick([_buy_signal("UPRO")], _spy_only_tick(ts=ts))
+
+        assert len(pf.om.pending_orders_by_id) == 1, \
+            "Should have exactly one pending bracket regardless of how many ticks pass"
+
+    def test_deferred_bracket_fills_when_price_available(self):
+        """When UPRO finally appears in the tick, the deferred bracket fills."""
+        pf = self._pf_with_cached_upro(price=50.0)
+
+        # Tick 1: no UPRO → bracket deferred
+        ts0 = datetime(2024, 1, 1, 10, 0)
+        pf.process_market_signals_for_tick([_buy_signal("UPRO")], _spy_only_tick(ts=ts0))
+        assert "UPRO" not in pf.positions
+
+        # Tick 2: UPRO in tick → pending bracket retries, fills
+        ts1 = datetime(2024, 1, 1, 10, 1)
+        pf.process_market_signals_for_tick([], _tick(("UPRO", 50.0), ts=ts1))
+
+        assert "UPRO" in pf.positions
+        assert pf.positions["UPRO"].quantity > 0
+
+    def test_no_new_entry_after_deferred_bracket_fills(self):
+        """Once the deferred bracket fills and position exists, new BUY signals are ignored."""
+        pf = self._pf_with_cached_upro(price=50.0)
+
+        ts0 = datetime(2024, 1, 1, 10, 0)
+        pf.process_market_signals_for_tick([_buy_signal("UPRO")], _spy_only_tick(ts=ts0))
+
+        ts1 = datetime(2024, 1, 1, 10, 1)
+        pf.process_market_signals_for_tick([], _tick(("UPRO", 50.0), ts=ts1))
+        qty_after_fill = pf.positions["UPRO"].quantity
+
+        # Further BUY signals for UPRO should be ignored (already holding)
+        ts2 = datetime(2024, 1, 1, 10, 2)
+        result = pf.process_market_signals_for_tick([_buy_signal("UPRO")], _tick(("UPRO", 50.0), ts=ts2))
+
+        assert len(result.orders) == 0
+        assert pf.positions["UPRO"].quantity == qty_after_fill
+
+    def test_only_one_position_after_multi_tick_defer_then_fill(self):
+        """Portfolio holds exactly one UPRO position after defer + fill, not multiple."""
+        pf = self._pf_with_cached_upro(price=50.0, cash=10000.0)
+
+        # Three ticks with missing UPRO data
+        for i in range(3):
+            ts = datetime(2024, 1, 1, 10, i)
+            pf.process_market_signals_for_tick([_buy_signal("UPRO")], _spy_only_tick(ts=ts))
+
+        # UPRO appears
+        ts3 = datetime(2024, 1, 1, 10, 3)
+        pf.process_market_signals_for_tick([], _tick(("UPRO", 50.0), ts=ts3))
+
+        # Bracket is now PENDING_SALE (waiting for stop/profit) — still in pending
+        assert len(pf.om.pending_orders_by_id) == 1
+        bracket = list(pf.om.pending_orders_by_id.values())[0]
+        assert bracket.status == OrderStatus.PENDING_SALE
+        assert "UPRO" in pf.positions
+        # Quantity should be what one order can buy, not 3x
+        expected_qty = int(10000.0 * 0.99 / 50.0)  # 198 shares from one bracket
+        assert pf.positions["UPRO"].quantity == expected_qty
