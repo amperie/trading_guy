@@ -73,6 +73,7 @@ class BacktestingOrderManager(OrderManager):
                 order.price = pd.close
                 order.cash = pd.close * order.quantity
                 order.executed_datetime = pd.timestamp
+                return order
             elif order.status == OrderStatus.PENDING_SALE:
                 # Order has been bought but sale hasn't triggered yet
                 # Check to see if a sale should trigger now
