@@ -101,7 +101,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
             order = self.om.pending_orders_by_id[order_id]
             if (isinstance(order, BracketOrder) and
                 order.symbol == symbol and
-                order.status == OrderStatus.PENDING_SALE):
+                order.status in (OrderStatus.PENDING_SALE, OrderStatus.PENDING)):
                 return order
 
         return None
@@ -191,6 +191,10 @@ class DualSymbolSwitchPortfolio(Portfolio):
 
         # Case A: No current position → Enter immediately
         if current_symbol is None:
+            # Don't double-submit if a bracket is already in flight for this symbol
+            if self._find_active_bracket(target) is not None:
+                return TickResults(orders=[])
+
             entry_price = self.get_price(target, tick)
             if entry_price is None:
                 return TickResults(orders=[])
