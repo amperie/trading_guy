@@ -139,7 +139,25 @@ def _resolve_alpaca_credentials(cfg: dict) -> dict:
     return cfg
 
 
-def _run_analysis(cfg: dict, pf, om):
+_SENSITIVE_KEYS = {"api_key", "secret_key", "password", "token"}
+
+
+def _flatten_config(cfg: dict, prefix: str = "config") -> dict:
+    """Recursively flatten a nested config dict to dot-notation key/value pairs."""
+    result = {}
+    for k, v in cfg.items():
+        if k in _SENSITIVE_KEYS:
+            continue
+        full_key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            result.update(_flatten_config(v, full_key))
+        elif isinstance(v, (str, int, float, bool)) or v is None:
+            result[full_key[:250]] = v
+        # lists and complex objects are skipped
+    return result
+
+
+def _run_analysis(cfg: dict, pf, om, config_path: str = None):
     """Run post-backtest analysis if enabled in config."""
     analysis_cfg = cfg.get("analysis", {})
     if not analysis_cfg.get("enabled", False):
@@ -147,14 +165,19 @@ def _run_analysis(cfg: dict, pf, om):
 
     from trading.analysis.analysis_engine import AnalysisEngine
 
+    # Merge explicit analysis.parameters with flattened config values
+    parameters = dict(analysis_cfg.get("parameters") or {})
+    parameters.update(_flatten_config(cfg))
+
     engine = AnalysisEngine(pf, om)
     results = engine.run_full_analysis(
         log_to_mlflow=analysis_cfg.get("log_to_mlflow", True),
         experiment_name=analysis_cfg.get("experiment_name"),
         run_name=analysis_cfg.get("run_name"),
         description=analysis_cfg.get("description"),
-        parameters=analysis_cfg.get("parameters"),
+        parameters=parameters,
         show_summary=True,
+        artifact_paths=[config_path] if config_path else None,
     )
     return results
 
@@ -191,7 +214,7 @@ def cmd_backtest(args: argparse.Namespace):
         f"Cash: ${pf.cash:,.2f}, Positions: {list(pf.positions.keys())}"
     )
 
-    _run_analysis(cfg, pf, om)
+    _run_analysis(cfg, pf, om, config_path=args.config)
 
 
 def cmd_live(args: argparse.Namespace):
@@ -329,12 +352,14 @@ def cmd_hpo(args: argparse.Namespace):
     analysis_cfg = cfg.get("analysis", {})
 
     base_backtest_cfg = {
-        "starting_cash":   starting_cash,
-        "experiment_name": analysis_cfg.get("experiment_name", "HPO"),
-        "run_name":        analysis_cfg.get("run_name", "HPO_Run"),
-        "description":     analysis_cfg.get("description", ""),
-        "symbol":          base_pf_cfg.get("symbol") or base_pf_cfg.get("upro_symbol", ""),
+        "starting_cash":        starting_cash,
+        "experiment_name":      analysis_cfg.get("experiment_name", "HPO"),
+        "run_name":             analysis_cfg.get("run_name", "HPO_Run"),
+        "description":          analysis_cfg.get("description", ""),
+        "symbol":               base_pf_cfg.get("symbol") or base_pf_cfg.get("upro_symbol", ""),
+        "config_artifact_path": args.config,
     }
+    base_backtest_cfg.update(_flatten_config(cfg))
 
     # Parse search space (YAML dict → Ray Tune distributions)
     from utils.utils import parse_search_space

@@ -2159,7 +2159,8 @@ Trading Days:           {self._metrics.trading_days}
         log_trades: bool = True,
         log_signals: bool = True,
         log_report: bool = True,
-        chart_dpi: int = 150
+        chart_dpi: int = 150,
+        artifact_paths: Optional[list] = None
     ):
         """
         Log all analysis results to MLflow
@@ -2527,6 +2528,14 @@ Trading Days:           {self._metrics.trading_days}
 """
             mlflow.log_markdown(markdown_summary, "summary.md")
 
+            # Log extra artifact files if provided (e.g. config YAML)
+            if artifact_paths:
+                import os as _os
+                for path in artifact_paths:
+                    if _os.path.isfile(path):
+                        mlflow.log_artifact(path, artifact_path="config")
+                        logger.debug(f"Logged artifact: {path}")
+
             # Get MLflow UI URL
             run_url = mlflow.get_run_url()
             logger.info(f"Analysis logged to MLflow successfully!")
@@ -2544,7 +2553,8 @@ Trading Days:           {self._metrics.trading_days}
         save_charts_locally: bool = False,
         save_report_locally: bool = False,
         output_dir: str = ".",
-        show_summary: bool = True
+        show_summary: bool = True,
+        artifact_paths: Optional[list] = None
     ) -> Dict[str, Any]:
         """
         Run complete analysis and optionally log to MLflow
@@ -2678,7 +2688,8 @@ Trading Days:           {self._metrics.trading_days}
                     run_name=run_name,
                     description=description,
                     tags=tags,
-                    parameters=parameters
+                    parameters=parameters,
+                    artifact_paths=artifact_paths
                 )
             else:
                 self.log_to_mlflow(
@@ -2686,7 +2697,8 @@ Trading Days:           {self._metrics.trading_days}
                     run_name=run_name,
                     description=description,
                     tags=tags,
-                    parameters=parameters
+                    parameters=parameters,
+                    artifact_paths=artifact_paths
                 )
 
         # Return all results
