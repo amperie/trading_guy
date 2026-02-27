@@ -22,7 +22,7 @@ mode: hpo
 # ---------------------------------------------------------------------------
 data_provider:
   provider: "trading.data_providers.test_data_provider.TestDataProvider"
-  path: "../data/SPXU_GDXU_UPRO_1min.csv"
+  path: "data/SPY_SPXU_UPRO_1min.csv"
   start_date: "01/01/2022"
   truncate: 0  # 0 = use all data
 

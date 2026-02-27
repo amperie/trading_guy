@@ -166,6 +166,10 @@ class BacktestingOrderManager(OrderManager):
             return order
 
         pd = find_pricedata_in_list(order.symbol, current_tick)
+        if pd is None:
+            logger.error(f"No price data found for {order.symbol} — canceling order {order.order_id}")
+            order.status = OrderStatus.CANCELED
+            return order
         if order.symbol in positions:
             position = positions[order.symbol]
         else:

@@ -88,6 +88,9 @@ def _apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
     if getattr(args, "alpaca_override_url", None):
         cfg.setdefault("alpaca", {})["override_url"] = args.alpaca_override_url
 
+    if getattr(args, "session_id", None):
+        cfg.setdefault("state_store", {})["session_id"] = args.session_id
+
     return cfg
 
 
@@ -156,10 +159,23 @@ def _run_analysis(cfg: dict, pf, om):
     return results
 
 
+def _validate_session_id(cfg: dict) -> None:
+    """Error out if state_store is enabled but session_id is not set."""
+    ss_cfg = cfg.get("state_store", {})
+    if ss_cfg.get("enabled", False) and not ss_cfg.get("session_id"):
+        logger.error(
+            "state_store is enabled but session_id is not set. "
+            "Set it in your config file or pass --session-id <id> to avoid "
+            "creating anonymous MongoDB sessions."
+        )
+        sys.exit(1)
+
+
 def cmd_backtest(args: argparse.Namespace):
     """Run a backtest from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _validate_session_id(cfg)
 
     logger.info(f"Starting backtest with profile: {args.config}")
 
@@ -167,7 +183,7 @@ def cmd_backtest(args: argparse.Namespace):
 
     from trading.engines.backtest_engine import BacktestingEngine
 
-    engine = BacktestingEngine(cfg={}, dp=dp, al=al, om=om, pf=pf)
+    engine = BacktestingEngine(cfg={"state_store": cfg.get("state_store", {})}, dp=dp, al=al, om=om, pf=pf)
     engine.run()
 
     logger.info(
@@ -182,6 +198,7 @@ def cmd_live(args: argparse.Namespace):
     """Run live trading from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _validate_session_id(cfg)
     cfg = _resolve_alpaca_credentials(cfg)
 
     alpaca_cfg = cfg.get("alpaca", {})
@@ -218,6 +235,7 @@ def cmd_live(args: argparse.Namespace):
 
     from trading.engines.alpaca_engine import AlpacaRealTimeEngine
 
+    alpaca_cfg["state_store"] = cfg.get("state_store", {})
     engine = AlpacaRealTimeEngine(cfg=alpaca_cfg, dp=dp, al=al, om=om, pf=pf)
 
     # Wrap with SelfOptimizingLiveEngine if optimization is enabled
@@ -245,6 +263,7 @@ def cmd_walk_forward(args: argparse.Namespace):
     """Run a walk-forward backtest from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _validate_session_id(cfg)
 
     logger.info(f"Starting walk-forward backtest with profile: {args.config}")
 
@@ -259,6 +278,7 @@ def cmd_walk_forward(args: argparse.Namespace):
         "experiment_name": cfg.get("analysis", {}).get("experiment_name", "Walk Forward Backtest"),
         "run_name": cfg.get("analysis", {}).get("run_name", "WalkForward"),
         "description": cfg.get("analysis", {}).get("description", ""),
+        "state_store": cfg.get("state_store", {}),
     }
 
     from trading.engines.walk_forward_engine import WalkForwardEngine
@@ -369,6 +389,7 @@ def main():
     shared.add_argument("--algorithm", help="Override algorithm class (dotted path)")
     shared.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging")
     shared.add_argument("--run-name", help="Override analysis run name")
+    shared.add_argument("--session-id", dest="session_id", help="MongoDB state_store session ID (required when state_store.enabled is true)")
 
     # -- backtest subcommand --
     bt = subparsers.add_parser("backtest", parents=[shared], help="Run a backtest")
