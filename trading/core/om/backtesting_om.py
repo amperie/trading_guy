@@ -57,7 +57,7 @@ class BacktestingOrderManager(OrderManager):
 
         pd = find_pricedata_in_list(order.symbol, current_tick)
         if pd is None:
-            logger.error(f"No price data found for {order.symbol}")
+            logger.debug(f"No price data found for {order.symbol}")
             return order
 
         if order.type == OrderType.MARKET:
@@ -66,8 +66,13 @@ class BacktestingOrderManager(OrderManager):
         elif order.type == OrderType.BRACKET:
             # Process all options for a bracket order
             if order.status == OrderStatus.PENDING:
-                # This should not happen as they should never be in PENDING state
-                raise ValueError("BRACKET order should not be in PENDING state")
+                # Price data was unavailable when first submitted — complete submission now
+                # (pd is guaranteed non-None here: the early-return above handles pd is None)
+                order.status = OrderStatus.PENDING_SALE
+                order.quantity = min(order.quantity, int(pf_cash / pd.close))
+                order.price = pd.close
+                order.cash = pd.close * order.quantity
+                order.executed_datetime = pd.timestamp
             elif order.status == OrderStatus.PENDING_SALE:
                 # Order has been bought but sale hasn't triggered yet
                 # Check to see if a sale should trigger now
@@ -167,8 +172,7 @@ class BacktestingOrderManager(OrderManager):
 
         pd = find_pricedata_in_list(order.symbol, current_tick)
         if pd is None:
-            logger.error(f"No price data found for {order.symbol} — canceling order {order.order_id}")
-            order.status = OrderStatus.CANCELED
+            logger.warning(f"No price data for {order.symbol} on this tick — order {order.order_id} will retry next tick")
             return order
         if order.symbol in positions:
             position = positions[order.symbol]
