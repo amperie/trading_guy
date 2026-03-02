@@ -388,6 +388,22 @@ def test_from_mongodb():
     print(f"  [OK]  win_rate          = {mongo_metrics.win_rate:.1f}%")
     print(f"  [OK]  bracket_trades    = {mongo_metrics.bracket_trades}")
 
+    # ---- Log analysis to MLflow ----
+    result = mongo_analyzer.run_analysis(
+        output_dir="output/test_from_mongodb",
+        log_to_mlflow=True,
+        experiment_name="Portfolio Analyzer Tests",
+        run_name="test_from_mongodb",
+        parameters={
+            "source": "mongomock",
+            "num_bars": NUM_BARS,
+            "symbols": str(SYMBOLS),
+            "initial_cash": INITIAL_CASH,
+        },
+    )
+    saved = sum(1 for ok in result["files"].values() if ok)
+    print(f"  [OK]  MLflow + local artifacts: {saved}/{len(result['files'])} files saved")
+
 
 def test_from_mongodb_multi():
     """
@@ -440,8 +456,98 @@ def test_from_mongodb_multi():
     print(f"  [OK]  {len(multi_analyzer.get_trades())} trades")
     print(f"  [OK]  total_return_pct = {multi_analyzer.get_metrics().total_return_pct:.2f}%")
 
+    # ---- Log analysis to MLflow ----
+    result = multi_analyzer.run_analysis(
+        output_dir="output/test_from_mongodb_multi",
+        log_to_mlflow=True,
+        experiment_name="Portfolio Analyzer Tests",
+        run_name="test_from_mongodb_multi",
+        parameters={
+            "source": "mongomock_multi",
+            "sessions": 2,
+            "num_bars": NUM_BARS,
+            "symbols": str(SYMBOLS),
+            "initial_cash": INITIAL_CASH,
+        },
+    )
+    saved = sum(1 for ok in result["files"].values() if ok)
+    print(f"  [OK]  MLflow + local artifacts: {saved}/{len(result['files'])} files saved")
+
+
+# ---------------------------------------------------------------------------
+# Live MongoDB session analysis
+# ---------------------------------------------------------------------------
+
+def test_live_mongodb_session():
+    """
+    Load a real MongoDB session, run full analysis, and log results to MLflow.
+
+    Connection URI and database are read from config.yaml state_store section
+    (mongodb://hp.lan:27017 / trading_z_desktop by default).
+
+    Pytest usage::
+        pytest scratch/test_portfolio_analyzer.py::test_live_mongodb_session -s
+    """
+    session_id = "live_SPY_switching_2214_1716_1722"
+
+    print(f"\n{'=' * 60}")
+    print("  Live MongoDB Session Analysis")
+    print(f"{'=' * 60}")
+    print(f"  Session ID: {session_id}")
+
+    # ---- Load from real MongoDB ----
+    try:
+        analyzer = PortfolioAnalyzer.from_mongodb(session_id, database="trading_hp")
+    except Exception as e:
+        print(f"  [FAIL] Could not load session from MongoDB: {e}")
+        return
+
+    bars = len(analyzer.portfolio.value_history)
+    print(f"  Loaded:     {bars} portfolio snapshots")
+
+    if bars == 0:
+        print("  [SKIP] Session has no history data — nothing to analyze")
+        return
+
+    # ---- Session metadata ----
+    session_meta = getattr(analyzer, '_session_metadata', {}) or {}
+    session_name  = session_meta.get('name') or session_id[:8]
+    account       = session_meta.get('account', '')
+    output_dir    = f"output/live_{session_id[:8]}"
+
+    print(f"  Session:    {session_name}" + (f"  ({account})" if account else ""))
+    print(f"  Output:     {output_dir}/")
+
+    # ---- Full analysis + MLflow logging ----
+    result = analyzer.run_analysis(
+        output_dir=output_dir,
+        log_to_mlflow=True,
+        experiment_name="Live Sessions",
+        run_name=session_name,
+        parameters={
+            "session_id": session_id,
+            "source": "mongodb_live",
+            "account": account,
+        },
+    )
+
+    # ---- Summary ----
+    m = result["metrics"]
+    saved = sum(1 for ok in result["files"].values() if ok)
+    print()
+    print(f"  Total Return:      {m.total_return_pct:.2f}%")
+    print(f"  Annualized Return: {m.annualized_return:.2f}%")
+    print(f"  Sharpe Ratio:      {m.sharpe_ratio:.3f}")
+    print(f"  Max Drawdown:      {m.max_drawdown_pct:.2f}%")
+    print(f"  Trades:            {m.total_trades}  (win rate {m.win_rate:.1f}%)")
+    print(f"  Profit Factor:     {m.profit_factor:.3f}")
+    print()
+    print(f"  [OK]  {saved}/{len(result['files'])} artifacts saved to {output_dir}/")
+    print(f"  [OK]  MLflow run '{session_name}' in experiment 'Live Sessions'")
+
 
 if __name__ == "__main__":
     main()
-    test_from_mongodb()
-    test_from_mongodb_multi()
+    #test_from_mongodb()
+    #test_from_mongodb_multi()
+    test_live_mongodb_session()
