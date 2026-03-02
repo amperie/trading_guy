@@ -117,6 +117,8 @@ def run_backtest_core(
     run_name = backtest_cfg['run_name']
     desc = backtest_cfg['description']
     config_artifact_path = backtest_cfg.get('config_artifact_path')
+    git_tags = backtest_cfg.get('git_tags') or {}
+    benchmark_paths = backtest_cfg.get('benchmark_paths') or {}
     params = backtest_cfg | alg_cfg | pf_cfg | dp_cfg
 
     print(f"Running backtest for {backtest_cfg}")
@@ -140,7 +142,9 @@ def run_backtest_core(
         log_to_mlflow=True,
         save_charts_locally=False,
         save_report_locally=False,
-        artifact_paths=[config_artifact_path] if config_artifact_path else None
+        tags=git_tags if git_tags else None,
+        artifact_paths=[config_artifact_path] if config_artifact_path else None,
+        benchmark_paths=benchmark_paths if benchmark_paths else None,
     )
     return results
 

@@ -31,3 +31,7 @@ analysis:
   experiment_name: "Example Backtest"
   run_name: "SPXU backtest"
   description: "Example backtest with random test algorithm on SPXU 5min data"
+  # Optional: compare strategy returns against buy-and-hold benchmarks.
+  # Paths are relative to where run.py is executed (project root).
+  benchmarks:
+    SPY: "data/SPY_5min.csv"

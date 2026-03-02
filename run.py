@@ -15,6 +15,7 @@ Usage:
 import argparse
 import copy
 import os
+import re
 import sys
 import yaml
 from dotenv import load_dotenv
@@ -157,6 +158,33 @@ def _flatten_config(cfg: dict, prefix: str = "config") -> dict:
     return result
 
 
+def _get_git_info() -> dict:
+    """Return git commit hash and GitHub URL as a flat dict, or {} on failure."""
+    import subprocess
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+        ).decode().strip()
+        remote = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"], stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        return {}
+
+    # Normalise remote to HTTPS URL (handles both https:// and git@github.com: forms)
+    remote = re.sub(r"\.git$", "", remote)
+    if remote.startswith("git@"):
+        # git@github.com:user/repo  →  https://github.com/user/repo
+        remote = re.sub(r"^git@([^:]+):", r"https://\1/", remote)
+
+    commit_url = f"{remote}/commit/{commit}" if "github.com" in remote else ""
+
+    result = {"git.commit": commit}
+    if commit_url:
+        result["git.commit_url"] = commit_url
+    return result
+
+
 def _run_analysis(cfg: dict, pf, om, config_path: str = None):
     """Run post-backtest analysis if enabled in config."""
     analysis_cfg = cfg.get("analysis", {})
@@ -169,6 +197,9 @@ def _run_analysis(cfg: dict, pf, om, config_path: str = None):
     parameters = dict(analysis_cfg.get("parameters") or {})
     parameters.update(_flatten_config(cfg))
 
+    tags = _get_git_info()
+    benchmark_paths = analysis_cfg.get("benchmarks") or {}
+
     engine = AnalysisEngine(pf, om)
     results = engine.run_full_analysis(
         log_to_mlflow=analysis_cfg.get("log_to_mlflow", True),
@@ -177,7 +208,9 @@ def _run_analysis(cfg: dict, pf, om, config_path: str = None):
         description=analysis_cfg.get("description"),
         parameters=parameters,
         show_summary=True,
+        tags=tags if tags else None,
         artifact_paths=[config_path] if config_path else None,
+        benchmark_paths=benchmark_paths if benchmark_paths else None,
     )
     return results
 
@@ -358,6 +391,8 @@ def cmd_hpo(args: argparse.Namespace):
         "description":          analysis_cfg.get("description", ""),
         "symbol":               base_pf_cfg.get("symbol") or base_pf_cfg.get("upro_symbol", ""),
         "config_artifact_path": args.config,
+        "git_tags":             _get_git_info(),
+        "benchmark_paths":      analysis_cfg.get("benchmarks") or {},
     }
     base_backtest_cfg.update(_flatten_config(cfg))
 

@@ -115,6 +115,7 @@ class AnalysisEngine:
         self.order_manager = order_manager
         self._trades: Optional[list[Trade]] = None
         self._metrics: Optional[PerformanceMetrics] = None
+        self._benchmark_paths: dict[str, str] = {}  # symbol → CSV path
 
     def extract_trades(self) -> list[Trade]:
         """
@@ -1245,6 +1246,94 @@ class AnalysisEngine:
 
         return benchmark_results
 
+    def _compute_single_benchmark_metrics(self, prices: 'pd.Series', initial_equity: float) -> dict:
+        """Shared buy-and-hold computation given a close-price series."""
+        if len(prices) < 2:
+            return {}
+        initial_price = float(prices.iloc[0])
+        final_price = float(prices.iloc[-1])
+        total_return_pct = ((final_price - initial_price) / initial_price) * 100
+        shares = initial_equity / initial_price
+        total_return_dollars = shares * final_price - initial_equity
+        returns = prices.pct_change().fillna(0)
+        volatility = returns.std() * np.sqrt(252 * 78) * 100  # annualized (5-min bars)
+        cumulative = (1 + returns).cumprod()
+        running_max = cumulative.expanding().max()
+        drawdown = (cumulative - running_max) / running_max
+        max_drawdown_pct = float(drawdown.min() * 100)
+        sharpe = (
+            (returns.mean() * 252 * 78) / (returns.std() * np.sqrt(252 * 78))
+            if returns.std() > 0 else 0.0
+        )
+        return {
+            'total_return_pct': total_return_pct,
+            'total_return_dollars': total_return_dollars,
+            'volatility': float(volatility),
+            'sharpe_ratio': float(sharpe),
+            'max_drawdown_pct': max_drawdown_pct,
+            'initial_price': initial_price,
+            'final_price': final_price,
+        }
+
+    def calculate_external_benchmarks(self) -> dict:
+        """
+        Load external benchmark CSVs and compute buy-and-hold metrics aligned to the
+        portfolio's time range.  Populate self._benchmark_paths before calling, e.g.:
+            engine._benchmark_paths = {"SPY": "data/SPY_5min.csv"}
+        or pass benchmark_paths to run_full_analysis().
+
+        Returns:
+            {symbol: {total_return_pct, volatility, sharpe_ratio, max_drawdown_pct,
+                      initial_price, final_price, total_return_dollars,
+                      alpha, outperformance}}
+        """
+        if not self._benchmark_paths or not self.portfolio.tick_history:
+            return {}
+
+        ticks = list(self.portfolio.tick_history.keys())
+        port_start = pd.Timestamp(min(ticks))
+        port_end = pd.Timestamp(max(ticks))
+        if port_start.tzinfo is None:
+            port_start = port_start.tz_localize('UTC')
+            port_end = port_end.tz_localize('UTC')
+
+        initial_equity = (
+            self._metrics.initial_equity if self._metrics
+            else list(self.portfolio.value_history.values())[0]
+        )
+
+        results = {}
+        for symbol, csv_path in self._benchmark_paths.items():
+            try:
+                df = pd.read_csv(csv_path)
+                if 'timestamp' not in df.columns or 'close' not in df.columns:
+                    logger.warning(f"Benchmark CSV for {symbol} missing 'timestamp'/'close', skipping")
+                    continue
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                if df['timestamp'].dt.tz is None:
+                    df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
+                else:
+                    df['timestamp'] = df['timestamp'].dt.tz_convert('UTC')
+                # If CSV contains multiple symbols, filter to the target symbol
+                if 'symbol' in df.columns and symbol in df['symbol'].values:
+                    df = df[df['symbol'] == symbol]
+                mask = (df['timestamp'] >= port_start) & (df['timestamp'] <= port_end)
+                df = df[mask].sort_values('timestamp')
+                if df.empty:
+                    logger.warning(f"No benchmark data for {symbol} in portfolio time range")
+                    continue
+                prices = df.set_index('timestamp')['close'].astype(float)
+                bm = self._compute_single_benchmark_metrics(prices, initial_equity)
+                if not bm:
+                    continue
+                if self._metrics:
+                    bm['alpha'] = self._metrics.total_return_pct - bm['total_return_pct']
+                    bm['outperformance'] = self._metrics.total_return_pct > bm['total_return_pct']
+                results[symbol] = bm
+            except Exception as e:
+                logger.warning(f"Failed to load benchmark {symbol} from '{csv_path}': {e}")
+        return results
+
     def generate_report(self) -> str:
         """Generate a comprehensive text report"""
         if self._metrics is None:
@@ -1366,6 +1455,33 @@ Performance:            {"OUTPERFORMED" if comp['outperformance'] else "UNDERPER
 """
         except Exception as e:
             logger.debug(f"Could not calculate benchmark comparison: {e}")
+
+        # External benchmark comparison (SPY, QQQ, etc.)
+        try:
+            ext_benchmarks = self.calculate_external_benchmarks()
+            if ext_benchmarks:
+                report += f"""
+ALPHA vs. EXTERNAL BENCHMARKS
+------------------------------
+Strategy Return:        {self._metrics.total_return_pct:.2f}%
+Strategy Sharpe:        {self._metrics.sharpe_ratio:.2f}
+Strategy Volatility:    {self._metrics.volatility:.2f}%
+"""
+                for bm_symbol, bm in ext_benchmarks.items():
+                    outperform_label = "[+] OUTPERFORMED" if bm.get('outperformance') else "[-] UNDERPERFORMED"
+                    alpha = bm.get('alpha', float('nan'))
+                    report += f"""
+{bm_symbol} (buy & hold):
+  Initial Price:        ${bm['initial_price']:,.2f}
+  Final Price:          ${bm['final_price']:,.2f}
+  B&H Return:           ${bm['total_return_dollars']:,.2f} ({bm['total_return_pct']:.2f}%)
+  B&H Sharpe:           {bm['sharpe_ratio']:.2f}
+  B&H Volatility:       {bm['volatility']:.2f}%
+  B&H Max Drawdown:     {bm['max_drawdown_pct']:.2f}%
+  Alpha (Strategy - B&H): {alpha:.2f}%  {outperform_label} by {abs(alpha):.2f}%
+"""
+        except Exception as e:
+            logger.debug(f"Could not calculate external benchmarks: {e}")
 
         report += f"""
 TIME PERIOD
@@ -2276,6 +2392,24 @@ Trading Days:           {self._metrics.trading_days}
                 "trading_days": float(self._metrics.trading_days),
             })
 
+            # Log external benchmark metrics (bm_<symbol>_<metric>)
+            try:
+                ext_benchmarks = self.calculate_external_benchmarks()
+                if ext_benchmarks:
+                    bm_metrics = {}
+                    for bm_symbol, bm in ext_benchmarks.items():
+                        prefix = f"bm_{bm_symbol.lower()}"
+                        bm_metrics[f"{prefix}_return_pct"] = bm['total_return_pct']
+                        bm_metrics[f"{prefix}_sharpe"] = bm['sharpe_ratio']
+                        bm_metrics[f"{prefix}_volatility"] = bm['volatility']
+                        bm_metrics[f"{prefix}_max_drawdown_pct"] = bm['max_drawdown_pct']
+                        if 'alpha' in bm:
+                            bm_metrics[f"{prefix}_alpha"] = bm['alpha']
+                    mlflow.log_metrics(bm_metrics)
+                    logger.debug(f"Logged benchmark metrics for: {list(ext_benchmarks.keys())}")
+            except Exception as e:
+                logger.warning(f"Could not log external benchmark metrics: {e}")
+
             # Log charts if enabled
             if log_charts:
                 try:
@@ -2554,7 +2688,8 @@ Trading Days:           {self._metrics.trading_days}
         save_report_locally: bool = False,
         output_dir: str = ".",
         show_summary: bool = True,
-        artifact_paths: Optional[list] = None
+        artifact_paths: Optional[list] = None,
+        benchmark_paths: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Run complete analysis and optionally log to MLflow
@@ -2579,6 +2714,8 @@ Trading Days:           {self._metrics.trading_days}
             save_report_locally: Whether to save report to local file
             output_dir: Directory for local file outputs
             show_summary: Whether to print summary to console
+            benchmark_paths: Dict mapping benchmark symbol → CSV path for alpha comparison,
+                e.g. {"SPY": "data/SPY_5min.csv", "QQQ": "data/QQQ_5min.csv"}
 
         Returns:
             Dictionary containing all analysis results:
@@ -2589,15 +2726,20 @@ Trading Days:           {self._metrics.trading_days}
                 - monthly_returns: pandas Series
                 - bracket_analysis: dict
                 - report: str
+                - benchmarks: dict (external benchmark metrics per symbol)
 
         Example:
             engine = AnalysisEngine(portfolio, order_manager)
             results = engine.run_full_analysis(
                 run_name="SMA Strategy",
                 parameters={"sma_short": 5, "sma_long": 20},
+                benchmark_paths={"SPY": "data/SPY_5min.csv"},
                 save_charts_locally=True
             )
         """
+        if benchmark_paths:
+            self._benchmark_paths = benchmark_paths
+
         logger.info("Starting full analysis...")
 
         # Extract trades
@@ -2710,4 +2852,5 @@ Trading Days:           {self._metrics.trading_days}
             "monthly_returns": monthly_returns,
             "bracket_analysis": bracket_analysis,
             "report": report,
+            "benchmarks": self.calculate_external_benchmarks(),
         }
