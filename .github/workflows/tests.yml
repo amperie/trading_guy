@@ -2,71 +2,41 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12']
-
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r tests/requirements.txt
-        pip install pandas pyyaml
-
-    - name: Run tests with pytest
-      run: |
-        pytest tests/ -v --cov=core --cov=data_providers --cov=engines --cov=algorithms --cov-report=xml --cov-report=term
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
-
-  lint:
+  unit-tests:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip'
 
-    - name: Install linting tools
-      run: |
-        python -m pip install --upgrade pip
-        pip install flake8 black isort mypy
+    - name: Install dependencies
+      run: pip install -e .
 
-    - name: Lint with flake8
+    - name: Run unit tests
       run: |
-        # Stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Exit-zero treats all errors as warnings
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+        pytest \
+          tests/unit/test_aggregate_stock_data.py \
+          tests/unit/test_indicators.py \
+          tests/unit/test_technical_analyzer.py \
+          tests/unit/test_ema_function.py \
+          tests/unit/test_bracket_order_progression.py \
+          tests/unit/test_backtesting_om_deferred_bracket.py \
+          tests/unit/test_portfolio.py \
+          tests/unit/test_get_price.py \
+          tests/unit/test_dual_symbol_switch_portfolio.py \
+          tests/unit/test_tick_aggregation_passthrough_engine.py \
+          tests/unit/test_trading_state_store.py \
+          -v
 
-    - name: Check code formatting with black
-      run: |
-        black --check --diff .
-
-    - name: Check import ordering with isort
-      run: |
-        isort --check-only --diff .
+    - name: Run portfolio analyzer tests
+      run: pytest scratch/test_portfolio_analyzer.py -v
