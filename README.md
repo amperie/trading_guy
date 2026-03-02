@@ -313,16 +313,44 @@ python run_remote_ray.py --ray-address ray://192.168.1.100:10001 --samples 5000
 
 ## Analysis and Reports
 
-The `AnalysisEngine` computes 30+ metrics, generates visualizations, and logs everything to MLflow.
+Two analysis engines are provided — both share the same interface and log to MLflow.
 
+**After a backtest** (in-memory portfolio):
 ```python
+from trading.analysis.analysis_engine import AnalysisEngine
+
 analysis = AnalysisEngine(portfolio, order_manager)
-metrics = analysis.calculate_metrics()
-analysis.plot_equity_curve(save_path="equity_curve.png")
-analysis.plot_comprehensive_dashboard(save_path="dashboard.png")
-analysis.plot_interactive_portfolio()   # Interactive Plotly chart
-report = analysis.generate_report()
+results = analysis.run_full_analysis(
+    experiment_name="SMA Tests",
+    run_name="SMA 5/20",
+    parameters={"sma_short": 5, "sma_long": 20},
+)
+print(f"Sharpe: {results['metrics'].sharpe_ratio:.2f}")
 ```
+
+**After live trading** (reconstruct from MongoDB, no in-memory state needed):
+```python
+from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
+
+# Single session — connection read from config.yaml state_store section
+analyzer = PortfolioAnalyzer.from_mongodb("your-session-uuid")
+results = analyzer.run_analysis(output_dir="output/session_abc")
+
+# Multiple sessions merged (bot restarted across several sessions)
+analyzer = PortfolioAnalyzer.from_mongodb_multi(["sid1", "sid2", "sid3"])
+results = analyzer.run_full_analysis(log_to_mlflow=True, run_name="Combined")
+
+# Date-filtered slice
+from datetime import datetime
+analyzer = PortfolioAnalyzer.from_mongodb(
+    "your-session-uuid",
+    start=datetime(2024, 6, 1),
+    end=datetime(2024, 9, 30),
+)
+```
+
+Session metadata (algorithm class, config params) stored by the engine is automatically
+included as MLflow parameters when the analyzer logs — no extra caller work required.
 
 **Metrics include:** total return, annualized return, Sharpe ratio, Sortino ratio, max drawdown, win rate, profit factor, average trade P&L, volatility, skewness, kurtosis, Calmar ratio, Ulcer index, bracket order effectiveness, and more.
 

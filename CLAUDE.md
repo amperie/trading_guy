@@ -78,6 +78,14 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 - `run_full_analysis(log_to_mlflow=True, experiment_name, run_name, parameters, ...)` — complete analysis + MLflow logging (7 PNGs + interactive HTML + signals + DataFrame CSV/Parquet)
 - `log_to_mlflow(...)` — manual MLflow logging with fine-grained control
 
+**PortfolioAnalyzer** (`trading/analysis/portfolio_analyzer.py`): Drop-in replacement for AnalysisEngine — same interface, cleaner internals. Preferred for post-mortem analysis of stored sessions.
+- `PortfolioAnalyzer(portfolio)` — from in-memory portfolio (backtest/live)
+- `PortfolioAnalyzer.from_mongodb(session_id, connection_uri=None, database=None, start=None, end=None)` — reconstruct from a single stored MongoDB session; falls back to `state_store` config for connection details
+- `PortfolioAnalyzer.from_mongodb_multi(session_ids, ...)` — merge multiple sessions (e.g. live bot restarted)
+- Session metadata (algo class, config params) stored by the engine is automatically included as MLflow parameters — no extra caller work required
+- `run_analysis(output_dir, log_to_mlflow=True, ...)` → `{"metrics", "trades", "files"}`
+- `run_full_analysis(log_to_mlflow=True, ...)` → same return dict as AnalysisEngine
+
 **WalkForwardEngine** (`engines/walk_forward_engine.py`): Rolling optimization + out-of-sample trading.
 - Splits data into overlapping `optimization_window_days` + `trading_window_days` periods
 - Each period: HPO via Ray Tune → compare vs current → adopt if improvement > threshold → backtest trading window

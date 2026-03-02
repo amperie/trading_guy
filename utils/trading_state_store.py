@@ -64,7 +64,36 @@ Quick Start
     for s in sessions:
         print(s["_id"], s["name"], s["created_at"])
 
-**Rebuild AnalysisEngine from stored data:**
+**Rebuild from stored data — two options:**
+
+Option A — ``PortfolioAnalyzer.from_mongodb()`` (recommended, no store object needed)::
+
+    from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
+
+    # Single session (connection read from config.yaml state_store section)
+    analyzer = PortfolioAnalyzer.from_mongodb(sid)
+    results = analyzer.run_analysis(output_dir="output/session_abc")
+
+    # Multiple sessions merged (live bot restarted several times)
+    analyzer = PortfolioAnalyzer.from_mongodb_multi([sid1, sid2, sid3])
+    results = analyzer.run_full_analysis(log_to_mlflow=True, run_name="Combined")
+
+    # Date-filtered slice
+    from datetime import datetime
+    analyzer = PortfolioAnalyzer.from_mongodb(
+        sid,
+        start=datetime(2024, 6, 1),
+        end=datetime(2024, 9, 30),
+    )
+
+    # Explicit connection (overrides config.yaml)
+    analyzer = PortfolioAnalyzer.from_mongodb(
+        sid,
+        connection_uri="mongodb://hp.lan:27017",
+        database="trading_live",
+    )
+
+Option B — ``TradingStateStore.create_analysis_engine()`` (AnalysisEngine path)::
 
     # Single session
     engine = store.create_analysis_engine(sid)
