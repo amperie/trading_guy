@@ -240,7 +240,16 @@ def cmd_backtest(args: argparse.Namespace):
     from trading.engines.backtest_engine import BacktestingEngine
 
     engine = BacktestingEngine(cfg={"state_store": cfg.get("state_store", {})}, dp=dp, al=al, om=om, pf=pf)
-    engine.run()
+
+    agg_cfg = cfg.get("aggregation", {})
+    if agg_cfg.get("enabled", False):
+        from trading.engines.tick_aggregation_passthrough_engine import TickAggregationPassthroughEngine
+        agg_engine = TickAggregationPassthroughEngine(cfg={**agg_cfg, "downstream_engine": engine})
+        agg_engine.dp = dp
+        logger.info(f"Aggregation enabled: {agg_cfg.get('aggregation_period_minutes', 5)}-min bars")
+        agg_engine.run()
+    else:
+        engine.run()
 
     logger.info(
         f"Backtest complete — Value: ${pf.total_value:,.2f}, "
@@ -292,7 +301,8 @@ def cmd_live(args: argparse.Namespace):
     from trading.engines.alpaca_engine import AlpacaRealTimeEngine
 
     alpaca_cfg["state_store"] = cfg.get("state_store", {})
-    engine = AlpacaRealTimeEngine(cfg=alpaca_cfg, dp=dp, al=al, om=om, pf=pf)
+    alpaca_engine = AlpacaRealTimeEngine(cfg=alpaca_cfg, dp=dp, al=al, om=om, pf=pf)
+    engine = alpaca_engine
 
     # Wrap with SelfOptimizingLiveEngine if optimization is enabled
     opt_cfg = cfg.get("optimization", {})
@@ -310,7 +320,19 @@ def cmd_live(args: argparse.Namespace):
             f"Self-optimization enabled: schedule={opt_cfg.get('schedule', 'daily')}, "
             f"window={opt_cfg.get('rolling_window_days', 90)}d"
         )
-        engine = SelfOptimizingLiveEngine(engine, opt_cfg)
+        engine = SelfOptimizingLiveEngine(alpaca_engine, opt_cfg)
+
+    # Wire aggregation engine into the inner Alpaca engine if enabled
+    agg_cfg = cfg.get("aggregation", {})
+    if agg_cfg.get("enabled", False):
+        import types
+        from trading.engines.tick_aggregation_passthrough_engine import TickAggregationPassthroughEngine
+        pipeline_shim = types.SimpleNamespace()
+        pipeline_shim.on_tick = alpaca_engine._run_pipeline
+        alpaca_engine._agg_engine = TickAggregationPassthroughEngine(
+            cfg={**agg_cfg, "downstream_engine": pipeline_shim}
+        )
+        logger.info(f"Live aggregation enabled: {agg_cfg.get('aggregation_period_minutes', 5)}-min bars")
 
     engine.run()
 

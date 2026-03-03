@@ -98,6 +98,7 @@ class AlpacaRealTimeEngine(AsyncEngine):
         ):
         super().__init__(cfg, dp, al, om, pf)
         self.cfg = cfg
+        self._agg_engine = None  # set by run.py if aggregation is enabled
         self._api_key = cfg.get("api_key", "")
         self._secret_key = cfg.get("secret_key", "")
         if self._secret_key == "" or self._api_key == "":
@@ -239,6 +240,12 @@ class AlpacaRealTimeEngine(AsyncEngine):
         raise NotImplementedError()
 
     def on_tick(self, tick: list[PriceData]) -> TickResults:
+        if self._agg_engine is not None:
+            return self._agg_engine.on_tick(tick)
+        return self._run_pipeline(tick)
+
+    def _run_pipeline(self, tick: list[PriceData]) -> TickResults:
+        """Run the standard algo → portfolio → persist pipeline."""
         market_signals = self.al.on_data(tick)
         ret_val = self.pf.process_market_signals_for_tick(market_signals, tick)
         self._persist_tick(tick, market_signals, ret_val)
