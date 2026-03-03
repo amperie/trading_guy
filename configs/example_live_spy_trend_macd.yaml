@@ -75,6 +75,7 @@ alpaca:
   subscribe_to_bars: true
   subscribe_to_quotes: false
   subscribe_to_trades: false
+  override_url: "ws://hp.lan:8765"
   warmup:
     provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
     symbols: ["SPY", "UPRO", "SPXU"]
