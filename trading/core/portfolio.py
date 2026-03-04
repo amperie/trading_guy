@@ -501,7 +501,7 @@ class Portfolio(ABC):
             TickResults containing the list of new orders submitted this tick.
         """
         if len(signals) > 0:
-            logger.info(f"Tick {tick[0].timestamp}: Processing {len(signals)} signals - Symbols: {[s.symbol for s in signals]}")
+            logger.debug(f"Tick {tick[0].timestamp}: Processing {len(signals)} signals - Symbols: {[s.symbol for s in signals]}")
 
         # Before processing new signals, update all pending orders, portfolio value and positions
         # get the list of order IDs that changed status since last tick

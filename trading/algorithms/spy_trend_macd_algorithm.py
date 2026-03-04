@@ -183,9 +183,9 @@ class SpyTrendMACDAlgorithm(Algorithm):
         logger.debug(f"Calculated target for {self.spy_symbol}: {target} (MACD: {macd_line}, Signal: {signal_line}, Histogram: {histogram})")
 
         # Only emit signal when target changes (regime flip)
-        #if target == self._last_target:
-        #    logger.debug(f"Skipping signal for {self.spy_symbol} - target {target} unchanged")
-        #    return []
+        if target == self._last_target:
+            logger.debug(f"Skipping signal for {self.spy_symbol} - target {target} unchanged")
+            return []
 
         # Calculate signal strength based on histogram magnitude
         # Larger histogram = stronger signal

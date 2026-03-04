@@ -40,7 +40,7 @@ order_manager:
 # Change aggregation_period_minutes (1, 3, 5, 10, 15, ...) to test bar sizes.
 aggregation:
   enabled: true
-  aggregation_period_minutes: 15
+  aggregation_period_minutes: 8
   use_market_open: true
   market_open_hour: 9
   market_open_minute: 30

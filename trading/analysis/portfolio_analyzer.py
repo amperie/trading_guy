@@ -2027,11 +2027,14 @@ class PortfolioAnalyzer:
         m = self.get_metrics()
         with client.start_run(run_name=run_name, description=description, tags=tags):
             # Metrics
-            metrics_dict = {
-                field.name: float(getattr(m, field.name))
-                for field in dataclasses.fields(m)
-                if isinstance(getattr(m, field.name), (int, float))
-            }
+            import math
+            metrics_dict = {}
+            for field in dataclasses.fields(m):
+                v = getattr(m, field.name)
+                if isinstance(v, (int, float)):
+                    fv = float(v)
+                    if not (math.isnan(fv) or math.isinf(fv)):
+                        metrics_dict[field.name] = fv
             client.log_metrics(metrics_dict)
 
             # Session metadata from MongoDB is merged in automatically
@@ -2150,14 +2153,17 @@ class PortfolioAnalyzer:
             self.save_all(output_dir)
 
         if log_to_mlflow:
-            self.log_to_mlflow(
-                experiment_name=experiment_name,
-                run_name=run_name,
-                description=description,
-                tags=tags,
-                parameters=parameters,
-                artifact_paths=artifact_paths,
-            )
+            try:
+                self.log_to_mlflow(
+                    experiment_name=experiment_name,
+                    run_name=run_name,
+                    description=description,
+                    tags=tags,
+                    parameters=parameters,
+                    artifact_paths=artifact_paths,
+                )
+            except Exception as e:
+                logger.warning(f"MLflow logging failed: {e}", exc_info=True)
 
         return {
             "trades": trades,
@@ -2379,11 +2385,14 @@ class PortfolioAnalyzer:
         client = MLflowClient.from_config(experiment_name=experiment_name)
         with client.start_run(run_name=run_name, tags=tags):
             # Metrics
-            metrics_dict = {
-                field.name: float(getattr(m, field.name))
-                for field in dataclasses.fields(m)
-                if isinstance(getattr(m, field.name), (int, float))
-            }
+            import math
+            metrics_dict = {}
+            for field in dataclasses.fields(m):
+                v = getattr(m, field.name)
+                if isinstance(v, (int, float)):
+                    fv = float(v)
+                    if not (math.isnan(fv) or math.isinf(fv)):
+                        metrics_dict[field.name] = fv
             client.log_metrics(metrics_dict)
 
             # Extra parameters (session metadata from MongoDB is merged in automatically)
