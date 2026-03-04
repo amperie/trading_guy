@@ -17,7 +17,7 @@ class TestDataProvider(DataProvider):
 
     def load_data(self):
         fp = self.cfg['path']
-        tr = self.cfg['truncate']
+        tr = self.cfg.get('truncate', 0)
         start_date = self.cfg['start_date'] if 'start_date' in self.cfg else None
         end_date = self.cfg['end_date'] if 'end_date' in self.cfg else None
 

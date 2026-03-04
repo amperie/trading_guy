@@ -92,6 +92,10 @@ def _apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
     if getattr(args, "session_id", None):
         cfg.setdefault("state_store", {})["session_id"] = args.session_id
 
+    if getattr(args, "agg_period", None) is not None:
+        cfg.setdefault("aggregation", {})["aggregation_period_minutes"] = args.agg_period
+        cfg.setdefault("aggregation", {}).setdefault("enabled", True)
+
     return cfg
 
 
@@ -191,7 +195,7 @@ def _run_analysis(cfg: dict, pf, om, config_path: str = None):
     if not analysis_cfg.get("enabled", False):
         return
 
-    from trading.analysis.analysis_engine import AnalysisEngine
+    from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
 
     # Merge explicit analysis.parameters with flattened config values
     parameters = dict(analysis_cfg.get("parameters") or {})
@@ -200,7 +204,7 @@ def _run_analysis(cfg: dict, pf, om, config_path: str = None):
     tags = _get_git_info()
     benchmark_paths = analysis_cfg.get("benchmarks") or {}
 
-    engine = AnalysisEngine(pf, om)
+    engine = PortfolioAnalyzer(pf, om)
     results = engine.run_full_analysis(
         log_to_mlflow=analysis_cfg.get("log_to_mlflow", True),
         experiment_name=analysis_cfg.get("experiment_name"),
@@ -472,6 +476,7 @@ def main():
     shared.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging")
     shared.add_argument("--run-name", help="Override analysis run name")
     shared.add_argument("--session-id", dest="session_id", help="MongoDB state_store session ID (required when state_store.enabled is true)")
+    shared.add_argument("--agg-period", dest="agg_period", type=int, help="Override aggregation.aggregation_period_minutes (also sets aggregation.enabled=true)")
 
     # -- backtest subcommand --
     bt = subparsers.add_parser("backtest", parents=[shared], help="Run a backtest")

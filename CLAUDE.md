@@ -10,6 +10,8 @@ Modular trading backtesting and algorithm framework with event-driven architectu
 - **Portfolio** converts signals into `Order` objects based on cash/positions/strategy
 - **OrderManager** executes orders (simulated or live via broker APIs)
 
+An optional **TickAggregationPassthroughEngine** can sit between the DataProvider and the downstream engine to fold raw 1-min ticks into N-min bars before the algorithm sees them.
+
 Components are swappable via config using `utils.utils.instantiate_from_string()` with dotted paths.
 
 ### Configuration System
@@ -34,6 +36,7 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 **DataProvider** (`data_providers.data_provider.DataProvider`):
 - Override `load_data()` to populate `self.data` (DataFrame: `timestamp`, `symbol`, `open`, `high`, `low`, `close`, `volume`; optional: `trade_count`, `vwap`, `exchange`)
 - `iterate()` yields `list[PriceData]` per timestamp, auto-detects chronological order, groups by timestamp
+- `TestDataProvider`: `path` required, `truncate` optional (default 0 = load all rows), `start_date`/`end_date` optional
 
 **Portfolio** (`core.portfolio.Portfolio`):
 - Override `process_tick_market_signals_logic(signals, tick) -> TickResults`
@@ -68,9 +71,25 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 
 ### Engines
 
-**Simulator** (`engines/simulator.py`): Backtesting — orchestrates DataProvider → Algorithm → Portfolio → OM. Run via `Simulator(cfg_section_to_use="simulator").run()` or by passing components directly.
+**BacktestingEngine** (`engines/backtest_engine.py`): Synchronous backtesting — iterates DataProvider → Algorithm → Portfolio → OM.
+- `BacktestingEngine(cfg, dp, al, om, pf).run()` — main entry point
+- `on_tick(tick)` — processes one tick through the pipeline; also callable directly as a downstream target
 
-**AnalysisEngine** (`engines/analysis_engine.py`): Requires Portfolio with `keep_history=True`.
+**AlpacaRealTimeEngine** (`engines/alpaca_engine.py`): Live streaming via Alpaca WebSocket.
+- `on_tick(tick)` — if `_agg_engine` is set, delegates to it; otherwise calls `_run_pipeline()`
+- `_run_pipeline(tick)` — the core algo → portfolio → persist logic; also used as the shim target when aggregation is enabled in live mode
+- `_agg_engine` — set by `run.py` when `aggregation.enabled: true`; routes raw ticks through `TickAggregationPassthroughEngine` before the pipeline
+- Config keys: `api_key`, `secret_key`, `symbols_to_subscribe`, `subscribe_to_bars/quotes/trades`, `warmup`, `override_url`
+
+**TickAggregationPassthroughEngine** (`engines/tick_aggregation_passthrough_engine.py`): Folds raw ticks into N-min bars before forwarding to a downstream engine.
+- Sits between the DataProvider and the real downstream engine (BacktestingEngine or AlpacaRealTimeEngine pipeline)
+- **Backtest usage** (`run.py cmd_backtest`): `agg_engine.dp = dp; agg_engine.run()` drives the loop; `BacktestingEngine` is the downstream (never calls `engine.run()`)
+- **Live usage** (`run.py cmd_live`): `alpaca_engine._agg_engine = agg_engine` where the downstream is a `SimpleNamespace(on_tick=alpaca_engine._run_pipeline)` shim
+- Config keys: `downstream_engine` (required), `aggregation_period_minutes` (default 5), `use_market_open` (default true), `market_open_hour/minute` (default 9:30), `batch_symbols` (default false), `expected_symbols` (list), `batch_timeout_seconds` (default 2.0)
+- Window alignment: anchors to market open (9:30); window end = first multiple of period after the anchor that is ≥ tick timestamp. A tick that lands exactly on a boundary is its own window and flushes immediately.
+- OHLCV accumulation: open=first tick, high=max, low=min, close=last, volume=sum; aggregated bar timestamp = window end
+
+**AnalysisEngine** (`trading/analysis/analysis_engine.py`): Requires Portfolio with `keep_history=True`.
 - `extract_trades()` → `Trade` objects (FIFO buy/sell pairing), `calculate_metrics()` → `PerformanceMetrics` (30+ metrics)
 - Returns: `get_tick_returns()`, `get_daily_returns()`, `get_monthly_returns()`
 - Plots: `plot_equity_curve()`, `plot_portfolio_with_trades()`, `plot_drawdown()`, `plot_trade_pnl()`, `plot_returns_distribution()`, `plot_stock_performance()`, `plot_interactive_portfolio()` (Plotly), `plot_comprehensive_dashboard()`
@@ -91,7 +110,6 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 - Each period: HPO via Ray Tune → compare vs current → adopt if improvement > threshold → backtest trading window
 - MLflow: parent aggregate run + nested per-period runs
 - Config keys: `walk_forward.{optimization_window_days, trading_window_days, improvement_threshold_pct, num_trials, max_concurrent_trials, search_space, algorithm_param_keys, portfolio_param_keys}`
-- Launcher: `run_walk_forward_spy_trend_macd()` in `trading/launchers/run_launchers.py`
 
 **SelfOptimizingLiveEngine** (`engines/self_optimizing_live_engine.py`): Wraps any `AsyncEngine`, adds periodic background HPO.
 - Schedule: `daily` | `weekly` | `monthly`. HPO runs in daemon thread, does not block ticks
@@ -109,32 +127,78 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 
 **Data aggregation** (`aggregate_stock_data`): Multi-symbol OHLCV to any pandas resample frequency. Timestamps = end of interval. Symbols kept separate. OHLCV: first/max/min/last/sum.
 
+### run.py CLI Reference
+
+All subcommands (`backtest`, `live`, `walk-forward`, `hpo`) share these flags:
+
+| Flag | Description |
+|------|-------------|
+| `--config` | Path to YAML config profile (required) |
+| `--symbol` | Override portfolio symbol |
+| `--cash` | Override starting cash |
+| `--algorithm` | Override algorithm class (dotted path) |
+| `--no-mlflow` | Disable MLflow logging |
+| `--run-name` | Override analysis run name |
+| `--session-id` | MongoDB state_store session ID |
+| `--agg-period N` | Override `aggregation.aggregation_period_minutes`; also sets `aggregation.enabled=true` |
+
+`backtest` and `walk-forward` additionally accept `--data` to override the data provider path.
+`live` additionally accepts `--alpaca-override-url`.
+`hpo` additionally accepts `--num-samples` and `--max-concurrent-trials`.
+
 ### Directory Structure
 
 ```
-core/
-  classes.py               # Enums/dataclasses: PriceData, MarketSignal, Order, Position, BracketOrder
-  algorithm.py             # Algorithm base class
-  portfolio.py             # Portfolio base class
-  order_manager.py         # OrderManager base class
-  pf/                      # Portfolio implementations (SingleSymbolPortfolio, DualSymbolSwitchPortfolio)
-  om/                      # OrderManager implementations (BacktestingOM)
-data_providers/
-  data_provider.py         # DataProvider base class
-  test_data_provider.py    # CSV reader
-engines/
-  simulator.py             # Backtesting engine
-  real_time.py             # Live trading engine
-  analysis_engine.py       # Analysis (30+ metrics, visualizations, reports)
-  walk_forward_engine.py   # Walk-forward HPO backtest
-  self_optimizing_live_engine.py  # Live engine + background HPO
-algorithms/                # Algorithm implementations
+trading/
+  core/
+    classes.py               # Enums/dataclasses: PriceData, MarketSignal, Order, Position, BracketOrder
+    algorithm.py             # Algorithm base class
+    portfolio.py             # Portfolio base class
+    pf/                      # Portfolio implementations
+      single_symbol_portfolio.py
+      dual_symbol_switch_portfolio.py
+      long_short_oscillator_portfolio.py
+    om/                      # OrderManager implementations
+      order_manager.py       # Base class
+      backtesting_om.py      # Instant fills, bracket stop/profit logic
+      alpaca_om.py           # Live Alpaca order routing
+  algorithms/                # Algorithm implementations
+    spy_trend_macd_algorithm.py
+    macd_rsi_algorithm.py
+    spy_trend_switch_algorithm.py
+    multi_algorithm.py
+    test_algorithm.py
+  data_providers/
+    data_provider.py         # DataProvider base class
+    test_data_provider.py    # CSV reader (truncate optional, defaults to 0)
+    alpaca_data_provider.py  # Alpaca historical bars
+  engines/
+    base_engine.py           # BaseEngine + AsyncEngine base classes
+    backtest_engine.py       # Synchronous backtesting engine
+    alpaca_engine.py         # Alpaca live engine (_agg_engine / _run_pipeline split)
+    tick_aggregation_passthrough_engine.py  # Folds N raw ticks into 1 aggregated bar
+    walk_forward_engine.py   # Rolling HPO + out-of-sample backtest
+    self_optimizing_live_engine.py  # Live engine + background HPO
+    split_period_backtest_engine.py
+  analysis/
+    analysis_engine.py       # 30+ metrics, charts, MLflow (primary)
+    portfolio_analyzer.py    # Drop-in alternative; from_mongodb() support
+configs/
+  example_backtest.yaml
+  example_backtest_agg.yaml            # Backtest with 1-min data + aggregation
+  example_live.yaml
+  example_live_spy_trend_macd.yaml
+  example_live_spy_trend_macd_agg.yaml # Live MACD + aggregation
+  example_live_self_optimizing.yaml
+  example_walk_forward.yaml
+  example_hpo.yaml
 utils/
-  config_manager.py        # Singleton config loader
-  logger.py                # Singleton logger
-  mlflow_client.py         # MLflow tracking client
-  performance_tracker.py   # Rolling performance tracker
-  utils.py                 # Helpers (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, parse_search_space)
+  config_manager.py          # Singleton config loader
+  logger.py                  # Singleton logger
+  mlflow_client.py           # MLflow tracking client
+  performance_tracker.py     # Rolling performance tracker
+  trading_state_store.py     # MongoDB session persistence
+  utils.py                   # Helpers (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, parse_search_space)
 tests/
   unit/
     test_aggregate_stock_data.py      # 18/18
@@ -146,20 +210,23 @@ tests/
     test_dual_symbol_switch_portfolio.py  # 21/21 — DualSymbolSwitchPortfolio + live trading fallback
     test_macd_calculation.py          # 23/23 — one-shot MACD calculation, EMA, signal generation, reconfigure
     test_macd_algorithm.py            # 6/6
+    test_tick_aggregation.py          # 40/40 — TickAggregationPassthroughEngine (window alignment, OHLCV, timing, multi-symbol, BacktestingEngine integration, AlpacaRealTimeEngine routing)
     test_analysis_engine.py           # needs fixtures
-scratch/                   # Notebooks and experiments
-data/                      # Sample CSV data files
+scratch/
+  run_agg_sweep.py           # Sweep [1,3,5,10,15]-min aggregation periods; logs to MLflow
+data/                        # Market data CSV files
+run.py                       # Main entry point (backtest / live / hpo / walk-forward)
 ```
 
 ### Running Tests
 
 ```bash
-pytest tests/ -v                    # All tests
-pytest tests/unit/ -v               # Unit tests only
+.venv/Scripts/pytest tests/ -v                    # All tests
+.venv/Scripts/pytest tests/unit/ -v               # Unit tests only
 # Only passing suites:
-pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py tests/unit/test_portfolio.py tests/unit/test_get_price.py tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py tests/unit/test_macd_algorithm.py -v
+.venv/Scripts/pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py tests/unit/test_portfolio.py tests/unit/test_get_price.py tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py tests/unit/test_macd_algorithm.py tests/unit/test_tick_aggregation.py -v
 # Coverage:
-pytest tests/ --cov=core --cov=utils --cov-report=html
+.venv/Scripts/pytest tests/ --cov=core --cov=utils --cov-report=html
 ```
 
 ### Important Implementation Details
@@ -182,3 +249,18 @@ simulator:
   order_manager: { order_manager: "core.om.backtesting_om.BacktestingOM" }
   portfolio: { portfolio: "core.pf.single_symbol_portfolio.SingleSymbolPortfolio", symbol: "SPXU", cash: 100000, keep_history: true }
 ```
+
+**Aggregation config section** (optional, any profile):
+```yaml
+aggregation:
+  enabled: true
+  aggregation_period_minutes: 5   # target bar size (1, 3, 5, 10, 15, ...)
+  use_market_open: true           # align windows to 9:30 market open
+  market_open_hour: 9
+  market_open_minute: 30
+  # live-only options:
+  batch_symbols: true             # wait for all expected symbols before forwarding
+  expected_symbols: ["SPY", "UPRO", "SPXU"]
+  batch_timeout_seconds: 2.0      # max wait before flushing incomplete batch
+```
+Can also be activated without editing the config via `--agg-period N` on the CLI.
