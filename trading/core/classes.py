@@ -156,6 +156,7 @@ class BracketOrder(Order):
 
     MANUAL_SALE: bool = False
     SOLD_ORDER: Order = None
+    intended_entry_price: float = 0.0
 
     @staticmethod
     def create_bracket_order(

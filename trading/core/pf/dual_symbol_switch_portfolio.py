@@ -165,6 +165,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
                             tx_cost=self.tx_cost,
                             current_tick=tick
                         )
+                        bo.intended_entry_price = entry_price
                         logger.debug(
                             f"Switching position to {pending_target} - qty: {qty}, "
                             f"entry price: {entry_price}, profit_pct: {self.profit_pct}, "
@@ -211,6 +212,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
                     tx_cost=self.tx_cost,
                     current_tick=tick
                 )
+                bo.intended_entry_price = entry_price
 
                 logger.debug(
                     f"No Current position, entering position for {target} - qty: {qty}, "

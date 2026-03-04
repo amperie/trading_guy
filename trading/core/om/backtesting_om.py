@@ -68,11 +68,23 @@ class BacktestingOrderManager(OrderManager):
             if order.status == OrderStatus.PENDING:
                 # Price data was unavailable when first submitted — complete submission now
                 # (pd is guaranteed non-None here: the early-return above handles pd is None)
+                actual_fill = pd.close
                 order.status = OrderStatus.PENDING_SALE
-                order.quantity = min(order.quantity, int(pf_cash / pd.close))
-                order.price = pd.close
-                order.cash = pd.close * order.quantity
+                order.quantity = min(order.quantity, int(pf_cash / actual_fill))
+                order.price = actual_fill
+                order.cash = actual_fill * order.quantity
                 order.executed_datetime = pd.timestamp
+                # Rescale bracket child prices to be relative to the actual fill price,
+                # correcting for any stale entry estimate used during order creation.
+                intended = getattr(order, 'intended_entry_price', 0.0)
+                if intended > 0 and actual_fill != intended:
+                    scale = actual_fill / intended
+                    so = order.get_child_order("STOP")
+                    po = order.get_child_order("PROFIT")
+                    if so:
+                        so.price = round(so.price * scale, 2)
+                    if po:
+                        po.price = round(po.price * scale, 2)
                 return order
             elif order.status == OrderStatus.PENDING_SALE:
                 # Order has been bought but sale hasn't triggered yet
@@ -123,7 +135,7 @@ class BacktestingOrderManager(OrderManager):
                         position_quantity = 0
                     else:
                         position_quantity = positions[order.symbol].quantity
-                    tx_quantity = min(so.quantity, position_quantity)
+                    tx_quantity = min(po.quantity, position_quantity)
 
                     order.status = OrderStatus.FILLED
                     po.status = OrderStatus.FILLED
