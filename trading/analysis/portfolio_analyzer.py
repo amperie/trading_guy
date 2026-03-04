@@ -1402,6 +1402,13 @@ class PortfolioAnalyzer:
         equity = self._get_equity_series()
         n_trades = len(chains)
 
+        # Downsample equity for the chart when there are many ticks — the HTML
+        # size and render time scale with point count, not trade count.
+        _MAX_EQUITY_POINTS = 5000
+        if len(equity) > _MAX_EQUITY_POINTS:
+            step = max(1, len(equity) // _MAX_EQUITY_POINTS)
+            equity = equity.iloc[::step]
+
         # ---- Colour / Plotly symbol maps ----
         _EXIT_COLOR = {'PROFIT': 'green', 'STOP': 'red', 'MANUAL': 'darkorange', None: 'gray'}
         _EXIT_SYM   = {'PROFIT': 'star', 'STOP': 'x', 'MANUAL': 'diamond', 'MARKET': 'diamond'}
@@ -1450,7 +1457,9 @@ class PortfolioAnalyzer:
         ), row=1, col=1)
 
         # ── Holding-period vrects (row 1) ─────────────────────────────────────
-        for chain in chains:
+        # Cap at 300 to avoid layout bloat with large backtests
+        _VRECT_MAX = 300
+        for chain in chains[:_VRECT_MAX]:
             t = chain.trade
             try:
                 fig.add_vrect(
@@ -1571,10 +1580,14 @@ class PortfolioAnalyzer:
             ), row=1, col=1)
 
         # ── Trade Gantt (row 2) ───────────────────────────────────────────────
+        # Group by exit type so we use O(exit_types) traces instead of O(trades).
+        # Each group shares one NaN-separated bar trace + one hover-point trace.
+        gantt_groups: dict[str, dict] = {}
         for i, chain in enumerate(chains):
             t = chain.trade
             etype = t.bracket_exit_type
-            bar_c  = _GANTT_C.get(etype, 'gray')
+            key   = etype or 'MARKET'
+            bar_c = _GANTT_C.get(etype, 'gray')
             en_ts  = _ts(t.entry_time)
             ex_ts  = _ts(t.exit_time)
             mid_ts = en_ts + (ex_ts - en_ts) / 2
@@ -1593,24 +1606,40 @@ class PortfolioAnalyzer:
                 f'Duration: {t.duration / 3600:.1f}h<br>'
                 f'{sig_line}'
             )
-            # Thick bar (line) for the holding period
+            if key not in gantt_groups:
+                gantt_groups[key] = {
+                    'bars_x': [], 'bars_y': [],
+                    'hover_x': [], 'hover_y': [], 'texts': [],
+                    'color': bar_c,
+                }
+            g = gantt_groups[key]
+            # NaN separator keeps bars distinct within a single trace
+            g['bars_x'] += [en_ts, ex_ts, None]
+            g['bars_y'] += [i, i, None]
+            g['hover_x'].append(mid_ts)
+            g['hover_y'].append(i)
+            g['texts'].append(gantt_hover)
+
+        for key, g in gantt_groups.items():
             fig.add_trace(go.Scatter(
-                x=[en_ts, ex_ts], y=[i, i],
-                mode='lines', line=dict(width=20, color=bar_c),
+                x=g['bars_x'], y=g['bars_y'],
+                mode='lines', line=dict(width=20, color=g['color']),
                 showlegend=False, hoverinfo='skip',
             ), row=2, col=1)
-            # Invisible wide marker at midpoint carries the hover tooltip
             fig.add_trace(go.Scatter(
-                x=[mid_ts], y=[i],
+                x=g['hover_x'], y=g['hover_y'],
                 mode='markers',
-                marker=dict(size=20, color=bar_c, opacity=0.01),
-                text=[gantt_hover], hovertemplate='%{text}<extra></extra>',
+                marker=dict(size=20, color=g['color'], opacity=0.01),
+                text=g['texts'], hovertemplate='%{text}<extra></extra>',
                 showlegend=False, name='',
             ), row=2, col=1)
 
-        # Signal dotted vlines on Gantt
+        # Signal dotted vlines on Gantt — cap at 300 to avoid layout bloat
+        _VLINE_MAX = 300
         seen_sigs: set = set()
         for chain in chains:
+            if len(seen_sigs) >= _VLINE_MAX:
+                break
             if chain.signal_time and chain.signal_time not in seen_sigs:
                 seen_sigs.add(chain.signal_time)
                 sig_c = _SIG_COLOR.get(chain.signal_type, 'gray')
