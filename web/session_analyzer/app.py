@@ -15,7 +15,7 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 def _get_state_store() -> TradingStateStore:
     cfg = ConfigManager().get("state_store", {}) or {}
     uri = os.getenv("MONGO_URI") or cfg.get("connection_uri", "mongodb://localhost:27017")
-    db = os.getenv("MONGO_DB") or cfg.get("database", "trading")
+    db = os.getenv("MONGO_DB") or cfg.get("database", "trading_hp")
     return TradingStateStore(connection_uri=uri, database=db)
 
 
