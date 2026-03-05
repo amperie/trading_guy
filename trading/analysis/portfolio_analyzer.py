@@ -1400,11 +1400,20 @@ class PortfolioAnalyzer:
 
         chains = self._build_lifecycle_chains()
         equity = self._get_equity_series()
+
+        # Cap trades shown in chart — every marker, hover string, Gantt bar,
+        # and table row contributes to HTML size. Show the most recent N.
+        _MAX_TRADES_CHART = 200
+        if len(chains) > _MAX_TRADES_CHART:
+            logger.warning(
+                f"Interactive chart: showing last {_MAX_TRADES_CHART} of "
+                f"{len(chains)} trades to keep HTML size manageable."
+            )
+            chains = chains[-_MAX_TRADES_CHART:]
         n_trades = len(chains)
 
-        # Downsample equity for the chart when there are many ticks — the HTML
-        # size and render time scale with point count, not trade count.
-        _MAX_EQUITY_POINTS = 5000
+        # Downsample equity for the chart when there are many ticks.
+        _MAX_EQUITY_POINTS = 2000
         if len(equity) > _MAX_EQUITY_POINTS:
             step = max(1, len(equity) // _MAX_EQUITY_POINTS)
             equity = equity.iloc[::step]
@@ -1458,7 +1467,7 @@ class PortfolioAnalyzer:
 
         # ── Holding-period vrects (row 1) ─────────────────────────────────────
         # Cap at 300 to avoid layout bloat with large backtests
-        _VRECT_MAX = 300
+        _VRECT_MAX = 100
         for chain in chains[:_VRECT_MAX]:
             t = chain.trade
             try:
@@ -1635,7 +1644,7 @@ class PortfolioAnalyzer:
             ), row=2, col=1)
 
         # Signal dotted vlines on Gantt — cap at 300 to avoid layout bloat
-        _VLINE_MAX = 300
+        _VLINE_MAX = 100
         seen_sigs: set = set()
         for chain in chains:
             if len(seen_sigs) >= _VLINE_MAX:
