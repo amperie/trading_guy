@@ -267,6 +267,16 @@ def cmd_live(args: argparse.Namespace):
     """Run live trading from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+
+    if not getattr(args, "session_id", None):
+        logger.error(
+            "Live mode requires --session-id <id> on the command line. "
+            "Each live run must have an explicit session ID for MongoDB persistence."
+        )
+        sys.exit(1)
+
+    cfg.setdefault("state_store", {})["enabled"] = True
+
     _validate_session_id(cfg)
     cfg = _resolve_alpaca_credentials(cfg)
 
