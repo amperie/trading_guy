@@ -116,12 +116,18 @@ class TestAlgorithmWarmUp:
             for pd in algo.price_data_history["AAPL"]
         )
 
-    def test_warm_up_does_not_call_on_data_logic(self):
-        algo = DummyAlgorithm(history_length=10)
+    def test_warm_up_calls_on_data_logic_for_internal_state(self):
+        """warm_up feeds ticks through on_data (history + on_data_logic) so
+        algorithm-specific state (e.g. indicators) is built up.  Signals are
+        suppressed by the warmup gate — on_data_logic IS called."""
+        algo = DummyAlgorithm(history_length=5)
         ticks = [make_tick("AAPL", 100 + i, i) for i in range(5)]
         algo.warm_up(ticks)
 
-        assert algo.on_data_calls == []
+        # on_data_logic is called for every tick so internal state builds up
+        assert len(algo.on_data_calls) == 5
+        # Gate is open (ticks_seen == required_warmup_bars == history_length)
+        assert algo.is_warmed_up
 
     def test_warm_up_respects_deque_maxlen(self):
         algo = DummyAlgorithm(history_length=5)
@@ -174,8 +180,8 @@ class TestAlgorithmWarmUp:
 
         assert len(algo.price_history["AAPL"]) == 4
         assert list(algo.price_history["AAPL"]) == [100, 101, 102, 200]
-        # on_data_logic should have been called once (for the live tick)
-        assert len(algo.on_data_calls) == 1
+        # on_data_logic is called during warm_up (3 times) + once for the live tick
+        assert len(algo.on_data_calls) == 4
 
     def test_warm_up_populates_full_history_when_enabled(self):
         algo = DummyAlgorithm(history_length=10, full_history=True)
@@ -207,7 +213,8 @@ class TestBaseEngineWarmUp:
         engine.warm_up(dp)
 
         assert len(algo.price_history["AAPL"]) == 5
-        assert algo.on_data_calls == []
+        # on_data_logic is called during warmup for each tick (builds internal state)
+        assert len(algo.on_data_calls) == 5
 
     def test_engine_warm_up_with_no_algorithm(self):
         """warm_up should not raise when algorithm is None."""
@@ -226,3 +233,82 @@ class TestBaseEngineWarmUp:
         engine.warm_up(dp)
 
         assert len(algo.price_history["SPY"]) == 20
+
+
+# ---------------------------------------------------------------------------
+# Warmup gate tests (required_warmup_bars / is_warmed_up)
+# ---------------------------------------------------------------------------
+
+class SignalEmittingAlgorithm(Algorithm):
+    """Algorithm that always tries to emit a BUY signal."""
+
+    def on_data_logic(self, data):
+        return [MarketSignal(type=SignalType.BUY, symbol=data[0].symbol, strength=50)]
+
+
+class TestWarmupGate:
+
+    def test_no_signals_before_warmup_complete(self):
+        """on_data() returns [] until is_warmed_up."""
+        algo = SignalEmittingAlgorithm(cfg={"history_length": 3}, history_length=3)
+        tick = make_tick("SPY", 500)
+
+        # First 2 ticks: not warmed up yet
+        assert algo.on_data(tick) == []
+        assert algo.on_data(tick) == []
+
+    def test_signals_flow_after_warmup(self):
+        """on_data() returns signals once is_warmed_up."""
+        algo = SignalEmittingAlgorithm(cfg={"history_length": 3}, history_length=3)
+        tick = make_tick("SPY", 500)
+
+        algo.on_data(tick)  # tick 1
+        algo.on_data(tick)  # tick 2
+        signals = algo.on_data(tick)  # tick 3 = history_length → warmed up
+
+        assert len(signals) == 1
+        assert signals[0].type == SignalType.BUY
+
+    def test_zero_history_length_is_immediately_warmed_up(self):
+        """When history_length=0, required_warmup_bars=0 so gate opens immediately."""
+        algo = SignalEmittingAlgorithm(cfg={"history_length": 0}, history_length=0)
+        tick = make_tick("SPY", 500)
+
+        signals = algo.on_data(tick)  # first tick
+        assert len(signals) == 1
+
+    def test_is_warmed_up_false_initially(self):
+        algo = DummyAlgorithm(history_length=5)
+        assert not algo.is_warmed_up
+
+    def test_is_warmed_up_true_after_enough_ticks(self):
+        algo = DummyAlgorithm(history_length=3)
+        tick = make_tick("SPY", 500)
+        for _ in range(3):
+            algo.on_data(tick)
+        assert algo.is_warmed_up
+
+    def test_ticks_seen_increments_on_each_on_data_call(self):
+        algo = DummyAlgorithm(history_length=10)
+        tick = make_tick("SPY", 500)
+        assert algo._ticks_seen == 0
+        algo.on_data(tick)
+        assert algo._ticks_seen == 1
+        algo.on_data(tick)
+        assert algo._ticks_seen == 2
+
+    def test_required_warmup_bars_defaults_to_history_length(self):
+        algo = DummyAlgorithm(history_length=42)
+        assert algo.required_warmup_bars == 42
+
+    def test_warm_up_counts_towards_ticks_seen(self):
+        """Ticks processed via warm_up() count toward the warmup gate."""
+        algo = SignalEmittingAlgorithm(cfg={"history_length": 5}, history_length=5)
+        warmup_ticks = [make_tick("SPY", 500 + i, i) for i in range(5)]
+        algo.warm_up(warmup_ticks)
+
+        # Gate should be open after warm_up
+        assert algo.is_warmed_up
+        live_tick = make_tick("SPY", 600, 10)
+        signals = algo.on_data(live_tick)
+        assert len(signals) == 1

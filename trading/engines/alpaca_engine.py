@@ -57,16 +57,13 @@ class AlpacaRealTimeEngine(AsyncEngine):
             - provider (str): Dotted path to a DataProvider class (required).
                 Example: "data_providers.alpaca_data_provider.AlpacaDataProvider"
             - limit (int): Max bars to fetch (optional). Auto-set to the
-                algorithm's history_length if omitted and history_length > 0.
+                algorithm's required_warmup_bars if omitted.
             - Any other keys are passed through to the DataProvider as cfg.
             Example:
                 warmup:
-                  provider: "data_providers.alpaca_data_provider.AlpacaDataProvider"
-                  api_key: "PK..."
-                  secret_key: "..."
-                  symbols: ["AAPL"]
+                  provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
                   timeframe: "Minute"
-                  # limit auto-derived from algorithm's history_length
+                  # limit auto-derived from algorithm's required_warmup_bars
 
     Startup behavior:
         1. Creates StockDataStream with provided credentials
@@ -74,7 +71,9 @@ class AlpacaRealTimeEngine(AsyncEngine):
         3. Calls Portfolio._sync_from_broker() to pull current Alpaca
            account state (cash, positions) before any ticks arrive
         4. Warms up algorithm history from historical data (if warmup configured)
-        5. Starts the WebSocket stream
+        5. Persists replay metadata to MongoDB (symbols, timeframe, warmup_bars)
+           so that ``session-replay`` can reconstruct the session later
+        6. Starts the WebSocket stream
 
     Testing:
         Use override_url="wss://stream.data.alpaca.markets/v2/test" with symbol "FAKEPACA"
@@ -159,7 +158,7 @@ class AlpacaRealTimeEngine(AsyncEngine):
         # Warm up algorithm history from historical data if configured
         warmup_cfg = self.cfg.get("warmup", None)
         if warmup_cfg is not None and self.al is not None:
-            from utils.utils import instantiate_from_string
+            from utils.utils import instantiate_from_string, compute_warmup_start_date
             warmup_cfg = dict(warmup_cfg)  # don't mutate original
             provider_path = warmup_cfg.pop("provider")
             # Propagate Alpaca credentials and symbols into warmup config
@@ -170,34 +169,18 @@ class AlpacaRealTimeEngine(AsyncEngine):
             # Compute a start_date if not provided, so the API looks back far enough.
             # Without start_date, Alpaca defaults to "beginning of current day" which
             # has far too few bars for large history_length values.
-            if "start_date" not in warmup_cfg and self.al.history_length > 0:
-                from datetime import datetime, timedelta
+            if "start_date" not in warmup_cfg and self.al.required_warmup_bars > 0:
+                from datetime import datetime
                 timeframe = warmup_cfg.get("timeframe", "Minute")
-                bars_needed = self.al.history_length
-                # Estimate calendar days needed based on timeframe
-                # (trading day ~ 6.5 hours = 390 minutes, ~252 trading days/year)
-                MINUTES_PER_TRADING_DAY = 390
-                if timeframe == "Minute":
-                    trading_days = (bars_needed / MINUTES_PER_TRADING_DAY) + 1
-                elif timeframe == "Hour":
-                    trading_days = (bars_needed / 6.5) + 1
-                elif timeframe == "Day":
-                    trading_days = bars_needed + 1
-                elif timeframe == "Week":
-                    trading_days = bars_needed * 5 + 5
-                elif timeframe == "Month":
-                    trading_days = bars_needed * 22 + 22
-                else:
-                    trading_days = bars_needed  # fallback
-                # Convert trading days to calendar days (roughly 5/7 ratio, plus buffer)
-                calendar_days = int(trading_days * 7 / 5) + 5
-                start_dt = datetime.now() - timedelta(days=calendar_days)
+                start_dt = compute_warmup_start_date(
+                    self.al.required_warmup_bars, timeframe, datetime.now()
+                )
                 warmup_cfg["start_date"] = start_dt.strftime("%Y-%m-%d")
 
             # Set limit per symbol — AlpacaDataProvider fetches each symbol
             # individually, so limit applies per-symbol, not across all.
-            if "limit" not in warmup_cfg and self.al.history_length > 0:
-                warmup_cfg["limit"] = self.al.history_length
+            if "limit" not in warmup_cfg and self.al.required_warmup_bars > 0:
+                warmup_cfg["limit"] = self.al.required_warmup_bars
             logger.info(f"Warming up algorithm from provider {provider_path} (limit={warmup_cfg.get('limit')})")
             dp = instantiate_from_string(provider_path, cfg=warmup_cfg)
             ticks = list(dp.iterate())
@@ -213,6 +196,18 @@ class AlpacaRealTimeEngine(AsyncEngine):
             else:
                 logger.warning("Warmup returned no ticks — algorithm history not populated")
             logger.info("Algorithm warmup complete")
+
+        # Persist replay-essential session metadata so SessionReplayDataProvider
+        # can reconstruct the run without re-specifying symbols/timeframe/warmup_bars.
+        if self.state_store and self.session_id:
+            warmup_cfg_orig = self.cfg.get("warmup") or {}
+            timeframe_meta = warmup_cfg_orig.get("timeframe", "Minute")
+            self.state_store.update_session(self.session_id, {
+                "metadata.symbols":     list(self._symbols_to_subscribe),
+                "metadata.timeframe":   timeframe_meta,
+                "metadata.warmup_bars": self.al.required_warmup_bars if self.al else 0,
+            })
+            logger.info(f"Persisted replay metadata to session {self.session_id[:8]}...")
 
         # stream.run() is a sync wrapper around asyncio.run(_run_forever()),
         # which can't be called from an already-running event loop.

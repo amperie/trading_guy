@@ -1,0 +1,54 @@
+# Backtest using Alpaca historical data instead of a local CSV.
+# Fill in api_key / secret_key, or export ALPACA_API_KEY / ALPACA_SECRET_KEY
+# and manually set them here (no env-var fallback in backtest mode).
+mode: backtest
+
+data_provider:
+  provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+  symbols: ["SPY", "SPXU", "UPRO"]
+  timeframe: "Minute"
+  start_date: "2026-02-26"
+  end_date: "2026-03-05"
+  adjustment: "split"
+
+# ---------------------------------------------------------------------------
+# Algorithm — SPY MACD trend detection
+# Watches SPY price history and computes MACD crossover to determine regime
+# ---------------------------------------------------------------------------
+algorithm:
+  algorithm: "trading.algorithms.spy_trend_macd_algorithm.SpyTrendMACDAlgorithm"
+  spy_symbol: "SPY"
+  upro_symbol: "UPRO"
+  spxu_symbol: "SPXU"
+  macd_fast_period: 12      # Fast EMA period (standard: 12)
+  macd_slow_period: 26     # Slow EMA period (standard: 26)
+  macd_signal_period: 9     # Signal line EMA period (standard: 9)
+  strength_scale: 20.0       # Multiplier for signal strength (larger histogram = stronger)
+
+# ---------------------------------------------------------------------------
+# Portfolio — dual-symbol switch with bracket orders
+# Switches between UPRO and SPXU, one position at a time
+# ---------------------------------------------------------------------------
+portfolio:
+  portfolio: "trading.core.pf.dual_symbol_switch_portfolio.DualSymbolSwitchPortfolio"
+  upro_symbol: "UPRO"
+  spxu_symbol: "SPXU"
+  cash: 10000
+  keep_history: true
+  min_signal_strength: 0     # Accept any signal strength (0 = no filter)
+  stop_pct: 13.8              # Stop-loss: exit if price drops 5% from entry
+  profit_pct: 17.4          # Profit-taker: exit if price rises 10% from entry
+  holding_period_hours: 0    # Minimum hours to hold before allowing a switch
+  tx_cost: 0.0               # Transaction cost per order (0 for commission-free)
+  sync_with_broker: true     # Periodically sync cash/positions from Alpaca
+  sync_interval: 60          # Sync every 60 ticks
+
+order_manager:
+  order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: "Alpaca Backtest"
+  run_name: "SPY alpaca backtest"
+  description: "Example backtest fetching 1-min bars from Alpaca API for SPY"

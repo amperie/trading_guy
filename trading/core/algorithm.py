@@ -25,37 +25,41 @@ class Algorithm(ABC):
     """
     Base class for trading algorithms.
 
-    Provides automatic price history management and a consistent interface
-    for the engine to call on each tick of market data. Subclasses implement
-    their strategy logic in on_data_logic().
+    Provides automatic price history management, a warmup gate, and a consistent
+    interface for the engine to call on each tick of market data.  Subclasses
+    implement their strategy logic in on_data_logic().
 
     Subclassing notes:
         - Implement on_data_logic(data) with your strategy logic.
-        - Do NOT override on_data(); it is @final and manages history updates
-          before delegating to on_data_logic().
+        - Do NOT override on_data(); it is @final and manages history updates,
+          the tick counter, and the warmup gate before delegating to on_data_logic().
         - Access rolling price history via self.price_history[symbol] (deque of
           closing prices) and self.price_data_history[symbol] (deque of PriceData).
         - History deques are automatically capped at history_length entries.
         - Pass algorithm-specific parameters through cfg dict.
+        - Override required_warmup_bars (property) when your algorithm needs more
+          bars than history_length before it can generate reliable signals.
 
-    Warm-up:
-        Call warm_up(historical_ticks) before the live run loop to pre-populate
-        price_history and price_data_history from historical data. This avoids
-        a cold-start period where the algorithm cannot generate signals because
-        its history deques are empty.
+    Warmup gate:
+        on_data() always calls on_data_logic() so that algorithm-specific internal
+        state (e.g. indicator histories) is built up from the very first tick.
+        However, it returns an empty list until is_warmed_up is True — i.e. until
+        _ticks_seen >= required_warmup_bars.
 
-        warm_up() feeds ticks through _update_history() without calling
-        on_data_logic(), so no spurious signals are generated. It is not
-        @final — subclasses can override it to initialize additional state
-        (e.g. indicator objects, rolling calculations) from historical data.
+        This gate is the primary mechanism for session replay: the BacktestingEngine
+        feeds both warmup bars and live-session bars in one continuous stream, and
+        the gate suppresses signals for the warmup portion automatically.
 
-        BaseEngine.warm_up(data_provider) provides a convenience wrapper
-        that iterates a DataProvider and calls this method automatically.
+        For live trading, call warm_up(historical_ticks) before the engine loop.
+        Each warmup tick increments _ticks_seen, so the gate opens naturally after
+        the configured number of bars.  BaseEngine.warm_up(data_provider) provides
+        a convenience wrapper that iterates a DataProvider automatically.
 
     Attributes:
         cfg (dict): Algorithm configuration. Merged with default_cfg on init.
         history_length (int): Max number of ticks to retain per symbol.
             Set to 0 to disable history tracking.
+        _ticks_seen (int): Total ticks processed via on_data() (including warmup).
         price_history (dict[str, deque]): Rolling closing prices keyed by symbol.
             Only populated when history_length > 0.
         price_data_history (dict[str, deque]): Rolling PriceData objects keyed by symbol.
@@ -63,7 +67,8 @@ class Algorithm(ABC):
         full_history (list): Every tick received, appended unconditionally when
             cfg["full_history"] is True.
 
-    Example:
+    Example — basic algorithm::
+
         class MyAlgo(Algorithm):
             def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
                 for pd in data:
@@ -78,6 +83,17 @@ class Algorithm(ABC):
 
         # Pre-populate history before live trading:
         algo.warm_up(list(data_provider.iterate()))
+
+    Example — custom warmup threshold::
+
+        class MyMACDAlgo(Algorithm):
+            @property
+            def required_warmup_bars(self) -> int:
+                # MACD needs slow_period + signal_period bars before it stabilises
+                return self.macd_slow + self.macd_signal
+
+            def on_data_logic(self, data):
+                ...
     """
 
     default_cfg = {
@@ -98,6 +114,8 @@ class Algorithm(ABC):
             history_length: Rolling window size. Overrides cfg["history_length"]
                 if provided (i.e. > 0). When > 0, price_history and
                 price_data_history are populated as deques with maxlen.
+                Also sets the default value of required_warmup_bars, which
+                controls when the warmup gate opens.
         """
         super().__init__()
         if cfg is None:
@@ -107,6 +125,8 @@ class Algorithm(ABC):
 
         self.cfg = cfg
         self.history_length = history_length
+        self.warm_up_ticks = cfg.get("warm_up_ticks", history_length)
+        self._ticks_seen: int = 0
         self.price_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.price_data_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.full_history: List[Dict[str, PriceData]] = []
@@ -182,19 +202,39 @@ class Algorithm(ABC):
     def warm_up(self, historical_ticks: list[list[PriceData]]):
         """Pre-populate price history and internal algorithm state.
 
-        Feeds each tick through on_data() (the full pipeline: history
-        update + on_data_logic()) so that algorithm-specific internal
-        state (e.g. indicator histories, rolling calculations) is built
-        up automatically. Generated signals are discarded since warmup
-        runs before the engine loop.
+        Feeds each tick through on_data() (the full pipeline: history update +
+        on_data_logic()) so that algorithm-specific internal state (e.g. indicator
+        histories, rolling calculations) is built up automatically.
+
+        Each tick increments _ticks_seen.  After warm_up() completes with N ticks,
+        _ticks_seen == N.  If N >= required_warmup_bars, is_warmed_up is True and
+        the very next on_data() call in the live engine loop will emit signals.
+
+        The signals returned by on_data() during warm_up are discarded by the gate
+        (is_warmed_up is False until the threshold is reached), so no spurious
+        orders are generated even if on_data_logic() tries to signal early.
 
         Args:
             historical_ticks: List of ticks (each tick is a list[PriceData])
                 in chronological order, as returned by DataProvider.iterate().
         """
         for tick in historical_ticks:
-            self.on_data(tick)  # full pipeline, signals discarded
+            self.on_data(tick)  # full pipeline; gate suppresses early signals
         logger.info(f"Algorithm warmed up with {len(historical_ticks)} historical ticks")
+
+    @property
+    def required_warmup_bars(self) -> int:
+        """Number of ticks that must be processed before signals are emitted.
+
+        Defaults to history_length. Subclasses can override to set a larger
+        value when additional bars are needed beyond the rolling window.
+        """
+        return self.history_length
+
+    @property
+    def is_warmed_up(self) -> bool:
+        """True once enough ticks have been seen for signals to be valid."""
+        return self._ticks_seen >= self.required_warmup_bars
 
     @final
     def on_data(self, data: list[PriceData]) -> list[MarketSignal]:
@@ -210,9 +250,13 @@ class Algorithm(ABC):
 
         Returns:
             List of MarketSignal objects generated by the strategy.
+            Returns [] until is_warmed_up is True (warmup gate).
         """
         self._update_history(data)
+        self._ticks_seen += 1
         signals = self.on_data_logic(data)
+        if not self.is_warmed_up:
+            return []
         if signals:
             logger.debug(f"Signals generated: {[(s.type.name, s.symbol, s.strength) for s in signals]}")
         return signals

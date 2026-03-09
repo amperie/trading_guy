@@ -1,0 +1,58 @@
+# Session Replay — replay a stored live session using Alpaca historical bars.
+#
+# Usage:
+#   python run.py session-replay \
+#       --config configs/example_session_replay.yaml \
+#       --session-id <your-session-id>
+#
+# What this does
+# --------------
+# 1. Loads session metadata from MongoDB (symbols, timeframe, warmup_bars,
+#    algorithm class + config, portfolio class + config).
+# 2. Fetches gap-free bars from Alpaca:
+#      [warmup window] → [live session start → live session end]
+# 3. Runs the same algo+portfolio from metadata through BacktestingEngine.
+#    The algorithm's warmup gate (required_warmup_bars) suppresses signals
+#    during the warmup window automatically — no manual intervention needed.
+# 4. Logs TWO sets of metrics/charts into a single MLflow run:
+#      - Replay metrics/charts:   standard names (total_return, equity_curve.png …)
+#      - Live session metrics:    live_ prefix  (live_total_return, live_equity_curve.png …)
+#
+# Backward compatibility
+# ----------------------
+# Sessions created before replay metadata was stored are handled gracefully:
+#   - symbols:      inferred from the ticks collection in MongoDB
+#   - timeframe:    defaults to "Minute" (override with --timeframe on CLI)
+#   - warmup_bars:  derived by instantiating the algo class from session metadata
+#
+# The session-replay subcommand DOES NOT use the algorithm/portfolio/data_provider
+# sections from this config — those are reconstructed from session metadata.
+# Only the sections below are used: alpaca credentials, MongoDB connection,
+# and analysis/MLflow settings.
+
+# ---------------------------------------------------------------------------
+# Alpaca credentials — used to fetch historical bars for the replay window.
+# Leave blank and set ALPACA_API_KEY / ALPACA_SECRET_KEY env vars instead.
+# ---------------------------------------------------------------------------
+alpaca:
+  api_key: ""       # Or set ALPACA_API_KEY env var
+  secret_key: ""    # Or set ALPACA_SECRET_KEY env var
+
+# ---------------------------------------------------------------------------
+# MongoDB — where the live session is stored.
+# Falls back to state_store section in root config.yaml if omitted.
+# ---------------------------------------------------------------------------
+state_store:
+  enabled: false            # Not used for replay; just provides connection params
+  connection_uri: "mongodb://hp.lan:27017"
+  database: "trading_hp"
+
+# ---------------------------------------------------------------------------
+# Analysis / MLflow — controls what gets logged.
+# ---------------------------------------------------------------------------
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: "Session Replay"
+  run_name: ""              # Defaults to "session-replay-<first 8 chars of session_id>"
+  description: "Side-by-side comparison of replay vs live session performance"

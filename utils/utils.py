@@ -101,6 +101,36 @@ def parse_search_space(config_dict: dict) -> dict:
     return space
 
 
+def compute_warmup_start_date(warmup_bars: int, timeframe: str, reference_dt) -> object:
+    """Compute the start datetime needed to cover warmup_bars bars of given timeframe.
+
+    Args:
+        warmup_bars: Number of bars needed.
+        timeframe:   Alpaca timeframe string ("Minute", "Hour", "Day", "Week", "Month").
+        reference_dt: Reference datetime to look back from.
+
+    Returns:
+        datetime — the earliest start date that should provide enough bars.
+    """
+    from datetime import timedelta
+
+    MINUTES_PER_TRADING_DAY = 390
+    if timeframe == "Minute":
+        trading_days = (warmup_bars / MINUTES_PER_TRADING_DAY) + 1
+    elif timeframe == "Hour":
+        trading_days = (warmup_bars / 6.5) + 1
+    elif timeframe == "Day":
+        trading_days = warmup_bars + 1
+    elif timeframe == "Week":
+        trading_days = warmup_bars * 5 + 5
+    elif timeframe == "Month":
+        trading_days = warmup_bars * 22 + 22
+    else:
+        trading_days = warmup_bars
+    calendar_days = int(trading_days * 7 / 5) + 5
+    return reference_dt - timedelta(days=calendar_days)
+
+
 def aggregate_stock_data(
     df: pd.DataFrame,
     interval: str = '5min',

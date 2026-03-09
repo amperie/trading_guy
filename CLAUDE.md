@@ -25,6 +25,11 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 - Override `on_data_logic(data: list[PriceData]) -> list[MarketSignal]` (do NOT override `on_data()` — it's `@final`)
 - Config: `history_length` (deque maxlen), `full_history` (bool)
 - `self.price_history[symbol]` (deque of closes), `self.price_data_history[symbol]` (deque of PriceData)
+- **Warmup gate**: `on_data()` always calls `on_data_logic()` (builds internal state) but returns `[]` until `is_warmed_up`.
+  - `_ticks_seen` — incremented on every `on_data()` call (including warmup ticks)
+  - `required_warmup_bars` — property, defaults to `history_length`; override to set a larger threshold
+  - `is_warmed_up` — `True` once `_ticks_seen >= required_warmup_bars`
+  - This gate enables session replay: warmup bars and live bars flow through `BacktestingEngine` as one stream; signals are suppressed automatically during the warmup window
 - `reconfigure(new_params)` updates params without losing history. Override if `__init__` caches config into instance vars:
   ```python
   def reconfigure(self, new_params):
@@ -118,7 +123,7 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 
 ### Utilities
 
-- `utils.utils`: `instantiate_from_string()`, `find_pricedata_in_list()`, `find_marketsignal_in_list()`, `aggregate_stock_data(df, interval)`, `parse_search_space()`
+- `utils.utils`: `instantiate_from_string()`, `find_pricedata_in_list()`, `find_marketsignal_in_list()`, `aggregate_stock_data(df, interval)`, `parse_search_space()`, `compute_warmup_start_date(warmup_bars, timeframe, reference_dt)` → datetime lookback start
 - `utils/logger.py`: `Logger().get_logger(__name__)` — configured via `config.yaml` logging section. Supports per-call color override: `logger.info("msg", color="magenta")`. Colors: red, bold_red, green, yellow, blue, magenta, cyan, white
 - `utils/mlflow_client.py`: `MLflowClient.from_config()` — tracking at `http://hp.lan:8899`. Context manager `start_run()`, log params/metrics/artifacts/charts/text/json/html
 - `utils/performance_tracker.py`: Rolling portfolio value tracker used by SelfOptimizingLiveEngine
@@ -129,7 +134,7 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 
 ### run.py CLI Reference
 
-All subcommands (`backtest`, `live`, `walk-forward`, `hpo`) share these flags:
+All subcommands (`backtest`, `live`, `walk-forward`, `hpo`, `session-replay`) share these flags:
 
 | Flag | Description |
 |------|-------------|
@@ -145,6 +150,7 @@ All subcommands (`backtest`, `live`, `walk-forward`, `hpo`) share these flags:
 `backtest` and `walk-forward` additionally accept `--data` to override the data provider path.
 `live` additionally accepts `--alpaca-override-url`.
 `hpo` additionally accepts `--num-samples` and `--max-concurrent-trials`.
+`session-replay` additionally accepts `--timeframe` (bar size override for sessions missing metadata, e.g. `Minute`, `Hour`, `Day`).
 
 ### Directory Structure
 
@@ -198,7 +204,7 @@ utils/
   mlflow_client.py           # MLflow tracking client
   performance_tracker.py     # Rolling performance tracker
   trading_state_store.py     # MongoDB session persistence
-  utils.py                   # Helpers (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, parse_search_space)
+  utils.py                   # Helpers (instantiate_from_string, find_pricedata_in_list, aggregate_stock_data, parse_search_space, compute_warmup_start_date)
 tests/
   unit/
     test_aggregate_stock_data.py      # 18/18
@@ -211,11 +217,13 @@ tests/
     test_macd_calculation.py          # 23/23 — one-shot MACD calculation, EMA, signal generation, reconfigure
     test_macd_algorithm.py            # 6/6
     test_tick_aggregation.py          # 40/40 — TickAggregationPassthroughEngine (window alignment, OHLCV, timing, multi-symbol, BacktestingEngine integration, AlpacaRealTimeEngine routing)
+    test_warmup.py                    # 21/21 — Algorithm warmup gate (required_warmup_bars, is_warmed_up, _ticks_seen, signal suppression)
+    test_session_replay.py            # 24/24 — compute_warmup_start_date, SessionReplayDataProvider, PortfolioAnalyzer._contribute_to_run
     test_analysis_engine.py           # needs fixtures
 scratch/
   run_agg_sweep.py           # Sweep [1,3,5,10,15]-min aggregation periods; logs to MLflow
 data/                        # Market data CSV files
-run.py                       # Main entry point (backtest / live / hpo / walk-forward)
+run.py                       # Main entry point (backtest / live / hpo / walk-forward / session-replay)
 ```
 
 ### Running Tests
@@ -224,7 +232,7 @@ run.py                       # Main entry point (backtest / live / hpo / walk-fo
 .venv/Scripts/pytest tests/ -v                    # All tests
 .venv/Scripts/pytest tests/unit/ -v               # Unit tests only
 # Only passing suites:
-.venv/Scripts/pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py tests/unit/test_portfolio.py tests/unit/test_get_price.py tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py tests/unit/test_macd_algorithm.py tests/unit/test_tick_aggregation.py -v
+.venv/Scripts/pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py tests/unit/test_portfolio.py tests/unit/test_get_price.py tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py tests/unit/test_macd_algorithm.py tests/unit/test_tick_aggregation.py tests/unit/test_warmup.py tests/unit/test_session_replay.py -v
 # Coverage:
 .venv/Scripts/pytest tests/ --cov=core --cov=utils --cov-report=html
 ```

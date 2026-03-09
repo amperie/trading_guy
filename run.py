@@ -1,15 +1,60 @@
 """
-Production launcher for backtesting and live trading.
+Production launcher for backtesting, live trading, and session replay.
 
-Usage:
-    python run.py backtest      --config configs/example_backtest.yaml
-    python run.py backtest      --config configs/example_backtest.yaml --symbol TSLA --cash 50000
-    python run.py live          --config configs/example_live.yaml
-    python run.py live          --config configs/example_live.yaml --alpaca-override-url wss://stream.data.alpaca.markets/v2/test
-    python run.py live          --config configs/example_live_self_optimizing.yaml
-    python run.py walk-forward  --config configs/example_walk_forward.yaml
-    python run.py hpo           --config configs/example_hpo.yaml
-    python run.py hpo           --config configs/example_hpo.yaml --num-samples 50 --max-concurrent-trials 4
+Subcommands
+-----------
+backtest
+    Run a full backtest from a CSV or Alpaca data source.
+
+live
+    Connect to Alpaca WebSocket for real-time trading.  Requires --session-id.
+    Automatically warms up the algorithm from historical bars if the config
+    includes an alpaca.warmup section.
+
+walk-forward
+    Rolling optimization (Ray Tune HPO) followed by out-of-sample backtesting
+    over consecutive windows.
+
+hpo
+    Standalone Ray Tune hyperparameter search over a single date range.
+
+session-replay
+    Replay a stored live session using gap-free Alpaca historical bars.
+    Fetches warmup bars + the full live session window, runs the same
+    algo/portfolio from session metadata, and logs both the replay metrics
+    (standard names) and the original live-session metrics (live_ prefix)
+    into a single MLflow run for side-by-side comparison.
+
+Usage
+-----
+    python run.py backtest       --config configs/example_backtest.yaml
+    python run.py backtest       --config configs/example_backtest.yaml --symbol TSLA --cash 50000
+    python run.py live           --config configs/example_live.yaml --session-id my-session
+    python run.py live           --config configs/example_live.yaml --session-id my-session \\
+                                     --alpaca-override-url wss://stream.data.alpaca.markets/v2/test
+    python run.py live           --config configs/example_live_self_optimizing.yaml --session-id opt-session
+    python run.py walk-forward   --config configs/example_walk_forward.yaml
+    python run.py hpo            --config configs/example_hpo.yaml
+    python run.py hpo            --config configs/example_hpo.yaml --num-samples 50 --max-concurrent-trials 4
+    python run.py session-replay --config configs/example_session_replay.yaml --session-id my-session
+    python run.py session-replay --config configs/example_session_replay.yaml --session-id my-session \\
+                                     --no-mlflow
+
+Shared flags (all subcommands)
+-------------------------------
+    --config       Path to YAML config profile (required)
+    --symbol       Override portfolio symbol
+    --cash         Override starting cash
+    --algorithm    Override algorithm class (dotted path)
+    --no-mlflow    Disable MLflow logging
+    --run-name     Override MLflow run name
+    --session-id   MongoDB state_store session ID
+    --agg-period N Override aggregation period (also sets aggregation.enabled=true)
+
+session-replay specific flags
+------------------------------
+    --timeframe    Bar size override for sessions missing metadata
+                   (e.g. "Minute", "Hour", "Day"). Defaults to "Minute".
 """
 
 import argparse
@@ -20,7 +65,7 @@ import sys
 import yaml
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 from utils.utils import instantiate_from_string
 from utils.logger import Logger
@@ -133,14 +178,18 @@ def _build_components(cfg: dict):
     return dp, al, om, pf
 
 
+def _fill_alpaca_creds(section: dict) -> None:
+    """Fill api_key / secret_key in a config section from env vars if not set."""
+    if not section.get("api_key"):
+        section["api_key"] = os.environ.get("ALPACA_API_KEY", "")
+    if not section.get("secret_key"):
+        section["secret_key"] = os.environ.get("ALPACA_SECRET_KEY", "")
+
+
 def _resolve_alpaca_credentials(cfg: dict) -> dict:
     """Fill in Alpaca API keys from env vars if not set in config."""
-    alpaca = cfg.get("alpaca", {})
-    if not alpaca.get("api_key"):
-        alpaca["api_key"] = os.environ.get("ALPACA_API_KEY", "")
-    if not alpaca.get("secret_key"):
-        alpaca["secret_key"] = os.environ.get("ALPACA_SECRET_KEY", "")
-    cfg["alpaca"] = alpaca
+    alpaca = cfg.setdefault("alpaca", {})
+    _fill_alpaca_creds(alpaca)
     return cfg
 
 
@@ -236,6 +285,18 @@ def cmd_backtest(args: argparse.Namespace):
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
     _validate_session_id(cfg)
+
+    # Fill Alpaca credentials from env vars if using AlpacaDataProvider
+    dp_section = cfg.get("data_provider", {})
+    if "alpaca" in dp_section.get("provider", "").lower():
+        _fill_alpaca_creds(dp_section)
+        if not dp_section.get("api_key") or not dp_section.get("secret_key"):
+            logger.error(
+                "AlpacaDataProvider requires credentials. "
+                "Set api_key / secret_key in the config file or via "
+                "ALPACA_API_KEY / ALPACA_SECRET_KEY environment variables (e.g. in .env)."
+            )
+            sys.exit(1)
 
     logger.info(f"Starting backtest with profile: {args.config}")
 
@@ -460,6 +521,122 @@ def cmd_hpo(args: argparse.Namespace):
         logger.info(f"  {k}: {v}")
 
 
+def cmd_session_replay(args: argparse.Namespace):
+    """Replay a stored live session using Alpaca historical bars."""
+    cfg = _load_config(args.config)
+    cfg = _apply_cli_overrides(cfg, args)
+    cfg = _resolve_alpaca_credentials(cfg)
+
+    alpaca_cfg = cfg.get("alpaca", {})
+    if not alpaca_cfg.get("api_key") or not alpaca_cfg.get("secret_key"):
+        logger.error("Alpaca API credentials required. Set in config or via ALPACA_API_KEY / ALPACA_SECRET_KEY env vars.")
+        sys.exit(1)
+
+    if not getattr(args, "session_id", None):
+        logger.error("session-replay requires --session-id <id>.")
+        sys.exit(1)
+
+    from trading.data_providers.session_replay_data_provider import SessionReplayDataProvider
+
+    ss_cfg = cfg.get("state_store", {})
+    dp = SessionReplayDataProvider(cfg={
+        "session_id":     args.session_id,
+        "api_key":        alpaca_cfg["api_key"],
+        "secret_key":     alpaca_cfg["secret_key"],
+        "connection_uri": ss_cfg.get("connection_uri"),
+        "database":       ss_cfg.get("database"),
+        "timeframe":      getattr(args, "timeframe", None),
+    })
+    dp.load_data()
+    meta = dp._session_metadata
+
+    logger.info(
+        f"Session replay: symbols={meta.get('symbols')} "
+        f"timeframe={meta.get('timeframe')} warmup_bars={meta.get('warmup_bars')}"
+    )
+
+    # Reconstruct algo + portfolio from session metadata
+    al_class_path = meta.get("algorithm_class")
+    al_cfg_raw    = dict(meta.get("algorithm_config") or {})
+    pf_class_path = meta.get("portfolio_class")
+    pf_cfg_raw    = dict(meta.get("portfolio_config") or {})
+
+    if not al_class_path or not pf_class_path:
+        logger.error(
+            "Session metadata is missing algorithm_class / portfolio_class. "
+            "This session was created before replay metadata was stored. "
+            "Re-run the live session with a current version to generate full metadata."
+        )
+        sys.exit(1)
+
+    history_length = al_cfg_raw.pop("history_length", 0)
+    al = instantiate_from_string(al_class_path, cfg=al_cfg_raw, history_length=history_length)
+
+    from trading.core.om.backtesting_om import BacktestingOM
+    om = BacktestingOM(cfg={})
+
+    pf_cfg_replay = {**pf_cfg_raw, "keep_history": True}
+    pf = instantiate_from_string(pf_class_path, cfg=pf_cfg_replay, order_manager=om)
+
+    # Run replay backtest
+    from trading.engines.backtest_engine import BacktestingEngine
+
+    engine = BacktestingEngine(cfg={}, dp=dp, al=al, om=om, pf=pf)
+    engine.run()
+
+    logger.info(
+        f"Replay complete — Value: ${pf.total_value:,.2f}, "
+        f"Cash: ${pf.cash:,.2f}, Positions: {list(pf.positions.keys())}"
+    )
+
+    analysis_cfg = cfg.get("analysis", {})
+    log_mlflow = analysis_cfg.get("log_to_mlflow", True)
+    if getattr(args, "no_mlflow", False):
+        log_mlflow = False
+
+    experiment_name = analysis_cfg.get("experiment_name", "Session Replay")
+    run_name = (
+        getattr(args, "run_name", None)
+        or analysis_cfg.get("run_name")
+        or f"session-replay-{args.session_id[:8]}"
+    )
+
+    from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
+
+    replay_analyzer = PortfolioAnalyzer(pf)
+    live_analyzer   = PortfolioAnalyzer.from_mongodb(
+        args.session_id,
+        connection_uri=ss_cfg.get("connection_uri"),
+        database=ss_cfg.get("database"),
+    )
+
+    if log_mlflow:
+        from utils.mlflow_client import MLflowClient
+
+        client = MLflowClient.from_config(experiment_name=experiment_name)
+        if not client.enabled:
+            logger.info("MLflow disabled — skipping logging")
+        else:
+            tags = _get_git_info() or {}
+            params = {
+                "session_id": args.session_id,
+                **_flatten_config({"meta": meta}),
+            }
+            with client.start_run(run_name=run_name, tags=tags if tags else None):
+                client.log_params({k[:250]: v for k, v in params.items()
+                                   if isinstance(v, (str, int, float, bool)) or v is None})
+                replay_analyzer._contribute_to_run(
+                    client, metric_prefix="", artifact_prefix=""
+                )
+                live_analyzer._contribute_to_run(
+                    client, metric_prefix="live_", artifact_prefix="live_"
+                )
+            logger.info("MLflow run complete")
+    else:
+        # Just print the summary
+        replay_analyzer.run_full_analysis(log_to_mlflow=False, show_summary=True)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Trading framework launcher",
@@ -509,6 +686,18 @@ def main():
     hpo_p.add_argument("--num-samples", dest="num_samples", type=int, help="Override hpo.num_samples (total Ray Tune trials)")
     hpo_p.add_argument("--max-concurrent-trials", dest="max_concurrent_trials", type=int, help="Override hpo.max_concurrent_trials (parallel Ray workers)")
     hpo_p.set_defaults(func=cmd_hpo)
+
+    # -- session-replay subcommand --
+    sr = subparsers.add_parser(
+        "session-replay",
+        parents=[shared],
+        help="Replay a stored live session using Alpaca historical bars (warmup + live period)",
+    )
+    sr.add_argument(
+        "--timeframe",
+        help="Override bar timeframe for sessions missing metadata (e.g. Minute, Hour, Day)",
+    )
+    sr.set_defaults(func=cmd_session_replay)
 
     args = parser.parse_args()
     args.func(args)

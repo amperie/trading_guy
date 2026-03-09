@@ -2041,6 +2041,86 @@ class PortfolioAnalyzer:
             plt.show()
         return fig
 
+    def _contribute_to_run(
+        self,
+        client,
+        metric_prefix: str = "",
+        artifact_prefix: str = "",
+        log_charts: bool = True,
+        log_trades: bool = True,
+        log_signals: bool = True,
+        log_report: bool = True,
+    ) -> None:
+        """Log metrics and artifacts into an already-open MLflow run with optional prefix.
+
+        Called by run.py session-replay to combine replay + live logging into one run.
+
+        Args:
+            client:          Active MLflowClient with an open run (via start_run context).
+            metric_prefix:   Prefix applied to every metric name (e.g. "live_").
+            artifact_prefix: Prefix applied to every artifact filename (e.g. "live_").
+            log_charts:      Whether to save and upload chart PNGs/HTMLs.
+            log_trades:      Whether to save and upload trades.csv.
+            log_signals:     Whether to save and upload signals_orders.csv.
+            log_report:      Whether to save and upload performance_report.txt.
+        """
+        import math
+        import tempfile
+        import dataclasses as _dc
+
+        m = self.get_metrics()
+        metrics_dict = {}
+        for field in _dc.fields(m):
+            v = getattr(m, field.name)
+            if isinstance(v, (int, float)):
+                fv = float(v)
+                if not (math.isnan(fv) or math.isinf(fv)):
+                    metrics_dict[f"{metric_prefix}{field.name}"] = fv
+        client.log_metrics(metrics_dict)
+
+        if log_report:
+            try:
+                report = self.generate_report()
+                client.log_text(report, f"{artifact_prefix}performance_report.txt")
+            except Exception as e:
+                logger.warning(f"Failed to log {artifact_prefix}performance_report.txt: {e}")
+
+        if log_charts:
+            tmp = tempfile.mkdtemp()
+            artifact_map = {
+                'equity_curve.png':           self.save_equity_curve,
+                'technical_analysis.png':     self.save_technical_chart,
+                'drawdown.png':               self.save_drawdown_chart,
+                'orders_chart.png':           self.save_orders_chart,
+                'lifecycle.png':              self.save_lifecycle_chart,
+                'lifecycle_interactive.html': self.save_lifecycle_chart_interactive,
+            }
+            for fname, method in artifact_map.items():
+                fpath = os.path.join(tmp, f"{artifact_prefix}{fname}")
+                try:
+                    method(fpath)
+                    client.log_artifact(fpath)
+                except Exception as e:
+                    logger.warning(f"Failed to log {artifact_prefix}{fname}: {e}")
+
+        if log_signals:
+            tmp = tempfile.mkdtemp()
+            fpath = os.path.join(tmp, f"{artifact_prefix}signals_orders.csv")
+            try:
+                self.save_signals_orders_csv(fpath)
+                client.log_artifact(fpath)
+            except Exception as e:
+                logger.warning(f"Failed to log {artifact_prefix}signals_orders.csv: {e}")
+
+        if log_trades:
+            tmp = tempfile.mkdtemp()
+            fpath = os.path.join(tmp, f"{artifact_prefix}trades.csv")
+            try:
+                self.save_trades_csv(fpath)
+                client.log_artifact(fpath)
+            except Exception as e:
+                logger.warning(f"Failed to log {artifact_prefix}trades.csv: {e}")
+
     def log_to_mlflow(
         self,
         experiment_name: Optional[str] = None,
