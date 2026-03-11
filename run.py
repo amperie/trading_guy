@@ -62,7 +62,9 @@ import copy
 import os
 import re
 import sys
+import tempfile
 import yaml
+import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -536,10 +538,11 @@ def cmd_session_replay(args: argparse.Namespace):
         logger.error("session-replay requires --session-id <id>.")
         sys.exit(1)
 
+    # --- Step 1: Load session metadata from MongoDB ---
     from trading.data_providers.session_replay_data_provider import SessionReplayDataProvider
 
     ss_cfg = cfg.get("state_store", {})
-    dp = SessionReplayDataProvider(cfg={
+    meta_loader = SessionReplayDataProvider(cfg={
         "session_id":     args.session_id,
         "api_key":        alpaca_cfg["api_key"],
         "secret_key":     alpaca_cfg["secret_key"],
@@ -547,15 +550,15 @@ def cmd_session_replay(args: argparse.Namespace):
         "database":       ss_cfg.get("database"),
         "timeframe":      getattr(args, "timeframe", None),
     })
-    dp.load_data()
-    meta = dp._session_metadata
+    meta_loader.load_data()
+    meta = meta_loader._session_metadata
 
     logger.info(
         f"Session replay: symbols={meta.get('symbols')} "
         f"timeframe={meta.get('timeframe')} warmup_bars={meta.get('warmup_bars')}"
     )
 
-    # Reconstruct algo + portfolio from session metadata
+    # --- Step 2: Reconstruct algo + portfolio from session metadata ---
     al_class_path = meta.get("algorithm_class")
     al_cfg_raw    = dict(meta.get("algorithm_config") or {})
     pf_class_path = meta.get("portfolio_class")
@@ -569,19 +572,53 @@ def cmd_session_replay(args: argparse.Namespace):
         )
         sys.exit(1)
 
+    warmup_bars = meta.get("warmup_bars", 0)
     history_length = al_cfg_raw.pop("history_length", 0)
     al = instantiate_from_string(al_class_path, cfg=al_cfg_raw, history_length=history_length)
 
-    from trading.core.om.backtesting_om import BacktestingOM
-    om = BacktestingOM(cfg={})
+    from trading.core.om.backtesting_om import BacktestingOrderManager
+    om = BacktestingOrderManager(cfg={})
 
-    pf_cfg_replay = {**pf_cfg_raw, "keep_history": True}
-    pf = instantiate_from_string(pf_class_path, cfg=pf_cfg_replay, order_manager=om)
+    pf = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om)
 
-    # Run replay backtest
+    session_start = pd.to_datetime(meta["session_start"])
+    session_end   = pd.to_datetime(meta["session_end"])
+
+    from trading.data_providers.alpaca_data_provider import AlpacaDataProvider
+
+    # --- Step 3: Fetch warmup bars (date-range only; algo deque auto-truncates to history_length) ---
+    if warmup_bars > 0:
+        from utils.utils import compute_warmup_start_date
+        warmup_start = compute_warmup_start_date(warmup_bars, meta["timeframe"], session_start.to_pydatetime())
+        warmup_dp = AlpacaDataProvider(cfg={
+            "api_key":    alpaca_cfg["api_key"],
+            "secret_key": alpaca_cfg["secret_key"],
+            "symbols":    meta["symbols"],
+            "timeframe":  meta["timeframe"],
+            "start_date": warmup_start.strftime("%Y-%m-%dT%H:%M:%S"),
+            "end_date":   session_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
+        warmup_dp.load_data()
+
+        # --- Step 4: Warm up algorithm manually (no portfolio, no engine) ---
+        al.warm_up(list(warmup_dp.iterate()))
+        logger.info(f"Algorithm warmed up (is_warmed_up={al.is_warmed_up})")
+
+    # --- Step 5: Fetch live session bars ---
+    live_dp = AlpacaDataProvider(cfg={
+        "api_key":    alpaca_cfg["api_key"],
+        "secret_key": alpaca_cfg["secret_key"],
+        "symbols":    meta["symbols"],
+        "timeframe":  meta["timeframe"],
+        "start_date": session_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        "end_date":   session_end.strftime("%Y-%m-%dT%H:%M:%S"),
+    })
+    live_dp.load_data()
+
+    # --- Step 6: Run BacktestingEngine on live bars only ---
     from trading.engines.backtest_engine import BacktestingEngine
 
-    engine = BacktestingEngine(cfg={}, dp=dp, al=al, om=om, pf=pf)
+    engine = BacktestingEngine(cfg={}, dp=live_dp, al=al, om=om, pf=pf)
     engine.run()
 
     logger.info(
@@ -598,7 +635,7 @@ def cmd_session_replay(args: argparse.Namespace):
     run_name = (
         getattr(args, "run_name", None)
         or analysis_cfg.get("run_name")
-        or f"session-replay-{args.session_id[:8]}"
+        or f"session-replay-{args.session_id[:28]}"
     )
 
     from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
@@ -631,6 +668,32 @@ def cmd_session_replay(args: argparse.Namespace):
                 live_analyzer._contribute_to_run(
                     client, metric_prefix="live_", artifact_prefix="live_"
                 )
+                # Combined chart: replay + live on one axes
+                session_start_str = meta.get("session_start")
+                align_start = pd.to_datetime(session_start_str, utc=True) if session_start_str else None
+                _tmp = tempfile.mkdtemp()
+                combined_path = os.path.join(_tmp, "combined_equity_curve.png")
+                try:
+                    replay_analyzer.save_combined_equity_curve(
+                        live_analyzer, combined_path,
+                        self_label="Replay", other_label="Live",
+                        align_start=align_start,
+                    )
+                    client.log_artifact(combined_path)
+                except Exception as e:
+                    logger.warning(f"Failed to log combined_equity_curve.png: {e}")
+
+                # Combined lifecycle interactive chart (HTML)
+                combined_lc_path = os.path.join(_tmp, "combined_lifecycle.html")
+                try:
+                    replay_analyzer.save_combined_lifecycle_chart_interactive(
+                        live_analyzer, combined_lc_path,
+                        self_label="Replay", other_label="Live",
+                        align_start=align_start,
+                    )
+                    client.log_artifact(combined_lc_path)
+                except Exception as e:
+                    logger.warning(f"Failed to log combined_lifecycle.html: {e}")
             logger.info("MLflow run complete")
     else:
         # Just print the summary

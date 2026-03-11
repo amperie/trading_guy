@@ -45,7 +45,7 @@ alpaca:
 state_store:
   enabled: false            # Not used for replay; just provides connection params
   connection_uri: "mongodb://hp.lan:27017"
-  database: "trading_hp"
+  database: "trading_z_desktop"
 
 # ---------------------------------------------------------------------------
 # Analysis / MLflow — controls what gets logged.
@@ -54,5 +54,5 @@ analysis:
   enabled: true
   log_to_mlflow: true
   experiment_name: "Session Replay"
-  run_name: ""              # Defaults to "session-replay-<first 8 chars of session_id>"
+  run_name: ""              # Defaults to "session-replay-<first 28 chars of session_id>"
   description: "Side-by-side comparison of replay vs live session performance"

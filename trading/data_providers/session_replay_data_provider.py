@@ -1,29 +1,26 @@
 """
-Data provider that reconstructs the bar stream for a stored live session.
+Metadata extractor for stored live sessions.
 
-Fetches bars from Alpaca covering the full time range of a MongoDB session,
-prepending warmup bars so the algorithm can warm up naturally before the live
-session period begins.
+Connects to MongoDB, loads session document, and resolves:
+    symbols, timeframe, warmup_bars, session_start, session_end
 
-Data flow:
-    MongoDB session → symbols, timeframe, warmup_bars, session_start/end
-    Alpaca API      → bars from (session_start - warmup_lookback) to session_end
-
-The algorithm's built-in warmup gate (required_warmup_bars) automatically
-suppresses signals during the warmup portion — no extra logic needed.
+Exposes these via ``_session_metadata`` after ``load_data()``.
+The DataProvider's ``self.data`` is left empty — callers (run.py) are
+responsible for fetching bars separately via AlpacaDataProvider.
 
 Config keys:
     session_id (str):      MongoDB session ID (required)
-    api_key (str):         Alpaca API key (required)
-    secret_key (str):      Alpaca secret key (required)
+    api_key (str):         (reserved for future use — not used here)
+    secret_key (str):      (reserved for future use — not used here)
     connection_uri (str):  MongoDB URI (falls back to config.yaml state_store)
     database (str):        MongoDB database name (falls back to config.yaml)
     timeframe (str):       Override timeframe (default: from session metadata,
                            or "Minute" if metadata is missing)
 
 After load_data(), exposes:
-    _session_metadata (dict): Full metadata dict from the session document,
-                              plus inferred values for missing fields.
+    _session_metadata (dict): Resolved metadata dict with keys:
+        symbols, timeframe, warmup_bars, session_start (ISO str),
+        session_end (ISO str), plus any raw session metadata fields.
 """
 import pandas as pd
 
@@ -34,7 +31,7 @@ logger = Logger().get_logger(__name__)
 
 
 class SessionReplayDataProvider(DataProvider):
-    """Fetch Alpaca bars covering a stored live session (warmup + live period)."""
+    """Load session metadata from MongoDB; leave bar fetching to the caller."""
 
     def __init__(self, cfg: dict = None):
         super().__init__(cfg)
@@ -43,11 +40,8 @@ class SessionReplayDataProvider(DataProvider):
     def load_data(self):
         from datetime import datetime
         from utils.trading_state_store import TradingStateStore
-        from utils.utils import compute_warmup_start_date
 
         session_id = self.cfg["session_id"]
-        api_key = self.cfg["api_key"]
-        secret_key = self.cfg["secret_key"]
 
         # --- Connect to MongoDB ---
         connection_uri, database = self._resolve_mongo_params(
@@ -65,7 +59,6 @@ class SessionReplayDataProvider(DataProvider):
         # --- Resolve symbols ---
         symbols = metadata.get("symbols")
         if not symbols:
-            # Infer from ticks collection
             distinct = store._ticks.distinct("symbol", {"session_id": session_id})
             symbols = list(distinct)
             if not symbols:
@@ -80,7 +73,6 @@ class SessionReplayDataProvider(DataProvider):
         # --- Resolve warmup_bars ---
         warmup_bars = metadata.get("warmup_bars")
         if warmup_bars is None:
-            # Derive from algo class + config stored in session metadata
             al_class_path = metadata.get("algorithm_class")
             al_cfg = metadata.get("algorithm_config") or {}
             if al_class_path:
@@ -119,42 +111,18 @@ class SessionReplayDataProvider(DataProvider):
             f"session_start={session_start} session_end={session_end}"
         )
 
-        # --- Compute warmup start date ---
-        if warmup_bars > 0:
-            warmup_start = compute_warmup_start_date(warmup_bars, timeframe, session_start)
-        else:
-            warmup_start = session_start
+        # --- Leave self.data empty (callers fetch bars themselves) ---
+        self.data = pd.DataFrame()
 
-        logger.info(f"Fetching bars from {warmup_start} to {session_end}")
-
-        # --- Fetch bars from Alpaca ---
-        from trading.data_providers.alpaca_data_provider import AlpacaDataProvider
-
-        alpaca_dp = AlpacaDataProvider(cfg={
-            "api_key": api_key,
-            "secret_key": secret_key,
-            "symbols": symbols,
-            "timeframe": timeframe,
-            "start_date": warmup_start.strftime("%Y-%m-%dT%H:%M:%S"),
-            "end_date": session_end.strftime("%Y-%m-%dT%H:%M:%S"),
-        })
-        alpaca_dp.load_data()
-        self.data = alpaca_dp.data
-
-        # --- Expose session metadata for run.py ---
+        # --- Expose resolved metadata ---
         self._session_metadata = {
             **metadata,
-            "symbols":      symbols,
-            "timeframe":    timeframe,
-            "warmup_bars":  warmup_bars,
+            "symbols":       symbols,
+            "timeframe":     timeframe,
+            "warmup_bars":   warmup_bars,
             "session_start": session_start.isoformat(),
             "session_end":   session_end.isoformat(),
         }
-
-        logger.info(
-            f"SessionReplayDataProvider loaded {len(self.data)} bars "
-            f"({warmup_bars} warmup + live period)"
-        )
 
     @staticmethod
     def _resolve_mongo_params(connection_uri, database):

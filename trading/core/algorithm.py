@@ -127,6 +127,7 @@ class Algorithm(ABC):
         self.history_length = history_length
         self.warm_up_ticks = cfg.get("warm_up_ticks", history_length)
         self._ticks_seen: int = 0
+        self._required_warmup_bars_override: int | None = None
         self.price_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.price_data_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.full_history: List[Dict[str, PriceData]] = []
@@ -228,7 +229,11 @@ class Algorithm(ABC):
 
         Defaults to history_length. Subclasses can override to set a larger
         value when additional bars are needed beyond the rolling window.
+        Set _required_warmup_bars_override to pin this value externally
+        (e.g. session replay to align the gate to exact warmup bars fetched).
         """
+        if self._required_warmup_bars_override is not None:
+            return self._required_warmup_bars_override
         return self.history_length
 
     @property

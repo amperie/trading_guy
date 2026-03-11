@@ -301,24 +301,13 @@ class TestSessionReplayDataProviderLoadData:
 
         return base, base + timedelta(minutes=2)  # session_start, session_end
 
-    def test_load_data_sets_self_data(self):
-        """load_data() populates self.data with a non-empty DataFrame."""
+    def test_load_data_sets_session_metadata(self):
+        """load_data() populates _session_metadata and leaves self.data empty."""
         store = self._make_store()
         session_id = "replay-test-1"
         self._make_session(store, session_id, ["SPY"])
 
-        fake_df = pd.DataFrame({
-            "timestamp": [datetime(2026, 3, 1, 9, 25), datetime(2026, 3, 1, 9, 30)],
-            "symbol": ["SPY", "SPY"],
-            "open": [100.0, 100.5],
-            "high": [101.0, 101.5],
-            "low": [99.0, 99.5],
-            "close": [100.5, 101.0],
-            "volume": [1000, 2000],
-        })
-
         from trading.data_providers.session_replay_data_provider import SessionReplayDataProvider
-        from trading.data_providers.alpaca_data_provider import AlpacaDataProvider
 
         dp = SessionReplayDataProvider(cfg={
             "session_id": session_id,
@@ -326,13 +315,16 @@ class TestSessionReplayDataProviderLoadData:
             "secret_key": "test-secret",
         })
 
-        # Patch AlpacaDataProvider.load_data and inject fake data
-        with patch.object(AlpacaDataProvider, "load_data", lambda self: setattr(self, "data", fake_df)):
-            with patch("utils.trading_state_store.TradingStateStore", return_value=store):
-                dp.load_data()
+        with patch("utils.trading_state_store.TradingStateStore", return_value=store):
+            dp.load_data()
 
+        assert dp._session_metadata
+        assert dp._session_metadata["symbols"] == ["SPY"]
+        assert "session_start" in dp._session_metadata
+        assert "session_end" in dp._session_metadata
+        # self.data is intentionally empty — callers fetch bars separately
         assert dp.data is not None
-        assert len(dp.data) == 2
+        assert len(dp.data) == 0
 
     def test_session_metadata_exposed(self):
         """_session_metadata is populated after load_data()."""
@@ -340,24 +332,15 @@ class TestSessionReplayDataProviderLoadData:
         session_id = "replay-test-2"
         self._make_session(store, session_id, ["SPY", "UPRO"], warmup_bars=10)
 
-        fake_df = pd.DataFrame({
-            "timestamp": [datetime(2026, 3, 1, 9, 25)],
-            "symbol": ["SPY"],
-            "open": [100.0], "high": [101.0], "low": [99.0],
-            "close": [100.5], "volume": [1000],
-        })
-
         from trading.data_providers.session_replay_data_provider import SessionReplayDataProvider
-        from trading.data_providers.alpaca_data_provider import AlpacaDataProvider
 
         dp = SessionReplayDataProvider(cfg={
             "session_id": session_id,
             "api_key": "k", "secret_key": "s",
         })
 
-        with patch.object(AlpacaDataProvider, "load_data", lambda self: setattr(self, "data", fake_df)):
-            with patch("utils.trading_state_store.TradingStateStore", return_value=store):
-                dp.load_data()
+        with patch("utils.trading_state_store.TradingStateStore", return_value=store):
+            dp.load_data()
 
         meta = dp._session_metadata
         assert set(["SPY", "UPRO"]) == set(meta["symbols"])
@@ -387,15 +370,7 @@ class TestSessionReplayDataProviderLoadData:
         session_id = "replay-test-3"
         self._make_session(store, session_id, ["SPY"], timeframe="Minute")
 
-        fake_df = pd.DataFrame({
-            "timestamp": [datetime(2026, 3, 1, 9, 25)],
-            "symbol": ["SPY"],
-            "open": [100.0], "high": [101.0], "low": [99.0],
-            "close": [100.5], "volume": [1000],
-        })
-
         from trading.data_providers.session_replay_data_provider import SessionReplayDataProvider
-        from trading.data_providers.alpaca_data_provider import AlpacaDataProvider
 
         dp = SessionReplayDataProvider(cfg={
             "session_id": session_id,
@@ -403,8 +378,7 @@ class TestSessionReplayDataProviderLoadData:
             "timeframe": "Day",   # CLI override
         })
 
-        with patch.object(AlpacaDataProvider, "load_data", lambda self: setattr(self, "data", fake_df)):
-            with patch("utils.trading_state_store.TradingStateStore", return_value=store):
-                dp.load_data()
+        with patch("utils.trading_state_store.TradingStateStore", return_value=store):
+            dp.load_data()
 
         assert dp._session_metadata["timeframe"] == "Day"

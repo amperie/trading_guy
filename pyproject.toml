@@ -16,4 +16,5 @@ dependencies = [
     "ray[default,tune]>=2.54.0",
     "seaborn>=0.13.2",
     "ta-lib>=0.6.8",
+    "yfinance>=1.2.0",
 ]

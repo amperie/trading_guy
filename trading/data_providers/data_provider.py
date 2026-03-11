@@ -147,6 +147,8 @@ class DataProvider(ABC):
         Returns:
             Count of unique timestamps in the DataFrame.
         """
+        if self.data is None:
+            self.load_data()
         return self.data['timestamp'].unique().shape[0]
 
     def iterate(self) -> Generator[list[PriceData], None, None]:

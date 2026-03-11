@@ -413,6 +413,25 @@ class PortfolioAnalyzer:
         s.index = pd.to_datetime(list(pf.tick_history.keys()), utc=True)
         return s
 
+    def _market_closed_vrects(
+        self,
+        index: "pd.DatetimeIndex",
+        tz: str = "America/New_York",
+        open_h: int = 9, open_m: int = 30,
+        close_h: int = 16, close_m: int = 0,
+    ) -> list:
+        """Return [(x0_utc, x1_utc)] covering pre-market and after-hours per day."""
+        local = index.tz_convert(tz)
+        dates = pd.DatetimeIndex(local.normalize().unique())
+        periods = []
+        for d in dates:
+            mo = d + pd.Timedelta(hours=open_h, minutes=open_m)
+            mc = d + pd.Timedelta(hours=close_h, minutes=close_m)
+            de = d + pd.Timedelta(days=1)
+            periods.append((d.tz_convert("UTC"), mo.tz_convert("UTC")))   # pre-market
+            periods.append((mc.tz_convert("UTC"), de.tz_convert("UTC")))  # after-hours
+        return periods
+
     def _get_price_series_by_symbol(self) -> dict[str, pd.Series]:
         """Returns {symbol: pd.Series(close, index=timestamps)} from tick_history."""
         pf = self.portfolio
@@ -440,6 +459,61 @@ class PortfolioAnalyzer:
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
         fig.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+
+    def save_combined_equity_curve(
+        self,
+        other: "PortfolioAnalyzer",
+        path: str,
+        self_label: str = "Replay",
+        other_label: str = "Live",
+        self_color: str = "steelblue",
+        other_color: str = "darkorange",
+        align_start=None,
+    ) -> None:
+        """Save a combined equity curve chart comparing two portfolio histories.
+
+        Both curves are normalized to % return from their first data point so that
+        they share a common baseline, making divergence easy to spot.
+
+        Args:
+            other: The second PortfolioAnalyzer (e.g. live session) to compare against.
+            path: Output file path (.png).
+            self_label: Legend label for this analyzer's curve (default: "Replay").
+            other_label: Legend label for other's curve (default: "Live").
+            self_color: Matplotlib color for this curve (default: "steelblue").
+            other_color: Matplotlib color for other's curve (default: "darkorange").
+            align_start: Optional datetime — both series are trimmed to start at or
+                after this timestamp. Pass session_start to exclude warmup bars from
+                the replay curve so both curves cover the same live-session window.
+        """
+        replay_eq = self._get_equity_series()
+        live_eq = other._get_equity_series()
+
+        if align_start is None and len(live_eq) > 0:
+            align_start = live_eq.index[0]
+        if align_start is not None:
+            align_ts = pd.to_datetime(align_start, utc=True)
+            replay_eq = replay_eq[replay_eq.index >= align_ts]
+            live_eq = live_eq[live_eq.index >= align_ts]
+
+        # Normalize to % return from first point
+        if len(replay_eq) > 0:
+            replay_eq = (replay_eq / replay_eq.iloc[0] - 1) * 100
+        if len(live_eq) > 0:
+            live_eq = (live_eq / live_eq.iloc[0] - 1) * 100
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(replay_eq.index, replay_eq.values, linewidth=1.5, color=self_color, label=self_label)
+        ax.plot(live_eq.index, live_eq.values, linewidth=1.5, color=other_color, label=other_label, alpha=0.85)
+        ax.axhline(0, color="gray", linewidth=0.7, linestyle="--")
+        ax.set_title("Equity Curve: Replay vs. Live Session", fontsize=13)
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Return (%)")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
 
     def save_drawdown_chart(self, path: str) -> None:
@@ -1733,6 +1807,457 @@ class PortfolioAnalyzer:
                 autorange='reversed',
                 row=2, col=1,
             )
+
+        fig.write_html(path, include_plotlyjs='cdn')
+
+    def save_combined_lifecycle_chart_interactive(
+        self,
+        other: "PortfolioAnalyzer",
+        path: str,
+        self_label: str = "Replay",
+        other_label: str = "Live",
+        align_start=None,
+        market_hours_shading: bool = True,
+    ) -> None:
+        """
+        Save a combined interactive lifecycle HTML chart overlaying two sessions.
+
+        Both equity curves are normalized to % return from their first data point.
+        Signal / entry / exit markers are differentiated by marker border and shape.
+        Pre/post-market windows are shaded yellow when market_hours_shading=True.
+        """
+        try:
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+        except ImportError:
+            logger.warning("plotly not installed — skipping combined_lifecycle.html")
+            return
+
+        # ── Data preparation ─────────────────────────────────────────────────
+        self_eq  = self._get_equity_series()
+        other_eq = other._get_equity_series()
+
+        if align_start is None and len(other_eq) > 0:
+            align_start = other_eq.index[0]
+        if align_start is not None:
+            align_ts = pd.to_datetime(align_start, utc=True)
+            self_eq  = self_eq[self_eq.index >= align_ts]
+            other_eq = other_eq[other_eq.index >= align_ts]
+
+        if len(self_eq) > 0:
+            self_eq = (self_eq / self_eq.iloc[0] - 1) * 100
+        if len(other_eq) > 0:
+            other_eq = (other_eq / other_eq.iloc[0] - 1) * 100
+
+        self_chains  = self._build_lifecycle_chains()
+        other_chains = other._build_lifecycle_chains()
+
+        _MAX_TRADES_CHART = 150
+        _MAX_EQUITY_POINTS = 2000
+
+        if len(self_chains) > _MAX_TRADES_CHART:
+            self_chains = self_chains[-_MAX_TRADES_CHART:]
+        if len(other_chains) > _MAX_TRADES_CHART:
+            other_chains = other_chains[-_MAX_TRADES_CHART:]
+
+        if len(self_eq) > _MAX_EQUITY_POINTS:
+            step = max(1, len(self_eq) // _MAX_EQUITY_POINTS)
+            self_eq = self_eq.iloc[::step]
+        if len(other_eq) > _MAX_EQUITY_POINTS:
+            step = max(1, len(other_eq) // _MAX_EQUITY_POINTS)
+            other_eq = other_eq.iloc[::step]
+
+        n_self  = len(self_chains)
+        n_other = len(other_chains)
+
+        # ── Colour / symbol scheme ────────────────────────────────────────────
+        _SELF_COLOR   = "steelblue"
+        _OTHER_COLOR  = "darkorange"
+        _SELF_BORDER  = "white"
+        _OTHER_BORDER = "black"
+        _EXIT_COLOR = {'PROFIT': 'green', 'STOP': 'red', 'MANUAL': 'darkorange', None: 'gray'}
+        _EXIT_SYM   = {'PROFIT': 'star', 'STOP': 'x', 'MANUAL': 'diamond', 'MARKET': 'diamond'}
+        _EXIT_SIZE  = {'PROFIT': 16, 'STOP': 12, 'MANUAL': 12, 'MARKET': 12}
+        _SIG_COLOR  = {'BUY': 'limegreen', 'SELL': 'crimson'}
+        _SIG_SYM    = {'BUY': 'triangle-up', 'SELL': 'triangle-down'}
+        _SPAN_RGBA  = {
+            'PROFIT': 'rgba(0,128,0,0.06)',
+            'STOP':   'rgba(220,20,60,0.06)',
+            'MANUAL': 'rgba(255,165,0,0.06)',
+            None:     'rgba(128,128,128,0.05)',
+        }
+        _GANTT_C = {'PROFIT': 'green', 'STOP': 'red', 'MANUAL': 'orange', None: 'gray'}
+
+        def _ts(t):
+            ts = pd.Timestamp(t)
+            return ts.tz_localize('UTC') if ts.tzinfo is None else ts
+
+        def _fmt(ts):
+            return _ts(ts).strftime('%Y-%m-%d %H:%M') if ts else '—'
+
+        # ── Layout ────────────────────────────────────────────────────────────
+        fig = make_subplots(
+            rows=3, cols=1,
+            shared_xaxes=True,
+            row_heights=[0.55, 0.18, 0.27],
+            vertical_spacing=0.04,
+            subplot_titles=[
+                f'Signal → Entry → Exit Lifecycle: {self_label} vs {other_label}',
+                'Holding Periods (Gantt)',
+                '',
+            ],
+            specs=[[{"type": "scatter"}], [{"type": "scatter"}], [{"type": "table"}]],
+        )
+
+        # ── Market-hours shading (row 1 only, layer=below) ────────────────────
+        if market_hours_shading:
+            combined_index = self_eq.index.union(other_eq.index)
+            if len(combined_index) > 0:
+                vrects = self._market_closed_vrects(combined_index)
+                _MAX_VRECTS = 200
+                for x0, x1 in vrects[:_MAX_VRECTS]:
+                    try:
+                        fig.add_vrect(
+                            x0=x0, x1=x1,
+                            fillcolor='rgba(255,215,0,0.25)',
+                            opacity=1.0, layer='below', line_width=0,
+                            row=1, col=1,
+                        )
+                    except Exception:
+                        pass
+
+        # ── Row 1: equity curves + drawdown fills ─────────────────────────────
+        def _add_equity(eq, label, line_color, fill_color):
+            if len(eq) == 0:
+                return
+            running_max = eq.expanding().max()
+            fig.add_trace(go.Scatter(
+                x=eq.index, y=running_max.values,
+                mode='lines', line=dict(width=0),
+                showlegend=False, hoverinfo='skip',
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=eq.index, y=eq.values,
+                mode='lines', name=label,
+                line=dict(width=1.5, color=line_color),
+                fill='tonexty', fillcolor=fill_color,
+                hovertemplate=f'<b>{label}</b><br>%{{x|%b %d, %Y %H:%M}}<br>%{{y:.2f}}%<extra></extra>',
+            ), row=1, col=1)
+
+        _add_equity(self_eq,  self_label,  _SELF_COLOR,  'rgba(70,130,180,0.07)')
+        _add_equity(other_eq, other_label, _OTHER_COLOR, 'rgba(255,140,0,0.07)')
+
+        # ── Holding-period vrects (row 1) ─────────────────────────────────────
+        _VRECT_MAX = 100
+
+        def _add_vrects(chains):
+            for chain in chains[:_VRECT_MAX]:
+                t = chain.trade
+                try:
+                    fig.add_vrect(
+                        x0=_ts(t.entry_time), x1=_ts(t.exit_time),
+                        fillcolor=_SPAN_RGBA.get(t.bracket_exit_type, 'rgba(128,128,128,0.05)'),
+                        opacity=1.0, layer='below', line_width=0, row=1, col=1,
+                    )
+                except Exception:
+                    pass
+
+        _add_vrects(self_chains)
+        _add_vrects(other_chains)
+
+        # ── Signal markers ────────────────────────────────────────────────────
+        def _add_signal_markers(chains, label, border_color):
+            sx, sy, st, sc, ss = [], [], [], [], []
+            for i, chain in enumerate(chains):
+                if chain.signal_time is None:
+                    continue
+                sig_ts = _ts(chain.signal_time)
+                eq = self_eq if label == self_label else other_eq
+                eq_val = eq.asof(sig_ts)
+                if pd.isna(eq_val):
+                    continue
+                stype = chain.signal_type or 'UNKNOWN'
+                sx.append(sig_ts)
+                sy.append(float(eq_val))
+                st.append(
+                    f'<b>🔔 Signal: {stype} ({label})</b><br>'
+                    f'Symbol: {chain.trade.symbol}<br>'
+                    f'Time: {_fmt(chain.signal_time)}<br>'
+                    f'Strength: {chain.signal_strength if chain.signal_strength is not None else "N/A"}<br>'
+                    f'<i>→ Trade #{i}: entry @ ${chain.trade.entry_price:,.2f}</i>'
+                )
+                sc.append(_SIG_COLOR.get(stype, 'gray'))
+                ss.append(_SIG_SYM.get(stype, 'circle'))
+            if sx:
+                fig.add_trace(go.Scatter(
+                    x=sx, y=sy, mode='markers', name=f'Signal ({label})',
+                    marker=dict(symbol=ss, size=12, color=sc,
+                                line=dict(width=1.5, color=border_color)),
+                    text=st, hovertemplate='%{text}<extra></extra>',
+                ), row=1, col=1)
+
+        _add_signal_markers(self_chains,  self_label,  _SELF_BORDER)
+        _add_signal_markers(other_chains, other_label, _OTHER_BORDER)
+
+        # ── Entry markers ─────────────────────────────────────────────────────
+        def _add_entry_markers(chains, label, line_color, marker_symbol, border_color):
+            en_x, en_y, en_t = [], [], []
+            eq = self_eq if label == self_label else other_eq
+            for i, chain in enumerate(chains):
+                t = chain.trade
+                entry_ts = _ts(t.entry_time)
+                eq_val = eq.asof(entry_ts)
+                if pd.isna(eq_val):
+                    continue
+                order_type = 'Bracket' if t.is_bracket else 'Market'
+                sig_line = (
+                    f'Signal: {chain.signal_type} @ {_fmt(chain.signal_time)} '
+                    f'(strength={chain.signal_strength})'
+                    if chain.signal_time else 'Signal: (no match within window)'
+                )
+                en_x.append(entry_ts)
+                en_y.append(float(eq_val))
+                en_t.append(
+                    f'<b>● Entry #{i} — {order_type} ({label})</b><br>'
+                    f'Symbol: {t.symbol}<br>'
+                    f'Time: {_fmt(t.entry_time)}<br>'
+                    f'Price: ${t.entry_price:,.2f}<br>'
+                    f'Quantity: {t.quantity:,}<br>'
+                    f'{sig_line}'
+                )
+            if en_x:
+                fig.add_trace(go.Scatter(
+                    x=en_x, y=en_y, mode='markers', name=f'Entry ({label})',
+                    marker=dict(symbol=marker_symbol, size=9, color=line_color,
+                                line=dict(width=1.5, color=border_color)),
+                    text=en_t, hovertemplate='%{text}<extra></extra>',
+                ), row=1, col=1)
+
+        _add_entry_markers(self_chains,  self_label,  _SELF_COLOR,  'circle', _SELF_BORDER)
+        _add_entry_markers(other_chains, other_label, _OTHER_COLOR, 'square', _OTHER_BORDER)
+
+        # ── Exit markers (grouped by type) ────────────────────────────────────
+        def _add_exit_markers(chains, label, border_color):
+            eq = self_eq if label == self_label else other_eq
+            exit_groups: dict[str, dict] = {}
+            for i, chain in enumerate(chains):
+                t = chain.trade
+                etype = t.bracket_exit_type
+                key = etype or 'MARKET'
+                exit_ts = _ts(t.exit_time)
+                eq_val = eq.asof(exit_ts)
+                if pd.isna(eq_val):
+                    continue
+                sig_line = (
+                    f'Signal: {chain.signal_type} @ {_fmt(chain.signal_time)} '
+                    f'(strength={chain.signal_strength})'
+                    if chain.signal_time else 'Signal: (no match)'
+                )
+                hover = (
+                    f'<b>Exit #{i}: {key} ({label})</b><br>'
+                    f'Symbol: {t.symbol}<br>'
+                    f'Exit Time: {_fmt(t.exit_time)}<br>'
+                    f'Exit Price: ${t.exit_price:,.2f}<br>'
+                    f'Entry Price: ${t.entry_price:,.2f} @ {_fmt(t.entry_time)}<br>'
+                    f'Quantity: {t.quantity:,}<br>'
+                    f'<b>P&L: ${t.pnl:+,.2f} ({t.pnl_pct:+.2f}%)</b><br>'
+                    f'Duration: {t.duration / 3600:.1f}h<br>'
+                    f'{sig_line}'
+                )
+                if key not in exit_groups:
+                    exit_groups[key] = {'xs': [], 'ys': [], 'texts': []}
+                exit_groups[key]['xs'].append(exit_ts)
+                exit_groups[key]['ys'].append(float(eq_val))
+                exit_groups[key]['texts'].append(hover)
+
+            for key, data in exit_groups.items():
+                etype_key = key if key != 'MARKET' else None
+                fig.add_trace(go.Scatter(
+                    x=data['xs'], y=data['ys'], mode='markers',
+                    name=f'Exit: {key} ({label})',
+                    marker=dict(
+                        symbol=_EXIT_SYM.get(key, 'diamond'),
+                        size=_EXIT_SIZE.get(key, 12),
+                        color=_EXIT_COLOR.get(etype_key, 'gray'),
+                        line=dict(width=1.5, color=border_color),
+                    ),
+                    text=data['texts'], hovertemplate='%{text}<extra></extra>',
+                ), row=1, col=1)
+
+        _add_exit_markers(self_chains,  self_label,  _SELF_BORDER)
+        _add_exit_markers(other_chains, other_label, _OTHER_BORDER)
+
+        # ── Row 2: Gantt ──────────────────────────────────────────────────────
+        # Replay trades: y = 0..N-1 ; Live trades: y = N+1..N+M (gap of 1)
+        gantt_gap = 1
+
+        def _add_gantt(chains, y_offset, label_suffix):
+            gantt_groups: dict[str, dict] = {}
+            for i, chain in enumerate(chains):
+                t = chain.trade
+                etype = t.bracket_exit_type
+                key = etype or 'MARKET'
+                bar_c = _GANTT_C.get(etype, 'gray')
+                en_ts  = _ts(t.entry_time)
+                ex_ts  = _ts(t.exit_time)
+                mid_ts = en_ts + (ex_ts - en_ts) / 2
+                sig_line = (
+                    f'Signal: {chain.signal_type} @ {_fmt(chain.signal_time)} '
+                    f'(strength={chain.signal_strength})'
+                    if chain.signal_time else 'Signal: (no match)'
+                )
+                gantt_hover = (
+                    f'<b>Trade #{i}: {t.symbol} ({label_suffix})</b><br>'
+                    f'Entry: ${t.entry_price:,.2f} @ {_fmt(t.entry_time)}<br>'
+                    f'Exit:  ${t.exit_price:,.2f} @ {_fmt(t.exit_time)}<br>'
+                    f'Exit Type: {etype or "MARKET"}<br>'
+                    f'Quantity: {t.quantity:,}<br>'
+                    f'<b>P&L: ${t.pnl:+,.2f} ({t.pnl_pct:+.2f}%)</b><br>'
+                    f'Duration: {t.duration / 3600:.1f}h<br>'
+                    f'{sig_line}'
+                )
+                y_pos = y_offset + i
+                if key not in gantt_groups:
+                    gantt_groups[key] = {
+                        'bars_x': [], 'bars_y': [],
+                        'hover_x': [], 'hover_y': [], 'texts': [],
+                        'color': bar_c,
+                    }
+                g = gantt_groups[key]
+                g['bars_x'] += [en_ts, ex_ts, None]
+                g['bars_y'] += [y_pos, y_pos, None]
+                g['hover_x'].append(mid_ts)
+                g['hover_y'].append(y_pos)
+                g['texts'].append(gantt_hover)
+
+            for key, g in gantt_groups.items():
+                fig.add_trace(go.Scatter(
+                    x=g['bars_x'], y=g['bars_y'],
+                    mode='lines', line=dict(width=20, color=g['color']),
+                    showlegend=False, hoverinfo='skip',
+                ), row=2, col=1)
+                fig.add_trace(go.Scatter(
+                    x=g['hover_x'], y=g['hover_y'],
+                    mode='markers',
+                    marker=dict(size=20, color=g['color'], opacity=0.01),
+                    text=g['texts'], hovertemplate='%{text}<extra></extra>',
+                    showlegend=False, name='',
+                ), row=2, col=1)
+
+        _add_gantt(self_chains,  y_offset=0,                          label_suffix=self_label)
+        _add_gantt(other_chains, y_offset=n_self + gantt_gap,         label_suffix=other_label)
+
+        # Separator line between the two groups
+        if n_self > 0 and n_other > 0:
+            sep_y = n_self + gantt_gap / 2
+            fig.add_hline(
+                y=sep_y, line_dash='dash', line_color='gray', opacity=0.5,
+                row=2, col=1,
+            )
+
+        # Signal vlines on Gantt for both sources
+        _VLINE_MAX = 100
+        seen_sigs: set = set()
+        for chain in list(self_chains) + list(other_chains):
+            if len(seen_sigs) >= _VLINE_MAX:
+                break
+            if chain.signal_time and chain.signal_time not in seen_sigs:
+                seen_sigs.add(chain.signal_time)
+                sig_c = _SIG_COLOR.get(chain.signal_type, 'gray')
+                try:
+                    fig.add_vline(
+                        x=_ts(chain.signal_time), line_dash='dot',
+                        line_color=sig_c, opacity=0.4, line_width=1.5,
+                        row=2, col=1,
+                    )
+                except Exception:
+                    pass
+
+        # Gantt y-axis labels
+        total_trades = n_self + n_other
+        if total_trades > 0:
+            tick_vals  = list(range(n_self)) + list(range(n_self + gantt_gap, n_self + gantt_gap + n_other))
+            tick_texts = [f'#{i}(R)' for i in range(n_self)] + [f'#{i}(L)' for i in range(n_other)]
+            fig.update_yaxes(
+                tickvals=tick_vals,
+                ticktext=tick_texts,
+                autorange='reversed',
+                row=2, col=1,
+            )
+
+        # ── Row 3: combined trade table ───────────────────────────────────────
+        all_chains = [(c, 'R', self_label) for c in self_chains] + [(c, 'L', other_label) for c in other_chains]
+        if all_chains:
+            headers = ['Src', '#', 'Symbol', 'Signal', 'Sig Time',
+                       'Entry $', 'Entry Time', 'Exit $', 'Exit Time',
+                       'Type', 'Dur (h)', 'P&L $', 'P&L %']
+            col_vals: list[list] = [[] for _ in headers]
+            row_fills: list[str] = []
+            for i, (chain, src, lbl) in enumerate(all_chains):
+                t = chain.trade
+                vals = [
+                    src, str(i), t.symbol,
+                    chain.signal_type or '—',
+                    _ts(chain.signal_time).strftime('%m/%d %H:%M') if chain.signal_time else '—',
+                    f'${t.entry_price:,.2f}',
+                    _ts(t.entry_time).strftime('%m/%d %H:%M'),
+                    f'${t.exit_price:,.2f}',
+                    _ts(t.exit_time).strftime('%m/%d %H:%M'),
+                    t.bracket_exit_type or 'MKT',
+                    f'{t.duration / 3600:.1f}',
+                    f'${t.pnl:+,.2f}',
+                    f'{t.pnl_pct:+.2f}%',
+                ]
+                for j, v in enumerate(vals):
+                    col_vals[j].append(v)
+                if src == 'R':
+                    row_fills.append('#d0e8f8' if t.pnl > 0 else '#f8d7da')
+                else:
+                    row_fills.append('#fde9d0' if t.pnl > 0 else '#f8d7da')
+
+            fig.add_trace(go.Table(
+                header=dict(
+                    values=[f'<b>{h}</b>' for h in headers],
+                    fill_color='#343a40',
+                    font=dict(color='white', size=11),
+                    align='center', height=28,
+                ),
+                cells=dict(
+                    values=col_vals,
+                    fill_color=[row_fills] * len(headers),
+                    align='center',
+                    font=dict(size=10),
+                    height=24,
+                ),
+            ), row=3, col=1)
+
+        # ── Final layout ──────────────────────────────────────────────────────
+        fig.update_layout(
+            title=dict(
+                text=f'Signal → Entry → Exit Lifecycle: {self_label} vs {other_label}',
+                x=0.5, font=dict(size=15),
+            ),
+            height=1100,
+            hovermode='closest',
+            legend=dict(
+                x=0.01, y=0.985,
+                bgcolor='rgba(255,255,255,0.85)',
+                bordercolor='rgba(0,0,0,0.2)', borderwidth=1,
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='#f8f9fa',
+        )
+        fig.update_xaxes(
+            showgrid=True, gridwidth=1, gridcolor='rgba(0,0,0,0.1)',
+            tickformat='%b %d',
+        )
+        fig.update_yaxes(
+            showgrid=True, gridwidth=1, gridcolor='rgba(0,0,0,0.1)',
+        )
+        fig.update_yaxes(
+            tickformat='.1f', ticksuffix='%',
+            row=1, col=1,
+        )
 
         fig.write_html(path, include_plotlyjs='cdn')
 

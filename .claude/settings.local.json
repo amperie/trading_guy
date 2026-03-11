@@ -69,7 +69,11 @@
       "Bash(git status:*)",
       "Bash(not fulfill minimum pricing criteria\".\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(cd /e/Programming/trading_guy && find . -name \"*.py\" -not -path \"./.venv/*\" -type f | xargs grep -l \"subprocess\\\\|from git\\\\|import git\" 2>/dev/null22)",
-      "Bash(echo No matches found in source code:*)"
+      "Bash(echo No matches found in source code:*)",
+      "Bash(where pytest:*)",
+      "Bash(.venv/Scripts/pytest:*)",
+      "Bash(python3:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
