@@ -224,3 +224,6 @@ data/ml/dataset.csv
 # Claude Code temporary files
 tmpclaude-*
 nul
+
+# Alpaca account credentials (use accounts.yaml.example as a template)
+accounts.yaml

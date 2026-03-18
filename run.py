@@ -27,22 +27,23 @@ session-replay
 
 Usage
 -----
-    python run.py backtest       --config configs/example_backtest.yaml
-    python run.py backtest       --config configs/example_backtest.yaml --symbol TSLA --cash 50000
-    python run.py live           --config configs/example_live.yaml --session-id my-session
-    python run.py live           --config configs/example_live.yaml --session-id my-session \\
+    python run.py backtest       --config configs/example_backtest.yaml --account paper
+    python run.py backtest       --config configs/example_backtest.yaml --account paper --symbol TSLA --cash 50000
+    python run.py live           --config configs/example_live.yaml --session-id my-session --account paper
+    python run.py live           --config configs/example_live.yaml --session-id my-session --account paper \\
                                      --alpaca-override-url wss://stream.data.alpaca.markets/v2/test
-    python run.py live           --config configs/example_live_self_optimizing.yaml --session-id opt-session
-    python run.py walk-forward   --config configs/example_walk_forward.yaml
-    python run.py hpo            --config configs/example_hpo.yaml
-    python run.py hpo            --config configs/example_hpo.yaml --num-samples 50 --max-concurrent-trials 4
-    python run.py session-replay --config configs/example_session_replay.yaml --session-id my-session
-    python run.py session-replay --config configs/example_session_replay.yaml --session-id my-session \\
+    python run.py live           --config configs/example_live_self_optimizing.yaml --session-id opt-session --account paper
+    python run.py walk-forward   --config configs/example_walk_forward.yaml --account paper
+    python run.py hpo            --config configs/example_hpo.yaml --account paper
+    python run.py hpo            --config configs/example_hpo.yaml --account paper --num-samples 50 --max-concurrent-trials 4
+    python run.py session-replay --config configs/example_session_replay.yaml --session-id my-session --account paper
+    python run.py session-replay --config configs/example_session_replay.yaml --session-id my-session --account paper \\
                                      --no-mlflow
 
 Shared flags (all subcommands)
 -------------------------------
     --config       Path to YAML config profile (required)
+    --account      Account name from accounts.yaml (selects api_key/secret_key) (required)
     --symbol       Override portfolio symbol
     --cash         Override starting cash
     --algorithm    Override algorithm class (dotted path)
@@ -65,14 +66,36 @@ import sys
 import tempfile
 import yaml
 import pandas as pd
-from dotenv import load_dotenv
-
-load_dotenv(override=True)
 
 from utils.utils import instantiate_from_string
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
+
+def _load_account_creds(account_name: str, path: str = "accounts.yaml") -> dict:
+    """Load api_key/secret_key for the named account from accounts.yaml."""
+    if not os.path.exists(path):
+        logger.error(
+            f"accounts.yaml not found at '{path}'. "
+            "Copy accounts.yaml.example to accounts.yaml and fill in your credentials."
+        )
+        sys.exit(1)
+    with open(path, "r") as f:
+        accounts = yaml.safe_load(f) or {}
+    if account_name not in accounts:
+        logger.error(
+            f"Account '{account_name}' not found in {path}. "
+            f"Available: {list(accounts.keys())}"
+        )
+        sys.exit(1)
+    entry = accounts[account_name]
+    if not entry.get("api_key") or not entry.get("secret_key"):
+        logger.error(
+            f"Account '{account_name}' in {path} is missing api_key or secret_key."
+        )
+        sys.exit(1)
+    return {"api_key": entry["api_key"], "secret_key": entry["secret_key"]}
 
 
 def _import_class(dotted_path: str):
@@ -180,18 +203,18 @@ def _build_components(cfg: dict):
     return dp, al, om, pf
 
 
-def _fill_alpaca_creds(section: dict) -> None:
-    """Fill api_key / secret_key in a config section from env vars if not set."""
+def _fill_alpaca_creds(section: dict, creds: dict) -> None:
+    """Fill api_key / secret_key in a config section from creds dict if not set."""
     if not section.get("api_key"):
-        section["api_key"] = os.environ.get("ALPACA_API_KEY", "")
+        section["api_key"] = creds.get("api_key", "")
     if not section.get("secret_key"):
-        section["secret_key"] = os.environ.get("ALPACA_SECRET_KEY", "")
+        section["secret_key"] = creds.get("secret_key", "")
 
 
-def _resolve_alpaca_credentials(cfg: dict) -> dict:
-    """Fill in Alpaca API keys from env vars if not set in config."""
+def _resolve_alpaca_credentials(cfg: dict, creds: dict) -> dict:
+    """Fill in Alpaca API keys from creds if not set in config."""
     alpaca = cfg.setdefault("alpaca", {})
-    _fill_alpaca_creds(alpaca)
+    _fill_alpaca_creds(alpaca, creds)
     return cfg
 
 
@@ -288,15 +311,16 @@ def cmd_backtest(args: argparse.Namespace):
     cfg = _apply_cli_overrides(cfg, args)
     _validate_session_id(cfg)
 
-    # Fill Alpaca credentials from env vars if using AlpacaDataProvider
+    creds = _load_account_creds(args.account)
+
+    # Fill Alpaca credentials if using AlpacaDataProvider
     dp_section = cfg.get("data_provider", {})
     if "alpaca" in dp_section.get("provider", "").lower():
-        _fill_alpaca_creds(dp_section)
+        _fill_alpaca_creds(dp_section, creds)
         if not dp_section.get("api_key") or not dp_section.get("secret_key"):
             logger.error(
                 "AlpacaDataProvider requires credentials. "
-                "Set api_key / secret_key in the config file or via "
-                "ALPACA_API_KEY / ALPACA_SECRET_KEY environment variables (e.g. in .env)."
+                "Set api_key / secret_key in the config file or in accounts.yaml."
             )
             sys.exit(1)
 
@@ -341,11 +365,12 @@ def cmd_live(args: argparse.Namespace):
     cfg.setdefault("state_store", {})["enabled"] = True
 
     _validate_session_id(cfg)
-    cfg = _resolve_alpaca_credentials(cfg)
+    creds = _load_account_creds(args.account)
+    cfg = _resolve_alpaca_credentials(cfg, creds)
 
     alpaca_cfg = cfg.get("alpaca", {})
     if not alpaca_cfg.get("api_key") or not alpaca_cfg.get("secret_key"):
-        logger.error("Alpaca API credentials required. Set in config or via ALPACA_API_KEY / ALPACA_SECRET_KEY env vars.")
+        logger.error("Alpaca API credentials required. Set in config or in accounts.yaml.")
         sys.exit(1)
 
     # Propagate alpaca credentials to order_manager config if needed
@@ -419,6 +444,12 @@ def cmd_walk_forward(args: argparse.Namespace):
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
     _validate_session_id(cfg)
+    creds = _load_account_creds(args.account)
+
+    # Fill Alpaca credentials if using AlpacaDataProvider
+    dp_section = cfg.get("data_provider", {})
+    if "alpaca" in dp_section.get("provider", "").lower():
+        _fill_alpaca_creds(dp_section, creds)
 
     logger.info(f"Starting walk-forward backtest with profile: {args.config}")
 
@@ -454,6 +485,12 @@ def cmd_hpo(args: argparse.Namespace):
     """Run standalone Ray Tune HPO from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    creds = _load_account_creds(args.account)
+
+    # Fill Alpaca credentials if using AlpacaDataProvider
+    dp_section = cfg.get("data_provider", {})
+    if "alpaca" in dp_section.get("provider", "").lower():
+        _fill_alpaca_creds(dp_section, creds)
 
     # CLI overrides for HPO-specific settings
     hpo_cfg = cfg.setdefault("hpo", {})
@@ -527,11 +564,12 @@ def cmd_session_replay(args: argparse.Namespace):
     """Replay a stored live session using Alpaca historical bars."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
-    cfg = _resolve_alpaca_credentials(cfg)
+    creds = _load_account_creds(args.account)
+    cfg = _resolve_alpaca_credentials(cfg, creds)
 
     alpaca_cfg = cfg.get("alpaca", {})
     if not alpaca_cfg.get("api_key") or not alpaca_cfg.get("secret_key"):
-        logger.error("Alpaca API credentials required. Set in config or via ALPACA_API_KEY / ALPACA_SECRET_KEY env vars.")
+        logger.error("Alpaca API credentials required. Set in config or in accounts.yaml.")
         sys.exit(1)
 
     if not getattr(args, "session_id", None):
@@ -720,6 +758,7 @@ def main():
     # -- Shared arguments --
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument("--config", required=True, help="Path to YAML config profile")
+    shared.add_argument("--account", required=True, help="Account name from accounts.yaml (selects api_key/secret_key)")
     shared.add_argument("--symbol", help="Override portfolio symbol")
     shared.add_argument("--cash", type=float, help="Override starting cash")
     shared.add_argument("--algorithm", help="Override algorithm class (dotted path)")
