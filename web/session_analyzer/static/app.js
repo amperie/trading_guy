@@ -84,20 +84,24 @@ function renderMetadata(session, orders) {
   $("metaOrders").textContent = orders ? `${orders.total} total` : "--";
 }
 
+function fmt2(value) {
+  return value != null ? value.toFixed(2) : "--";
+}
+
 function renderMetrics(metrics, benchmark) {
   $("metricReturn").textContent = formatPct(metrics.total_return_pct);
   $("metricAnnualized").textContent = formatPct(metrics.annualized_return);
-  $("metricSharpe").textContent = `${metrics.sharpe_ratio.toFixed(2)} / ${metrics.sortino_ratio.toFixed(2)}`;
-  $("metricSortino").textContent = `Volatility ${metrics.volatility.toFixed(2)}%`;
+  $("metricSharpe").textContent = `${fmt2(metrics.sharpe_ratio)} / ${fmt2(metrics.sortino_ratio)}`;
+  $("metricSortino").textContent = `Volatility ${fmt2(metrics.volatility)}%`;
   $("metricDrawdown").textContent = formatPct(metrics.max_drawdown_pct);
-  $("metricCalmar").textContent = `Calmar ${metrics.calmar_ratio.toFixed(2)}`;
+  $("metricCalmar").textContent = `Calmar ${fmt2(metrics.calmar_ratio)}`;
   $("metricWinRate").textContent = formatPct(metrics.win_rate);
-  $("metricProfitFactor").textContent = `Profit Factor ${metrics.profit_factor.toFixed(2)}`;
-  $("metricTrades").textContent = `${metrics.total_trades}`;
+  $("metricProfitFactor").textContent = `Profit Factor ${fmt2(metrics.profit_factor)}`;
+  $("metricTrades").textContent = metrics.total_trades != null ? `${metrics.total_trades}` : "--";
   $("metricAvgTrade").textContent = `Avg PnL ${formatMoney(metrics.avg_trade_pnl)}`;
 
   if (benchmark && benchmark._comparison) {
-    const alpha = benchmark._comparison.alpha;
+    const alpha = benchmark._comparison.alpha ?? null;
     const out = benchmark._comparison.outperformance ? "Outperformed SPY" : "Underperformed SPY";
     $("metricAlpha").textContent = `Alpha vs SPY: ${formatPct(alpha)}`;
     $("metricOutperformance").textContent = out;
