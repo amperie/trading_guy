@@ -204,11 +204,9 @@ def _build_components(cfg: dict):
 
 
 def _fill_alpaca_creds(section: dict, creds: dict) -> None:
-    """Fill api_key / secret_key in a config section from creds dict if not set."""
-    if not section.get("api_key"):
-        section["api_key"] = creds.get("api_key", "")
-    if not section.get("secret_key"):
-        section["secret_key"] = creds.get("secret_key", "")
+    """Override api_key / secret_key in a config section from accounts.yaml (always wins)."""
+    section["api_key"] = creds.get("api_key", "")
+    section["secret_key"] = creds.get("secret_key", "")
 
 
 def _resolve_alpaca_credentials(cfg: dict, creds: dict) -> dict:

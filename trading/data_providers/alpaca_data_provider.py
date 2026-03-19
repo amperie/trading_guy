@@ -64,11 +64,6 @@ class AlpacaDataProvider(DataProvider):
         self.timeframe = TIMEFRAME_MAP[timeframe_str]
         self.adjustment = self.cfg.get("adjustment", "split")
 
-        logger.info(
-            f"AlpacaDataProvider: api_key={self.api_key[:8] + '...' if self.api_key else '(empty)'} "
-            f"key_len={len(self.api_key or '')} secret_len={len(self.secret_key or '')} "
-            f"symbols={self.symbols} timeframe={timeframe_str}"
-        )
         self.client = StockHistoricalDataClient(self.api_key, self.secret_key)
 
     def load_data(self):
