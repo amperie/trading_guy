@@ -7,15 +7,21 @@ from flask import Flask, jsonify, render_template, request
 
 from utils.config_manager import ConfigManager
 from utils.trading_state_store import TradingStateStore
+from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
 
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 
-def _get_state_store(db: str = None) -> TradingStateStore:
+def _get_mongo_params(db: str = None) -> tuple[str, str]:
     cfg = ConfigManager().get("state_store", {}) or {}
     uri = os.getenv("MONGO_URI") or cfg.get("connection_uri", "mongodb://localhost:27017")
     resolved_db = db or os.getenv("MONGO_DB") or cfg.get("database", "trading_hp")
+    return uri, resolved_db
+
+
+def _get_state_store(db: str = None) -> TradingStateStore:
+    uri, resolved_db = _get_mongo_params(db)
     return TradingStateStore(connection_uri=uri, database=resolved_db)
 
 
@@ -104,7 +110,8 @@ def session_data(session_id: str):
 
         pf_data = store.load_portfolio_history(session_id)
         order_data = store.load_orders(session_id)
-        engine = store.create_analysis_engine(session_id)
+        uri, resolved_db = _get_mongo_params(db)
+        engine = PortfolioAnalyzer.from_mongodb(session_id, connection_uri=uri, database=resolved_db)
 
         trades = []
         metrics = {}
@@ -150,6 +157,7 @@ def session_data(session_id: str):
             "benchmark": _json_safe(benchmark),
             "trades": _trades_payload(trades),
             "orders": order_summary,
+            "errors": {k[1:]: v for k, v in benchmark.items() if k.startswith("_")},
         }
         return jsonify(payload)
     except Exception as exc:
