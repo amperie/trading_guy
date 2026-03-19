@@ -1,8 +1,6 @@
-import os
 from alpaca.data.live.stock import StockDataStream
 from alpaca.data.enums import \
     DataFeed  # IEX or SIP
-from dotenv import load_dotenv
 
 from trading.core.algorithm import Algorithm
 from trading.core.classes import PriceData, TickResults
@@ -12,13 +10,7 @@ from trading.data_providers.data_provider import DataProvider
 from trading.engines.base_engine import BaseEngine, AsyncEngine
 from utils.logger import Logger
 
-# Load environment variables from .env file
-load_dotenv()
-
 logger = Logger().get_logger(__name__)
-
-api_key = os.getenv("ALPACA_API_KEY")
-secret_key = os.getenv("ALPACA_SECRET_KEY")
 
 class AlpacaRealTimeEngine(AsyncEngine):
 
