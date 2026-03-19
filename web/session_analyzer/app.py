@@ -3,7 +3,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 import math
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 from utils.config_manager import ConfigManager
 from utils.trading_state_store import TradingStateStore
@@ -12,11 +12,11 @@ from utils.trading_state_store import TradingStateStore
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 
-def _get_state_store() -> TradingStateStore:
+def _get_state_store(db: str = None) -> TradingStateStore:
     cfg = ConfigManager().get("state_store", {}) or {}
     uri = os.getenv("MONGO_URI") or cfg.get("connection_uri", "mongodb://localhost:27017")
-    db = os.getenv("MONGO_DB") or cfg.get("database", "trading_hp")
-    return TradingStateStore(connection_uri=uri, database=db)
+    resolved_db = db or os.getenv("MONGO_DB") or cfg.get("database", "trading_hp")
+    return TradingStateStore(connection_uri=uri, database=resolved_db)
 
 
 def _json_safe(value):
@@ -96,7 +96,8 @@ def index():
 @app.route("/api/session/<session_id>")
 def session_data(session_id: str):
     try:
-        store = _get_state_store()
+        db = request.args.get("db") or None
+        store = _get_state_store(db=db)
         session = store.get_session(session_id)
         if session is None:
             return jsonify({"error": f"Session not found: {session_id}"}), 404

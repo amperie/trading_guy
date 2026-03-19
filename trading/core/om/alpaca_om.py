@@ -413,7 +413,9 @@ class AlpacaOrderManager(OrderManager):
 
         try:
             account = self.client.get_account()
-            buying_power = float(account.buying_power)
+            # Use min(cash, buying_power) — on margin accounts buying_power is 2× cash,
+            # but bracket/GTC orders are collateralized against actual cash balance.
+            buying_power = min(float(account.cash), float(account.buying_power))
         except Exception as exc:
             logger.warning(f"Could not fetch buying power for pre-submit check: {exc}")
             return order

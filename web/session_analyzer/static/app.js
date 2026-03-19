@@ -289,7 +289,11 @@ async function loadSession() {
   if (!sessionId) return;
   $("status").textContent = "Loading session data...";
   try {
-    const res = await fetch(`/api/session/${sessionId}`);
+    const db = $("dbName").value.trim();
+    const url = db
+      ? `/api/session/${sessionId}?db=${encodeURIComponent(db)}`
+      : `/api/session/${sessionId}`;
+    const res = await fetch(url);
     if (!res.ok) {
       const msg = await res.json();
       throw new Error(msg.error || "Failed to load session");
@@ -343,11 +347,16 @@ document.addEventListener("DOMContentLoaded", () => {
   $("sessionId").addEventListener("keydown", (event) => {
     if (event.key === "Enter") loadSession();
   });
+  $("dbName").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") loadSession();
+  });
   $("exportEquity").addEventListener("click", exportEquityCsv);
   $("exportJson").addEventListener("click", exportJson);
 
   const params = new URLSearchParams(window.location.search);
   const sessionId = params.get("session_id");
+  const db = params.get("db");
+  if (db) $("dbName").value = db;
   if (sessionId) {
     $("sessionId").value = sessionId;
     loadSession();
