@@ -174,6 +174,64 @@ class Logger:
         for name in quiet_loggers:
             logging.getLogger(name).setLevel(logging.INFO)
 
+    def set_log_file(self, session_name: str):
+        """
+        Replace the file handler with one whose filename includes *session_name*.
+
+        The base stem comes from ``logging.filename`` in config.yaml, so if the
+        config says ``trading.log`` and session_name is ``MyRun``, the file will
+        be ``logs/trading_MyRun.log``.
+
+        Invalid filename characters are stripped before use.  Call this once
+        after the session/run name is known (e.g. right after CLI arg parsing).
+        Only has an effect when ``file_logging: true`` is set in config.
+        """
+        import re
+        config = ConfigManager()
+
+        if not config.get("logging.file_logging", False):
+            return
+
+        # Sanitize: remove characters not allowed in filenames
+        safe_name = re.sub(r'[\\/:*?"<>|]', "_", session_name).strip()
+        if not safe_name:
+            return
+
+        log_folder = config.get("logging.folder", "logs")
+        log_filename = config.get("logging.filename", "trading.log")
+        file_level = config.get("logging.file_level", "DEBUG").upper()
+        log_format = config.get(
+            "logging.format",
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+
+        stem = Path(log_filename).stem
+        suffix = Path(log_filename).suffix or ".log"
+        new_filename = f"{stem}_{safe_name}{suffix}"
+        log_path = Path(log_folder) / new_filename
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        root_logger = logging.getLogger()
+
+        # Remove existing file handlers
+        for handler in root_logger.handlers[:]:
+            if isinstance(handler, TimedRotatingFileHandler):
+                handler.close()
+                root_logger.removeHandler(handler)
+
+        new_handler = TimedRotatingFileHandler(
+            filename=str(log_path),
+            when="midnight",
+            interval=1,
+            backupCount=self._retention_days,
+            encoding="utf-8",
+        )
+        new_handler.setFormatter(logging.Formatter(log_format))
+        new_handler.setLevel(getattr(logging, file_level))
+        root_logger.addHandler(new_handler)
+
+        self._cleanup_old_logs(log_path)
+
     def _cleanup_old_logs(self, log_path: Path):
         """Delete rotated log files older than retention_days."""
         import time

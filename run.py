@@ -73,6 +73,13 @@ from utils.logger import Logger
 logger = Logger().get_logger(__name__)
 
 
+def _apply_session_log_file(cfg: dict, args: argparse.Namespace):
+    """Point the file handler at a session-named log file if a run name is known."""
+    run_name = getattr(args, "run_name", None) or cfg.get("analysis", {}).get("run_name")
+    if run_name:
+        Logger().set_log_file(run_name)
+
+
 def _load_account_creds(account_name: str, path: str = "accounts.yaml") -> dict:
     """Load api_key/secret_key for the named account from accounts.yaml."""
     if not os.path.exists(path):
@@ -307,6 +314,7 @@ def cmd_backtest(args: argparse.Namespace):
     """Run a backtest from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _apply_session_log_file(cfg, args)
     _validate_session_id(cfg)
 
     creds = _load_account_creds(args.account)
@@ -352,6 +360,7 @@ def cmd_live(args: argparse.Namespace):
     """Run live trading from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _apply_session_log_file(cfg, args)
 
     if not getattr(args, "session_id", None):
         logger.error(
@@ -441,6 +450,7 @@ def cmd_walk_forward(args: argparse.Namespace):
     """Run a walk-forward backtest from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _apply_session_log_file(cfg, args)
     _validate_session_id(cfg)
     creds = _load_account_creds(args.account)
 
@@ -483,6 +493,7 @@ def cmd_hpo(args: argparse.Namespace):
     """Run standalone Ray Tune HPO from a config profile."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _apply_session_log_file(cfg, args)
     creds = _load_account_creds(args.account)
 
     # Fill Alpaca credentials if using AlpacaDataProvider
@@ -562,6 +573,7 @@ def cmd_session_replay(args: argparse.Namespace):
     """Replay a stored live session using Alpaca historical bars."""
     cfg = _load_config(args.config)
     cfg = _apply_cli_overrides(cfg, args)
+    _apply_session_log_file(cfg, args)
     creds = _load_account_creds(args.account)
     cfg = _resolve_alpaca_credentials(cfg, creds)
 
