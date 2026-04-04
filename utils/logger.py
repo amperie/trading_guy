@@ -88,7 +88,9 @@ class Logger:
 
     Config (config.yaml):
         logging:
-          level: INFO
+          level: INFO                # root logger floor (set to DEBUG when using per-handler levels)
+          console_level: INFO        # optional; overrides level for the console handler
+          file_level: DEBUG          # optional; overrides level for the file handler
           console: true
           file_logging: false        # set true to enable file output
           folder: "logs"
@@ -121,6 +123,8 @@ class Logger:
         config = ConfigManager()
 
         log_level = config.get("logging.level", "INFO").upper()
+        console_level = config.get("logging.console_level", log_level).upper()
+        file_level = config.get("logging.file_level", "DEBUG").upper()
         log_to_console = config.get("logging.console", True)
         log_to_file = config.get("logging.file_logging", False)
         log_folder = config.get("logging.folder", "logs")
@@ -136,6 +140,7 @@ class Logger:
         if log_to_console:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(ColorFormatter(log_format))
+            console_handler.setLevel(getattr(logging, console_level))
             handlers.append(console_handler)
 
         if log_to_file and log_filename:
@@ -150,13 +155,16 @@ class Logger:
                 encoding="utf-8",
             )
             file_handler.setFormatter(logging.Formatter(log_format))
+            file_handler.setLevel(getattr(logging, file_level))
             handlers.append(file_handler)
 
             # Clean up old log files beyond retention
             self._cleanup_old_logs(log_path)
 
+        # Root logger must be DEBUG so messages aren't filtered before reaching handlers;
+        # each handler's own level controls what it actually emits.
         logging.basicConfig(
-            level=getattr(logging, log_level),
+            level=logging.DEBUG,
             handlers=handlers,
             force=True
         )
