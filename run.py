@@ -663,15 +663,40 @@ def cmd_session_replay(args: argparse.Namespace):
     })
     live_dp.load_data()
 
-    # --- Step 6: Run BacktestingEngine on live bars only ---
+    # --- Step 6: Run BacktestingEngine on Alpaca bars ---
     from trading.engines.backtest_engine import BacktestingEngine
 
     engine = BacktestingEngine(cfg={}, dp=live_dp, al=al, om=om, pf=pf)
     engine.run()
 
     logger.info(
-        f"Replay complete — Value: ${pf.total_value:,.2f}, "
+        f"Alpaca replay complete — Value: ${pf.total_value:,.2f}, "
         f"Cash: ${pf.cash:,.2f}, Positions: {list(pf.positions.keys())}"
+    )
+
+    # --- Step 7: MongoDB-tick replay (exact bars the live session processed) ---
+    from trading.data_providers.mongodb_data_provider import MongoDBDataProvider
+
+    al_mongo = instantiate_from_string(al_class_path, cfg=dict(al_cfg_raw), history_length=history_length)
+    om_mongo = BacktestingOrderManager(cfg={})
+    pf_mongo = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om_mongo)
+
+    if warmup_bars > 0:
+        al_mongo.warm_up(list(warmup_dp.iterate()))
+        logger.info(f"MongoDB-replay algorithm warmed up (is_warmed_up={al_mongo.is_warmed_up})")
+
+    mongo_dp = MongoDBDataProvider(cfg={
+        "session_id":     args.session_id,
+        "connection_uri": ss_cfg.get("connection_uri"),
+        "database":       ss_cfg.get("database"),
+    })
+
+    engine_mongo = BacktestingEngine(cfg={}, dp=mongo_dp, al=al_mongo, om=om_mongo, pf=pf_mongo)
+    engine_mongo.run()
+
+    logger.info(
+        f"MongoDB replay complete — Value: ${pf_mongo.total_value:,.2f}, "
+        f"Cash: ${pf_mongo.cash:,.2f}, Positions: {list(pf_mongo.positions.keys())}"
     )
 
     analysis_cfg = cfg.get("analysis", {})
@@ -689,6 +714,7 @@ def cmd_session_replay(args: argparse.Namespace):
     from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
 
     replay_analyzer = PortfolioAnalyzer(pf)
+    mongo_analyzer  = PortfolioAnalyzer(pf_mongo)
     live_analyzer   = PortfolioAnalyzer.from_mongodb(
         args.session_id,
         connection_uri=ss_cfg.get("connection_uri"),
@@ -707,41 +733,71 @@ def cmd_session_replay(args: argparse.Namespace):
                 "session_id": args.session_id,
                 **_flatten_config({"meta": meta}),
             }
+            session_start_str = meta.get("session_start")
+            align_start = pd.to_datetime(session_start_str, utc=True) if session_start_str else None
+            _tmp = tempfile.mkdtemp()
+
             with client.start_run(run_name=run_name, tags=tags if tags else None):
                 client.log_params({k[:250]: v for k, v in params.items()
                                    if isinstance(v, (str, int, float, bool)) or v is None})
+
+                # --- Three parallel analyses ---
                 replay_analyzer._contribute_to_run(
                     client, metric_prefix="", artifact_prefix=""
+                )
+                mongo_analyzer._contribute_to_run(
+                    client, metric_prefix="mongo_", artifact_prefix="mongo_"
                 )
                 live_analyzer._contribute_to_run(
                     client, metric_prefix="live_", artifact_prefix="live_"
                 )
-                # Combined chart: replay + live on one axes
-                session_start_str = meta.get("session_start")
-                align_start = pd.to_datetime(session_start_str, utc=True) if session_start_str else None
-                _tmp = tempfile.mkdtemp()
+
+                # --- Combined charts: Alpaca replay vs Live ---
                 combined_path = os.path.join(_tmp, "combined_equity_curve.png")
                 try:
                     replay_analyzer.save_combined_equity_curve(
                         live_analyzer, combined_path,
-                        self_label="Replay", other_label="Live",
+                        self_label="Alpaca Replay", other_label="Live",
                         align_start=align_start,
                     )
                     client.log_artifact(combined_path)
                 except Exception as e:
                     logger.warning(f"Failed to log combined_equity_curve.png: {e}")
 
-                # Combined lifecycle interactive chart (HTML)
                 combined_lc_path = os.path.join(_tmp, "combined_lifecycle.html")
                 try:
                     replay_analyzer.save_combined_lifecycle_chart_interactive(
                         live_analyzer, combined_lc_path,
-                        self_label="Replay", other_label="Live",
+                        self_label="Alpaca Replay", other_label="Live",
                         align_start=align_start,
                     )
                     client.log_artifact(combined_lc_path)
                 except Exception as e:
                     logger.warning(f"Failed to log combined_lifecycle.html: {e}")
+
+                # --- Combined charts: MongoDB replay vs Live ---
+                combined_mongo_path = os.path.join(_tmp, "combined_equity_curve_mongo.png")
+                try:
+                    mongo_analyzer.save_combined_equity_curve(
+                        live_analyzer, combined_mongo_path,
+                        self_label="MongoDB Replay", other_label="Live",
+                        align_start=align_start,
+                    )
+                    client.log_artifact(combined_mongo_path)
+                except Exception as e:
+                    logger.warning(f"Failed to log combined_equity_curve_mongo.png: {e}")
+
+                combined_lc_mongo_path = os.path.join(_tmp, "combined_lifecycle_mongo.html")
+                try:
+                    mongo_analyzer.save_combined_lifecycle_chart_interactive(
+                        live_analyzer, combined_lc_mongo_path,
+                        self_label="MongoDB Replay", other_label="Live",
+                        align_start=align_start,
+                    )
+                    client.log_artifact(combined_lc_mongo_path)
+                except Exception as e:
+                    logger.warning(f"Failed to log combined_lifecycle_mongo.html: {e}")
+
             logger.info("MLflow run complete")
     else:
         # Just print the summary
