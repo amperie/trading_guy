@@ -128,6 +128,13 @@ class DualSymbolSwitchPortfolio(Portfolio):
         # Check current position
         current_symbol = self._current_symbol()
 
+        # Record entry time on the first tick we observe the position is open.
+        # This must happen here (not at order-submission time) so that orders
+        # which pend overnight (market_hours_only) don't start the holding-period
+        # clock before the position actually fills at market open.
+        if current_symbol is not None and current_symbol not in self._symbol_entry_time:
+            self._symbol_entry_time[current_symbol] = current_timestamp
+
         # Phase 1: Find target from current tick signals
         target_signal = None
         for signal in signals:
@@ -170,9 +177,6 @@ class DualSymbolSwitchPortfolio(Portfolio):
                             f"Switching position to {pending_target} - qty: {qty}, "
                             f"entry price: {entry_price}, profit_pct: {self.profit_pct}, "
                             f"stop_pct: {self.stop_pct}")
-
-                        # Track entry time
-                        self._symbol_entry_time[pending_target] = current_timestamp
 
                         # Link to signal if available
                         if target_signal and target_signal.symbol == pending_target:
@@ -218,9 +222,6 @@ class DualSymbolSwitchPortfolio(Portfolio):
                     f"No Current position, entering position for {target} - qty: {qty}, "
                     f"entry price: {entry_price}, profit_pct: {self.profit_pct}, "
                     f"stop_pct: {self.stop_pct}")
-
-                # Track entry time for holding period
-                self._symbol_entry_time[target] = current_timestamp
 
                 # Link signal to order for analysis
                 target_signal.metadata['order_id'] = bo.order_id
