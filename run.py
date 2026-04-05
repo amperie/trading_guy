@@ -611,6 +611,8 @@ def cmd_session_replay(args: argparse.Namespace):
     al_cfg_raw    = dict(meta.get("algorithm_config") or {})
     pf_class_path = meta.get("portfolio_class")
     pf_cfg_raw    = dict(meta.get("portfolio_config") or {})
+    if getattr(args, "cash", None) is not None:
+        pf_cfg_raw["cash"] = args.cash
 
     if not al_class_path or not pf_class_path:
         logger.error(
