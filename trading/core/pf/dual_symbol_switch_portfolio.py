@@ -158,6 +158,14 @@ class DualSymbolSwitchPortfolio(Portfolio):
             # Check if previous position is closed
             if current_symbol is None:  # Position exited
                 pending_target = self._pending_target
+
+                # If a bracket for the target is already PENDING (stale pre-market
+                # order), let it fill naturally instead of adding a second one.
+                if self._find_active_bracket(pending_target) is not None:
+                    self._pending_target = None
+                    self._pending_switch_state = None
+                    return TickResults(orders=orders)
+
                 entry_price = self.get_price(pending_target, tick)
 
                 if entry_price is not None:
@@ -196,9 +204,14 @@ class DualSymbolSwitchPortfolio(Portfolio):
 
         # Case A: No current position → Enter immediately
         if current_symbol is None:
-            # Don't double-submit if a bracket is already in flight for this symbol
-            if self._find_active_bracket(target) is not None:
-                return TickResults(orders=[])
+            # Don't submit if ANY bracket is active for either symbol.
+            # With market_hours_only, a bracket submitted pre-market stays PENDING
+            # until 9:30 AM.  If the signal flips during that wait, submitting a
+            # second bracket for the new symbol means both fill at open with the
+            # same pf_cash → double-buy → negative cash → no more trades.
+            for sym in (self.upro_symbol, self.spxu_symbol):
+                if self._find_active_bracket(sym) is not None:
+                    return TickResults(orders=[])
 
             entry_price = self.get_price(target, tick)
             if entry_price is None:
