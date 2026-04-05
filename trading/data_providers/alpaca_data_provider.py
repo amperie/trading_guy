@@ -17,11 +17,13 @@ Config keys (cfg dict):
     symbols (list):     Symbols to fetch (required, e.g. ["AAPL", "SPY"])
     timeframe (str):    Bar size — "Minute", "Hour", "Day", "Week", "Month"
                         (default: "Minute")
-    adjustment (str):   Price adjustment — "split", "raw", "all"
-                        (default: "split")
-    start_date (str):   Start of date range (optional)
-    end_date (str):     End of date range (optional, defaults to now)
-    limit (int):        Max bars to return (optional)
+    adjustment (str):       Price adjustment — "split", "raw", "all"
+                            (default: "split")
+    start_date (str):       Start of date range (optional)
+    end_date (str):         End of date range (optional, defaults to now)
+    limit (int):            Max bars to return (optional)
+    market_hours_only (bool): Drop pre-market and after-hours bars, keeping
+                            only 09:30–16:00 Eastern. (default: False)
 """
 import pandas as pd
 from datetime import datetime
@@ -181,6 +183,19 @@ class AlpacaDataProvider(DataProvider):
         for col in expected_cols:
             if col not in df.columns:
                 df[col] = None
+
+        if self.cfg.get("market_hours_only", False):
+            import datetime as _dt
+            market_open  = _dt.time(9, 30)
+            market_close = _dt.time(16, 0)
+            before = len(df)
+            df = df[
+                (df["timestamp"].dt.time >= market_open) &
+                (df["timestamp"].dt.time < market_close)
+            ].copy()
+            dropped = before - len(df)
+            if dropped:
+                logger.info(f"market_hours_only: dropped {dropped} off-hours bars")
 
         logger.info(f"Fetched {len(df)} bars for {self.symbols}: {df['timestamp'].min()} → {df['timestamp'].max()}")
         self.data = df

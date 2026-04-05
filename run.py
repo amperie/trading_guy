@@ -639,12 +639,13 @@ def cmd_session_replay(args: argparse.Namespace):
         from utils.utils import compute_warmup_start_date
         warmup_start = compute_warmup_start_date(warmup_bars, meta["timeframe"], session_start.to_pydatetime())
         warmup_dp = AlpacaDataProvider(cfg={
-            "api_key":    alpaca_cfg["api_key"],
-            "secret_key": alpaca_cfg["secret_key"],
-            "symbols":    meta["symbols"],
-            "timeframe":  meta["timeframe"],
-            "start_date": warmup_start.strftime("%Y-%m-%dT%H:%M:%S"),
-            "end_date":   session_start.strftime("%Y-%m-%dT%H:%M:%S"),
+            "api_key":          alpaca_cfg["api_key"],
+            "secret_key":       alpaca_cfg["secret_key"],
+            "symbols":          meta["symbols"],
+            "timeframe":        meta["timeframe"],
+            "start_date":       warmup_start.strftime("%Y-%m-%dT%H:%M:%S"),
+            "end_date":         session_start.strftime("%Y-%m-%dT%H:%M:%S"),
+            "market_hours_only": True,
         })
         warmup_dp.load_data()
 
@@ -652,14 +653,15 @@ def cmd_session_replay(args: argparse.Namespace):
         al.warm_up(list(warmup_dp.iterate()))
         logger.info(f"Algorithm warmed up (is_warmed_up={al.is_warmed_up})")
 
-    # --- Step 5: Fetch live session bars ---
+    # --- Step 5: Fetch live session bars (market hours only, matching live conditions) ---
     live_dp = AlpacaDataProvider(cfg={
-        "api_key":    alpaca_cfg["api_key"],
-        "secret_key": alpaca_cfg["secret_key"],
-        "symbols":    meta["symbols"],
-        "timeframe":  meta["timeframe"],
-        "start_date": session_start.strftime("%Y-%m-%dT%H:%M:%S"),
-        "end_date":   session_end.strftime("%Y-%m-%dT%H:%M:%S"),
+        "api_key":          alpaca_cfg["api_key"],
+        "secret_key":       alpaca_cfg["secret_key"],
+        "symbols":          meta["symbols"],
+        "timeframe":        meta["timeframe"],
+        "start_date":       session_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        "end_date":         session_end.strftime("%Y-%m-%dT%H:%M:%S"),
+        "market_hours_only": True,
     })
     live_dp.load_data()
 
