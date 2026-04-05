@@ -43,7 +43,7 @@
 state_store:
   enabled: false            # Not used for replay; just provides connection params
   connection_uri: "mongodb://hp.lan:27017"
-  database: "trading_z_desktop"
+  database: "trading_hp"
 
 # ---------------------------------------------------------------------------
 # Analysis / MLflow — controls what gets logged.
