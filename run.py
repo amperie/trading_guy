@@ -625,7 +625,7 @@ def cmd_session_replay(args: argparse.Namespace):
     al = instantiate_from_string(al_class_path, cfg=al_cfg_raw, history_length=history_length)
 
     from trading.core.om.backtesting_om import BacktestingOrderManager
-    om = BacktestingOrderManager(cfg={})
+    om = BacktestingOrderManager(cfg={"market_hours_only": True})
 
     pf = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om)
 
@@ -639,13 +639,12 @@ def cmd_session_replay(args: argparse.Namespace):
         from utils.utils import compute_warmup_start_date
         warmup_start = compute_warmup_start_date(warmup_bars, meta["timeframe"], session_start.to_pydatetime())
         warmup_dp = AlpacaDataProvider(cfg={
-            "api_key":          alpaca_cfg["api_key"],
-            "secret_key":       alpaca_cfg["secret_key"],
-            "symbols":          meta["symbols"],
-            "timeframe":        meta["timeframe"],
-            "start_date":       warmup_start.strftime("%Y-%m-%dT%H:%M:%S"),
-            "end_date":         session_start.strftime("%Y-%m-%dT%H:%M:%S"),
-            "market_hours_only": True,
+            "api_key":    alpaca_cfg["api_key"],
+            "secret_key": alpaca_cfg["secret_key"],
+            "symbols":    meta["symbols"],
+            "timeframe":  meta["timeframe"],
+            "start_date": warmup_start.strftime("%Y-%m-%dT%H:%M:%S"),
+            "end_date":   session_start.strftime("%Y-%m-%dT%H:%M:%S"),
         })
         warmup_dp.load_data()
 
@@ -653,15 +652,14 @@ def cmd_session_replay(args: argparse.Namespace):
         al.warm_up(list(warmup_dp.iterate()))
         logger.info(f"Algorithm warmed up (is_warmed_up={al.is_warmed_up})")
 
-    # --- Step 5: Fetch live session bars (market hours only, matching live conditions) ---
+    # --- Step 5: Fetch live session bars ---
     live_dp = AlpacaDataProvider(cfg={
-        "api_key":          alpaca_cfg["api_key"],
-        "secret_key":       alpaca_cfg["secret_key"],
-        "symbols":          meta["symbols"],
-        "timeframe":        meta["timeframe"],
-        "start_date":       session_start.strftime("%Y-%m-%dT%H:%M:%S"),
-        "end_date":         session_end.strftime("%Y-%m-%dT%H:%M:%S"),
-        "market_hours_only": True,
+        "api_key":    alpaca_cfg["api_key"],
+        "secret_key": alpaca_cfg["secret_key"],
+        "symbols":    meta["symbols"],
+        "timeframe":  meta["timeframe"],
+        "start_date": session_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        "end_date":   session_end.strftime("%Y-%m-%dT%H:%M:%S"),
     })
     live_dp.load_data()
 
@@ -680,7 +678,7 @@ def cmd_session_replay(args: argparse.Namespace):
     from trading.data_providers.mongodb_data_provider import MongoDBDataProvider
 
     al_mongo = instantiate_from_string(al_class_path, cfg=dict(al_cfg_raw), history_length=history_length)
-    om_mongo = BacktestingOrderManager(cfg={})
+    om_mongo = BacktestingOrderManager(cfg={"market_hours_only": True})
     pf_mongo = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om_mongo)
 
     if warmup_bars > 0:

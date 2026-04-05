@@ -1,3 +1,4 @@
+import datetime as _dt
 from typing import Union
 from trading.core.classes import Order, PriceData, OrderType, OrderStatus, Position, OrderAction, BracketOrder
 from trading.core.om.order_manager import OrderManager
@@ -5,6 +6,18 @@ from utils.utils import find_pricedata_in_list
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
+_MARKET_OPEN  = _dt.time(9, 30)
+_MARKET_CLOSE = _dt.time(16, 0)
+
+
+def _is_market_hours(ts) -> bool:
+    """Return True if ts falls within regular market hours (09:30–16:00 ET)."""
+    import pandas as pd
+    t = pd.Timestamp(ts)
+    if t.tzinfo is not None:
+        t = t.tz_convert("America/New_York").tz_localize(None)
+    return _MARKET_OPEN <= t.time() < _MARKET_CLOSE
 
 def _process_market_order(
         order: Order, pd: PriceData, pf_cash: float, quantity: int,
@@ -38,6 +51,10 @@ def _process_market_order(
 
 class BacktestingOrderManager(OrderManager):
 
+    def __init__(self, cfg: dict = None):
+        super().__init__(cfg)
+        self._market_hours_only: bool = (self.cfg or {}).get("market_hours_only", False)
+
     def _cancel_order(self, order_id: str) -> Order:
         if order_id in self._pending_orders_by_id:
             self._pending_orders_by_id[order_id].status = OrderStatus.CANCELED
@@ -56,6 +73,9 @@ class BacktestingOrderManager(OrderManager):
             return order
 
         pd = find_pricedata_in_list(order.symbol, current_tick)
+
+        if self._market_hours_only and pd is not None and not _is_market_hours(pd.timestamp):
+            return order  # outside market hours — leave order pending
         if pd is None:
             logger.debug(f"No price data found for {order.symbol}")
             return order
@@ -184,6 +204,10 @@ class BacktestingOrderManager(OrderManager):
             return order
 
         pd = find_pricedata_in_list(order.symbol, current_tick)
+
+        if self._market_hours_only and pd is not None and not _is_market_hours(pd.timestamp):
+            return order  # outside market hours — leave order pending
+
         if pd is None:
             logger.warning(f"No price data for {order.symbol} on this tick — order {order.order_id} will retry next tick")
             return order
