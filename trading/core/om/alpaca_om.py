@@ -193,8 +193,16 @@ class AlpacaOrderManager(OrderManager):
             logger.error(f"Failed to fetch orders from Alpaca: {exc}")
             return {"new": 0, "updated": 0, "total": 0}
 
-        # Build reverse lookup: remote platform_id -> local order_id
-        remote_to_local = {v: k for k, v in self._local_to_remote.items()}
+        # Build reverse lookup: remote platform_id -> local order_id.
+        # Prefer the explicit map, but also fall back to any already-loaded
+        # local orders so resumed sessions do not recreate duplicates.
+        remote_to_local = {
+            str(v): k for k, v in self._local_to_remote.items() if v
+        }
+        for local_id, local_order in self._all_orders.items():
+            platform_id_existing = getattr(local_order, "platform_id", None)
+            if platform_id_existing:
+                remote_to_local.setdefault(str(platform_id_existing), local_id)
 
         new_count = 0
         updated_count = 0

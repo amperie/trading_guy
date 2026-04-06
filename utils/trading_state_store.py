@@ -131,6 +131,34 @@ from utils.logger import Logger
 logger = Logger().get_logger(__name__)
 
 
+def _order_status_rank(order: Union[Order, BracketOrder]) -> tuple[int, datetime | None, datetime | None]:
+    """Rank duplicate broker orders so the most-complete representation wins."""
+    status_rank = {
+        OrderStatus.FILLED: 3,
+        OrderStatus.CANCELED: 3,
+        OrderStatus.PENDING_SALE: 2,
+        OrderStatus.PENDING: 1,
+    }.get(order.status, 0)
+    return (
+        status_rank,
+        order.executed_datetime,
+        order.placed_datetime,
+    )
+
+
+def _dedupe_orders_by_platform_id(
+    orders: list[Union[Order, BracketOrder]],
+) -> list[Union[Order, BracketOrder]]:
+    """Collapse duplicate local orders that point at the same broker platform_id."""
+    deduped: dict[str, Union[Order, BracketOrder]] = {}
+    for order in orders:
+        key = order.platform_id or order.order_id
+        current = deduped.get(key)
+        if current is None or _order_status_rank(order) > _order_status_rank(current):
+            deduped[key] = order
+    return list(deduped.values())
+
+
 class TradingStateStore:
     """MongoDB persistence layer with session partitioning.
 
@@ -483,8 +511,8 @@ class TradingStateStore:
         filled_orders = {}
         pending_orders = {}
 
-        for doc in self._orders.find(query):
-            order = deserialize_order(doc)
+        orders = [deserialize_order(doc) for doc in self._orders.find(query)]
+        for order in _dedupe_orders_by_platform_id(orders):
             all_orders[order.order_id] = order
             if order.status in {OrderStatus.FILLED, OrderStatus.CANCELED}:
                 filled_orders[order.order_id] = order

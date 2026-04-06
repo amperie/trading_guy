@@ -588,6 +588,8 @@ def cmd_session_replay(args: argparse.Namespace):
 
     # --- Step 1: Load session metadata from MongoDB ---
     from trading.data_providers.session_replay_data_provider import SessionReplayDataProvider
+    from trading.core.classes import BracketOrder, OrderStatus, Position
+    from utils.trading_state_store import TradingStateStore
 
     ss_cfg = cfg.get("state_store", {})
     meta_loader = SessionReplayDataProvider(cfg={
@@ -605,6 +607,70 @@ def cmd_session_replay(args: argparse.Namespace):
         f"Session replay: symbols={meta.get('symbols')} "
         f"timeframe={meta.get('timeframe')} warmup_bars={meta.get('warmup_bars')}"
     )
+
+    def _build_opening_state(store: TradingStateStore, session_id: str, start_ts: pd.Timestamp) -> tuple[float | None, dict[str, Position], list]:
+        """Restore the live session's opening cash, positions, and active orders."""
+        start_dt = start_ts.to_pydatetime()
+        first_snapshot = store._snapshots.find_one(
+            {"session_id": session_id},
+            sort=[("timestamp", 1)],
+        )
+
+        opening_cash = None
+        opening_positions: dict[str, Position] = {}
+        if first_snapshot is not None:
+            opening_cash = first_snapshot.get("cash")
+            for symbol, pos in (first_snapshot.get("positions") or {}).items():
+                qty = int(pos.get("quantity", 0) or 0)
+                if qty > 0:
+                    opening_positions[symbol] = Position(symbol=symbol, quantity=qty)
+
+        def _reset_order_for_replay(order):
+            order.processed_by_portfolio = False
+            if isinstance(order, BracketOrder):
+                order.MANUAL_SALE = False
+                order.SOLD_ORDER = None
+                order.status = OrderStatus.PENDING_SALE if (
+                    order.executed_datetime is not None and order.executed_datetime <= start_dt
+                ) else OrderStatus.PENDING
+                for child_name in list(order.get_child_order_names()):
+                    child = order.get_child_order(child_name)
+                    if child_name == "MANUAL_ORDER":
+                        order.add_child_order("MANUAL_ORDER", None)
+                        continue
+                    if child is None:
+                        continue
+                    child.status = OrderStatus.PENDING
+                    child.executed_datetime = None
+                    child.cash = 0.0
+                    child.processed_by_portfolio = False
+            else:
+                order.status = OrderStatus.PENDING
+            return order
+
+        opening_orders = []
+        order_data = store.load_orders(session_id)
+        for order in order_data["all_orders"].values():
+            placed_ts = order.placed_datetime
+            executed_ts = order.executed_datetime
+            if placed_ts is None or placed_ts > start_dt:
+                continue
+
+            if isinstance(order, BracketOrder):
+                if executed_ts is None or executed_ts > start_dt:
+                    opening_orders.append(_reset_order_for_replay(copy.deepcopy(order)))
+                    continue
+
+                sold_order = order.SOLD_ORDER
+                sold_ts = None
+                if sold_order is not None:
+                    sold_ts = sold_order.executed_datetime or sold_order.placed_datetime
+                if sold_ts is None or sold_ts > start_dt:
+                    opening_orders.append(_reset_order_for_replay(copy.deepcopy(order)))
+            elif order.status == OrderStatus.PENDING:
+                opening_orders.append(_reset_order_for_replay(copy.deepcopy(order)))
+
+        return opening_cash, opening_positions, opening_orders
 
     # --- Step 2: Reconstruct algo + portfolio from session metadata ---
     al_class_path = meta.get("algorithm_class")
@@ -633,6 +699,38 @@ def cmd_session_replay(args: argparse.Namespace):
 
     session_start = pd.to_datetime(meta["session_start"])
     session_end   = pd.to_datetime(meta["session_end"])
+    store = TradingStateStore(
+        connection_uri=ss_cfg.get("connection_uri") or "mongodb://localhost:27017",
+        database=ss_cfg.get("database") or "trading",
+    )
+    opening_cash, opening_positions, opening_orders = _build_opening_state(
+        store, args.session_id, session_start
+    )
+    opening_positions_template = copy.deepcopy(opening_positions)
+    opening_orders_template = copy.deepcopy(opening_orders)
+    if getattr(args, "cash", None) is None and opening_cash is not None:
+        pf.cash = float(opening_cash)
+    if opening_positions_template:
+        pf.positions = copy.deepcopy(opening_positions_template)
+    for order in copy.deepcopy(opening_orders_template):
+        om.all_orders[order.order_id] = order
+        om.pending_orders_by_id[order.order_id] = order
+        if getattr(order, "platform_id", None):
+            logger.debug(f"Restored opening order {order.order_id} platform_id={order.platform_id}")
+    if hasattr(pf, "_symbol_entry_time"):
+        pf._symbol_entry_time = {}
+        for order in om.pending_orders_by_id.values():
+            if (
+                isinstance(order, BracketOrder)
+                and order.status == OrderStatus.PENDING_SALE
+                and order.executed_datetime is not None
+            ):
+                pf._symbol_entry_time[order.symbol] = order.executed_datetime
+    logger.info(
+        f"Restored opening replay state: cash={pf.cash:.2f}, "
+        f"positions={{{', '.join(f'{k}:{v.quantity}' for k, v in pf.positions.items())}}}, "
+        f"active_orders={len(om.pending_orders_by_id)}"
+    )
 
     from trading.data_providers.alpaca_data_provider import AlpacaDataProvider
 
@@ -682,6 +780,22 @@ def cmd_session_replay(args: argparse.Namespace):
     al_mongo = instantiate_from_string(al_class_path, cfg=dict(al_cfg_raw), history_length=history_length)
     om_mongo = BacktestingOrderManager(cfg={"market_hours_only": True})
     pf_mongo = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om_mongo)
+    if getattr(args, "cash", None) is None and opening_cash is not None:
+        pf_mongo.cash = float(opening_cash)
+    if opening_positions_template:
+        pf_mongo.positions = copy.deepcopy(opening_positions_template)
+    for restored in copy.deepcopy(opening_orders_template):
+        om_mongo.all_orders[restored.order_id] = restored
+        om_mongo.pending_orders_by_id[restored.order_id] = restored
+    if hasattr(pf_mongo, "_symbol_entry_time"):
+        pf_mongo._symbol_entry_time = {}
+        for order in om_mongo.pending_orders_by_id.values():
+            if (
+                isinstance(order, BracketOrder)
+                and order.status == OrderStatus.PENDING_SALE
+                and order.executed_datetime is not None
+            ):
+                pf_mongo._symbol_entry_time[order.symbol] = order.executed_datetime
 
     if warmup_bars > 0:
         al_mongo.warm_up(list(warmup_dp.iterate()))
