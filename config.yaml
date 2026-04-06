@@ -21,5 +21,5 @@ mlflow:
 state_store:
   enabled: false
   connection_uri: "mongodb://hp.lan:27017"
-  database: "trading_hp"
+  database: "live_trading"
   session_id: "live_SPY_UPRO_SPXU"  # null = new UUID each run; paste a UUID to resume a session
