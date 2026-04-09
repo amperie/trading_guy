@@ -21,9 +21,14 @@ hpo
 session-replay
     Replay a stored live session using gap-free Alpaca historical bars.
     Fetches warmup bars + the full live session window, runs the same
-    algo/portfolio from session metadata, and logs both the replay metrics
-    (standard names) and the original live-session metrics (live_ prefix)
-    into a single MLflow run for side-by-side comparison.
+    algo/portfolio from session metadata, and produces a three-way MLflow
+    comparison: Alpaca replay (no prefix), MongoDB-tick replay (mongo_
+    prefix), and the original live session (live_ prefix).
+
+    With --start-date: also runs a fourth "extended" backtest from the
+    given date to the session end using a fresh portfolio (no opening state
+    restored).  Logged with extended_ prefix and a combined extended-vs-live
+    chart.  The three-way comparison still runs normally.
 
 Usage
 -----
@@ -56,6 +61,11 @@ session-replay specific flags
 ------------------------------
     --timeframe    Bar size override for sessions missing metadata
                    (e.g. "Minute", "Hour", "Day"). Defaults to "Minute".
+    --start-date   Run an additional extended Alpaca backtest starting from
+                   this date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS) through the
+                   end of the MongoDB session.  Fresh portfolio — no opening
+                   state restored from MongoDB.  The normal three-way replay
+                   still runs.
 """
 
 import argparse
@@ -774,6 +784,32 @@ def cmd_session_replay(args: argparse.Namespace):
         f"Cash: ${pf.cash:,.2f}, Positions: {list(pf.positions.keys())}"
     )
 
+    # --- Step 6b: Extended Alpaca backtest (only when --start-date is given) ---
+    pf_extended = None
+    if getattr(args, "start_date", None):
+        start_dt = pd.to_datetime(args.start_date).to_pydatetime()
+        al_ext = instantiate_from_string(al_class_path, cfg=dict(al_cfg_raw), history_length=history_length)
+        om_ext = BacktestingOrderManager(cfg={"market_hours_only": True})
+        pf_ext = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om_ext)
+        if getattr(args, "cash", None) is not None:
+            pf_ext.cash = args.cash
+        ext_dp = AlpacaDataProvider(cfg={
+            "api_key":    alpaca_cfg["api_key"],
+            "secret_key": alpaca_cfg["secret_key"],
+            "symbols":    meta["symbols"],
+            "timeframe":  meta["timeframe"],
+            "start_date": start_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            "end_date":   session_end.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
+        ext_dp.load_data()
+        engine_ext = BacktestingEngine(cfg={}, dp=ext_dp, al=al_ext, om=om_ext, pf=pf_ext)
+        engine_ext.run()
+        logger.info(
+            f"Extended Alpaca replay complete — Value: ${pf_ext.total_value:,.2f}, "
+            f"Cash: ${pf_ext.cash:,.2f}, Positions: {list(pf_ext.positions.keys())}"
+        )
+        pf_extended = pf_ext
+
     # --- Step 7: MongoDB-tick replay (exact bars the live session processed) ---
     from trading.data_providers.mongodb_data_provider import MongoDBDataProvider
 
@@ -857,7 +893,7 @@ def cmd_session_replay(args: argparse.Namespace):
                 client.log_params({k[:250]: v for k, v in params.items()
                                    if isinstance(v, (str, int, float, bool)) or v is None})
 
-                # --- Three parallel analyses ---
+                # --- Three (or four) parallel analyses ---
                 replay_analyzer._contribute_to_run(
                     client, metric_prefix="", artifact_prefix=""
                 )
@@ -867,6 +903,12 @@ def cmd_session_replay(args: argparse.Namespace):
                 live_analyzer._contribute_to_run(
                     client, metric_prefix="live_", artifact_prefix="live_"
                 )
+                if pf_extended is not None:
+                    extended_analyzer = PortfolioAnalyzer(pf_extended)
+                    client.log_params({"extended_start_date": str(args.start_date)})
+                    extended_analyzer._contribute_to_run(
+                        client, metric_prefix="extended_", artifact_prefix="extended_"
+                    )
 
                 # --- Combined charts: Alpaca replay vs Live ---
                 combined_path = os.path.join(_tmp, "combined_equity_curve.png")
@@ -914,6 +956,30 @@ def cmd_session_replay(args: argparse.Namespace):
                 except Exception as e:
                     logger.warning(f"Failed to log combined_lifecycle_mongo.html: {e}")
 
+                # --- Combined charts: Extended Alpaca vs Live (only when --start-date given) ---
+                if pf_extended is not None:
+                    combined_ext_path = os.path.join(_tmp, "combined_equity_curve_extended.png")
+                    try:
+                        extended_analyzer.save_combined_equity_curve(
+                            live_analyzer, combined_ext_path,
+                            self_label="Extended Alpaca", other_label="Live",
+                            align_start=align_start,
+                        )
+                        client.log_artifact(combined_ext_path)
+                    except Exception as e:
+                        logger.warning(f"Failed to log combined_equity_curve_extended.png: {e}")
+
+                    combined_lc_ext_path = os.path.join(_tmp, "combined_lifecycle_extended.html")
+                    try:
+                        extended_analyzer.save_combined_lifecycle_chart_interactive(
+                            live_analyzer, combined_lc_ext_path,
+                            self_label="Extended Alpaca", other_label="Live",
+                            align_start=align_start,
+                        )
+                        client.log_artifact(combined_lc_ext_path)
+                    except Exception as e:
+                        logger.warning(f"Failed to log combined_lifecycle_extended.html: {e}")
+
             logger.info("MLflow run complete")
     else:
         # Just print the summary
@@ -926,16 +992,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python run.py backtest --config configs/example_backtest.yaml\n"
-            "  python run.py backtest --config configs/example_backtest.yaml --symbol TSLA --cash 50000\n"
-            "  python run.py live --config configs/example_live.yaml\n"
-            "  python run.py live --config configs/example_live_self_optimizing.yaml\n"
-            "  python run.py walk-forward --config configs/example_walk_forward.yaml\n"
-            "  python run.py hpo --config configs/example_hpo.yaml\n"
-            "  python run.py hpo --config configs/example_hpo.yaml --num-samples 50 --max-concurrent-trials 4\n"
+            "  python run.py backtest        --config configs/example_backtest.yaml --account paper\n"
+            "  python run.py backtest        --config configs/example_backtest.yaml --account paper --symbol TSLA --cash 50000\n"
+            "  python run.py live            --config configs/example_live.yaml --session-id my-session --account paper\n"
+            "  python run.py live            --config configs/example_live_self_optimizing.yaml --session-id opt-session --account paper\n"
+            "  python run.py walk-forward    --config configs/example_walk_forward.yaml --account paper\n"
+            "  python run.py hpo             --config configs/example_hpo.yaml --account paper\n"
+            "  python run.py hpo             --config configs/example_hpo.yaml --account paper --num-samples 50 --max-concurrent-trials 4\n"
+            "  python run.py session-replay  --config configs/example_live.yaml --session-id my-session --account paper\n"
+            "  python run.py session-replay  --config configs/example_live.yaml --session-id my-session --account paper --start-date 2024-01-01\n"
+            "  python run.py session-replay  --config configs/example_live.yaml --session-id my-session --account paper --no-mlflow\n"
         ),
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=False)
 
     # -- Shared arguments --
     shared = argparse.ArgumentParser(add_help=False)
@@ -981,9 +1050,18 @@ def main():
         "--timeframe",
         help="Override bar timeframe for sessions missing metadata (e.g. Minute, Hour, Day)",
     )
+    sr.add_argument(
+        "--start-date",
+        dest="start_date",
+        help="Also run an extended Alpaca backtest from this date to session end (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS). "
+             "MongoDB-tick replay still runs as normal.",
+    )
     sr.set_defaults(func=cmd_session_replay)
 
     args = parser.parse_args()
+    if not getattr(args, "command", None):
+        parser.print_help()
+        sys.exit(0)
     args.func(args)
 
 
