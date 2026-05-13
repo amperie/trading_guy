@@ -16,6 +16,7 @@ from trading.commands import (
     cmd_session_replay,
     cmd_walk_forward,
 )
+from trading.commands.hpo_from_mlflow import cmd_hpo_from_mlflow
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,7 +24,34 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Trading framework CLI. Commands share a typed config normalization layer "
             "so internal runs and external experiment runners use the same interface."
-        )
+        ),
+        epilog=(
+            "Top-level command summary:\n"
+            "  backtest:\n"
+            "    --config --account [--data] [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
+            "    [--no-mlflow] [--run-name] [--session-id] [--agg-period]\n"
+            "  live:\n"
+            "    --config --account [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
+            "    [--alpaca-override-url] [--run-name] [--session-id] [--agg-period]\n"
+            "  walk-forward:\n"
+            "    --config --account [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
+            "    [--no-mlflow] [--run-name] [--session-id] [--agg-period]\n"
+            "  hpo:\n"
+            "    --config --account [--num-samples] [--max-concurrent-trials] [--symbol] [--cash] [--algorithm]\n"
+            "    [--algorithm-url] [--portfolio] [--portfolio-url] [--run-name] [--agg-period]\n"
+            "  hpo-from-mlflow:\n"
+            "    --account --run-url [--tracking-uri] [--editor]\n"
+            "  session-replay:\n"
+            "    --config --account --session-id [--timeframe] [--start-date] [--run-name] [--agg-period]\n"
+            "\n"
+            "Use `python run.py <command> -h` for full command-specific help.\n"
+            "\n"
+            "Examples:\n"
+            "  python run.py backtest --config configs/example_backtest.yaml --account paper\n"
+            "  python run.py hpo --config configs/example_hpo.yaml --account paper --num-samples 50\n"
+            "  python run.py hpo-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --editor vim"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -33,6 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     shared.add_argument("--symbol", help="Override portfolio symbol")
     shared.add_argument("--cash", type=float, help="Override starting cash")
     shared.add_argument("--algorithm", help="Override algorithm implementation path")
+    shared.add_argument("--algorithm-url", dest="algorithm_url", help="Load algorithm class code from an HTTP(S) URL")
+    shared.add_argument("--portfolio", help="Override portfolio implementation path")
+    shared.add_argument("--portfolio-url", dest="portfolio_url", help="Load portfolio class code from an HTTP(S) URL")
     shared.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging")
     shared.add_argument("--run-name", dest="run_name", help="Override MLflow run name")
     shared.add_argument(
@@ -46,6 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Override aggregation.aggregation_period_minutes (also sets aggregation.enabled=true)",
     )
+
+    shared_account = argparse.ArgumentParser(add_help=False)
+    shared_account.add_argument("--account", required=True, help="Account name from accounts.yaml")
 
     backtest_p = subparsers.add_parser("backtest", parents=[shared], help="Run a backtest")
     backtest_p.add_argument("--data", help="Override data provider path")
@@ -71,6 +105,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override hpo.max_concurrent_trials",
     )
     hpo_p.set_defaults(func=cmd_hpo)
+
+    hpo_mlflow_p = subparsers.add_parser(
+        "hpo-from-mlflow",
+        parents=[shared_account],
+        help="Recreate an HPO search from an MLflow run, edit the generated YAML, then execute it",
+        description=(
+            "Load a prior MLflow run, reconstruct its runtime config, prefill HPO settings from MLflow artifacts "
+            "when available, open the generated HPO YAML in a local editor, then run HPO from the saved file."
+        ),
+    )
+    hpo_mlflow_p.add_argument("--run-url", required=True, help="MLflow run URL to recreate")
+    hpo_mlflow_p.add_argument(
+        "--tracking-uri",
+        dest="tracking_uri",
+        help="Optional MLflow tracking URI override if the URL does not point to the desired tracking server",
+    )
+    hpo_mlflow_p.add_argument(
+        "--editor",
+        help="Editor executable or command. Defaults to notepad.exe on Windows and vim on Linux when EDITOR/VISUAL is unset",
+    )
+    hpo_mlflow_p.set_defaults(func=cmd_hpo_from_mlflow)
 
     sr_p = subparsers.add_parser(
         "session-replay",

@@ -16,6 +16,7 @@ from trading.commands.common import (
     load_raw_config,
     resolve_alpaca_credentials,
 )
+from trading.reporting import CombinedArtifactSpec, AnalyzerReportTarget, ExperimentReport, ExperimentReporter
 from utils.logger import Logger
 from utils.utils import instantiate_from_string
 
@@ -281,83 +282,135 @@ def cmd_session_replay(args: argparse.Namespace):
 
     if log_mlflow:
         from trading.commands.common import flatten_config
-        from utils.mlflow_client import MLflowClient
 
-        client = MLflowClient.from_config(experiment_name=experiment_name)
-        if not client.enabled:
-            logger.info("MLflow disabled — skipping logging")
-        else:
-            tags = get_git_info() or {}
-            params = {"session_id": args.session_id, **flatten_config({"meta": meta})}
-            session_start_str = meta.get("session_start")
-            align_start = pd.to_datetime(session_start_str, utc=True) if session_start_str else None
-            temp_dir = tempfile.mkdtemp()
+        params = {"session_id": args.session_id, **flatten_config({"meta": meta})}
+        if pf_extended is not None:
+            params["extended_start_date"] = str(args.start_date)
 
-            with client.start_run(run_name=run_name, tags=tags if tags else None):
-                client.log_params({k[:250]: v for k, v in params.items() if isinstance(v, (str, int, float, bool)) or v is None})
-                replay_analyzer._contribute_to_run(client, metric_prefix="", artifact_prefix="")
-                mongo_analyzer._contribute_to_run(client, metric_prefix="mongo_", artifact_prefix="mongo_")
-                live_analyzer._contribute_to_run(client, metric_prefix="live_", artifact_prefix="live_")
-                if pf_extended is not None:
-                    extended_analyzer = PortfolioAnalyzer(pf_extended)
-                    client.log_params({"extended_start_date": str(args.start_date)})
-                    extended_analyzer._contribute_to_run(client, metric_prefix="extended_", artifact_prefix="extended_")
+        session_start_str = meta.get("session_start")
+        align_start = pd.to_datetime(session_start_str, utc=True) if session_start_str else None
 
-                combined_path = os.path.join(temp_dir, "combined_equity_curve.png")
-                try:
-                    replay_analyzer.save_combined_equity_curve(
-                        live_analyzer, combined_path, self_label="Alpaca Replay", other_label="Live", align_start=align_start
-                    )
-                    client.log_artifact(combined_path)
-                except Exception as exc:
-                    logger.warning(f"Failed to log combined_equity_curve.png: {exc}")
+        targets = [
+            AnalyzerReportTarget(
+                name="alpaca_replay",
+                analyzer=replay_analyzer,
+                summary=ExperimentReporter.build_single_report(
+                    analyzer=replay_analyzer,
+                    experiment_name=experiment_name,
+                    run_name=run_name,
+                    description=None,
+                    tags=None,
+                    parameters=None,
+                )[1],
+            ),
+            AnalyzerReportTarget(
+                name="mongo_replay",
+                analyzer=mongo_analyzer,
+                summary=ExperimentReporter.build_single_report(
+                    analyzer=mongo_analyzer,
+                    experiment_name=experiment_name,
+                    run_name=run_name,
+                    description=None,
+                    tags=None,
+                    parameters=None,
+                )[1],
+                metric_prefix="mongo_",
+                artifact_prefix="mongo_",
+            ),
+            AnalyzerReportTarget(
+                name="live",
+                analyzer=live_analyzer,
+                summary=ExperimentReporter.build_single_report(
+                    analyzer=live_analyzer,
+                    experiment_name=experiment_name,
+                    run_name=run_name,
+                    description=None,
+                    tags=None,
+                    parameters=None,
+                )[1],
+                metric_prefix="live_",
+                artifact_prefix="live_",
+            ),
+        ]
 
-                combined_lc_path = os.path.join(temp_dir, "combined_lifecycle.html")
-                try:
-                    replay_analyzer.save_combined_lifecycle_chart_interactive(
-                        live_analyzer, combined_lc_path, self_label="Alpaca Replay", other_label="Live", align_start=align_start
-                    )
-                    client.log_artifact(combined_lc_path)
-                except Exception as exc:
-                    logger.warning(f"Failed to log combined_lifecycle.html: {exc}")
+        combined_artifacts = [
+            CombinedArtifactSpec(
+                filename="combined_equity_curve.png",
+                builder=lambda path: replay_analyzer.save_combined_equity_curve(
+                    live_analyzer, path, self_label="Alpaca Replay", other_label="Live", align_start=align_start
+                ),
+            ),
+            CombinedArtifactSpec(
+                filename="combined_lifecycle.html",
+                builder=lambda path: replay_analyzer.save_combined_lifecycle_chart_interactive(
+                    live_analyzer, path, self_label="Alpaca Replay", other_label="Live", align_start=align_start
+                ),
+            ),
+            CombinedArtifactSpec(
+                filename="combined_equity_curve_mongo.png",
+                builder=lambda path: mongo_analyzer.save_combined_equity_curve(
+                    live_analyzer, path, self_label="MongoDB Replay", other_label="Live", align_start=align_start
+                ),
+            ),
+            CombinedArtifactSpec(
+                filename="combined_lifecycle_mongo.html",
+                builder=lambda path: mongo_analyzer.save_combined_lifecycle_chart_interactive(
+                    live_analyzer, path, self_label="MongoDB Replay", other_label="Live", align_start=align_start
+                ),
+            ),
+        ]
 
-                combined_mongo_path = os.path.join(temp_dir, "combined_equity_curve_mongo.png")
-                try:
-                    mongo_analyzer.save_combined_equity_curve(
-                        live_analyzer, combined_mongo_path, self_label="MongoDB Replay", other_label="Live", align_start=align_start
-                    )
-                    client.log_artifact(combined_mongo_path)
-                except Exception as exc:
-                    logger.warning(f"Failed to log combined_equity_curve_mongo.png: {exc}")
+        if pf_extended is not None:
+            extended_analyzer = PortfolioAnalyzer(pf_extended)
+            targets.append(
+                AnalyzerReportTarget(
+                    name="extended",
+                    analyzer=extended_analyzer,
+                    summary=ExperimentReporter.build_single_report(
+                        analyzer=extended_analyzer,
+                        experiment_name=experiment_name,
+                        run_name=run_name,
+                        description=None,
+                        tags=None,
+                        parameters=None,
+                    )[1],
+                    metric_prefix="extended_",
+                    artifact_prefix="extended_",
+                )
+            )
+            combined_artifacts.extend([
+                CombinedArtifactSpec(
+                    filename="combined_equity_curve_extended.png",
+                    builder=lambda path: extended_analyzer.save_combined_equity_curve(
+                        live_analyzer, path, self_label="Extended Alpaca", other_label="Live", align_start=align_start
+                    ),
+                ),
+                CombinedArtifactSpec(
+                    filename="combined_lifecycle_extended.html",
+                    builder=lambda path: extended_analyzer.save_combined_lifecycle_chart_interactive(
+                        live_analyzer, path, self_label="Extended Alpaca", other_label="Live", align_start=align_start
+                    ),
+                ),
+            ])
 
-                combined_lc_mongo_path = os.path.join(temp_dir, "combined_lifecycle_mongo.html")
-                try:
-                    mongo_analyzer.save_combined_lifecycle_chart_interactive(
-                        live_analyzer, combined_lc_mongo_path, self_label="MongoDB Replay", other_label="Live", align_start=align_start
-                    )
-                    client.log_artifact(combined_lc_mongo_path)
-                except Exception as exc:
-                    logger.warning(f"Failed to log combined_lifecycle_mongo.html: {exc}")
+        report = ExperimentReport(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            tags=get_git_info() or None,
+            parameters={k[:250]: v for k, v in params.items() if isinstance(v, (str, int, float, bool)) or v is None},
+            analyzers=targets,
+            combined_artifacts=combined_artifacts,
+        )
 
-                if pf_extended is not None:
-                    combined_ext_path = os.path.join(temp_dir, "combined_equity_curve_extended.png")
-                    try:
-                        extended_analyzer.save_combined_equity_curve(
-                            live_analyzer, combined_ext_path, self_label="Extended Alpaca", other_label="Live", align_start=align_start
-                        )
-                        client.log_artifact(combined_ext_path)
-                    except Exception as exc:
-                        logger.warning(f"Failed to log combined_equity_curve_extended.png: {exc}")
-
-                    combined_lc_ext_path = os.path.join(temp_dir, "combined_lifecycle_extended.html")
-                    try:
-                        extended_analyzer.save_combined_lifecycle_chart_interactive(
-                            live_analyzer, combined_lc_ext_path, self_label="Extended Alpaca", other_label="Live", align_start=align_start
-                        )
-                        client.log_artifact(combined_lc_ext_path)
-                    except Exception as exc:
-                        logger.warning(f"Failed to log combined_lifecycle_extended.html: {exc}")
-
-            logger.info("MLflow run complete")
+        ExperimentReporter.log_to_mlflow(report)
+        logger.info("MLflow run complete")
     else:
-        replay_analyzer.run_full_analysis(log_to_mlflow=False, show_summary=True)
+        summary = ExperimentReporter.build_single_report(
+            analyzer=replay_analyzer,
+            experiment_name=experiment_name,
+            run_name=run_name,
+            description=None,
+            tags=None,
+            parameters=None,
+        )[1]
+        ExperimentReporter.show_summary(summary)

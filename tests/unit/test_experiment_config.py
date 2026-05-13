@@ -6,6 +6,7 @@ import uuid
 import pytest
 
 from trading.commands.common import apply_cli_overrides
+from trading.config import component_loader
 from trading.config import ExperimentService
 from trading.experiments import ExperimentRequest, build_runtime, describe_experiment, load_experiment
 
@@ -159,6 +160,9 @@ def test_apply_cli_overrides_supports_new_style_sections():
         symbol = "QQQ"
         cash = 5000.0
         algorithm = "tests.fixtures.custom_components.CustomAlgorithm"
+        portfolio = "tests.fixtures.custom_components.CustomPortfolio"
+        algorithm_url = "https://example.com/remote_algorithm.py"
+        portfolio_url = "https://example.com/remote_portfolio.py"
         data = None
         no_mlflow = True
         run_name = "override-run"
@@ -169,12 +173,255 @@ def test_apply_cli_overrides_supports_new_style_sections():
     updated = apply_cli_overrides(raw, Args())
     assert updated["portfolio"]["params"]["symbol"] == "QQQ"
     assert updated["portfolio"]["params"]["cash"] == 5000.0
+    assert updated["portfolio"]["implementation"] == "tests.fixtures.custom_components.CustomPortfolio"
+    assert updated["portfolio"]["source_url"] == "https://example.com/remote_portfolio.py"
     assert updated["algorithm"]["implementation"] == "tests.fixtures.custom_components.CustomAlgorithm"
+    assert updated["algorithm"]["source_url"] == "https://example.com/remote_algorithm.py"
     assert updated["analysis"]["log_to_mlflow"] is False
     assert updated["analysis"]["run_name"] == "override-run"
     assert updated["state_store"]["session_id"] == "sess-123"
     assert updated["aggregation"]["aggregation_period_minutes"] == 15
     assert updated["aggregation"]["enabled"] is True
+
+
+def test_remote_component_config_and_runtime(monkeypatch):
+    remote_sources = {
+        "https://example.com/remote_algorithm.py": """
+from pydantic import BaseModel
+
+class RemoteAlgorithmConfig(BaseModel):
+    lookback: int
+
+class RemoteAlgorithm:
+    def __init__(self, cfg=None, history_length: int = 0):
+        self.cfg = cfg or {}
+        self.history_length = history_length
+
+    @classmethod
+    def config_model(cls):
+        return RemoteAlgorithmConfig
+""",
+        "https://example.com/remote_portfolio.py": """
+from pydantic import BaseModel
+
+class RemotePortfolioConfig(BaseModel):
+    cash: float
+
+class RemotePortfolio:
+    def __init__(self, cfg=None, order_manager=None):
+        self.cfg = cfg or {}
+        self.order_manager = order_manager
+
+    @classmethod
+    def config_model(cls):
+        return RemotePortfolioConfig
+""",
+    }
+
+    component_loader._download_remote_source.cache_clear()
+    component_loader._load_remote_module.cache_clear()
+    monkeypatch.setattr(
+        component_loader,
+        "_download_remote_source",
+        lambda url: remote_sources[url],
+    )
+
+    raw = {
+        "mode": "backtest",
+        "algorithm": {
+            "algorithm": "RemoteAlgorithm",
+            "source_url": "https://example.com/remote_algorithm.py",
+            "lookback": 25,
+            "history_length": 40,
+        },
+        "portfolio": {
+            "portfolio": "RemotePortfolio",
+            "source_url": "https://example.com/remote_portfolio.py",
+            "cash": 15000,
+        },
+        "order_manager": {
+            "implementation": "tests.fixtures.custom_components.CustomOrderManager",
+            "params": {},
+        },
+        "data_provider": {
+            "implementation": "tests.fixtures.custom_components.CustomDataProvider",
+            "params": {},
+        },
+        "analysis": {"enabled": False, "log_to_mlflow": False},
+        "state_store": {"enabled": False},
+        "mlflow": {"enabled": False},
+        "logging": {},
+    }
+
+    config = ExperimentService.from_dict(raw)
+    built = build_runtime(config)
+
+    assert config.algorithm.source_url == "https://example.com/remote_algorithm.py"
+    assert config.portfolio.source_url == "https://example.com/remote_portfolio.py"
+    assert built.algorithm.cfg["lookback"] == 25
+    assert built.algorithm.history_length == 40
+    assert built.portfolio.cfg["cash"] == 15000
+    assert built.portfolio.order_manager is built.order_manager
+
+
+def test_new_style_remote_component_preserves_params(monkeypatch):
+    remote_source = """
+from pydantic import BaseModel
+
+class UrlAlgoConfig(BaseModel):
+    threshold: float
+
+class UrlAlgo:
+    def __init__(self, cfg=None, history_length: int = 0):
+        self.cfg = cfg or {}
+        self.history_length = history_length
+
+    @classmethod
+    def config_model(cls):
+        return UrlAlgoConfig
+"""
+
+    component_loader._download_remote_source.cache_clear()
+    component_loader._load_remote_module.cache_clear()
+    monkeypatch.setattr(component_loader, "_download_remote_source", lambda url: remote_source)
+
+    config = ExperimentService.from_dict({
+        "mode": "backtest",
+        "algorithm": {
+            "implementation": "UrlAlgo",
+            "source_url": "https://example.com/url_algo.py",
+            "params": {"threshold": 1.25, "history_length": 22},
+        },
+        "portfolio": {
+            "implementation": "tests.fixtures.custom_components.CustomPortfolio",
+            "params": {},
+        },
+        "order_manager": {
+            "implementation": "tests.fixtures.custom_components.CustomOrderManager",
+            "params": {},
+        },
+        "data_provider": {
+            "implementation": "tests.fixtures.custom_components.CustomDataProvider",
+            "params": {},
+        },
+        "analysis": {"enabled": False, "log_to_mlflow": False},
+        "state_store": {"enabled": False},
+        "mlflow": {"enabled": False},
+        "logging": {},
+    })
+
+    assert config.algorithm.params["threshold"] == 1.25
+    assert config.algorithm.params["history_length"] == 22
+
+
+def test_local_source_path_component_runtime():
+    source_path = Path("scratch") / f"local_algo_{uuid.uuid4().hex}.py"
+    source_path.write_text(
+        """
+from pydantic import BaseModel
+
+class LocalAlgoConfig(BaseModel):
+    threshold: float
+
+class LocalAlgo:
+    def __init__(self, cfg=None, history_length: int = 0):
+        self.cfg = cfg or {}
+        self.history_length = history_length
+
+    @classmethod
+    def config_model(cls):
+        return LocalAlgoConfig
+""",
+        encoding="utf-8",
+    )
+    try:
+        config = ExperimentService.from_dict({
+            "mode": "backtest",
+            "algorithm": {
+                "implementation": "LocalAlgo",
+                "source_path": str(source_path),
+                "params": {"threshold": 2.5, "history_length": 18},
+            },
+            "portfolio": {
+                "implementation": "tests.fixtures.custom_components.CustomPortfolio",
+                "params": {},
+            },
+            "order_manager": {
+                "implementation": "tests.fixtures.custom_components.CustomOrderManager",
+                "params": {},
+            },
+            "data_provider": {
+                "implementation": "tests.fixtures.custom_components.CustomDataProvider",
+                "params": {},
+            },
+            "analysis": {"enabled": False, "log_to_mlflow": False},
+            "state_store": {"enabled": False},
+            "mlflow": {"enabled": False},
+            "logging": {},
+        })
+        built = build_runtime(config)
+
+        assert config.algorithm.source_path == str(source_path)
+        assert built.algorithm.cfg["threshold"] == 2.5
+        assert built.algorithm.history_length == 18
+    finally:
+        if source_path.exists():
+            source_path.unlink()
+
+
+def test_local_source_path_component_runtime_with_windows_style_relative_path():
+    source_path = Path("scratch") / f"local_algo_{uuid.uuid4().hex}.py"
+    source_path.write_text(
+        """
+from pydantic import BaseModel
+
+class LocalAlgoConfig(BaseModel):
+    threshold: float
+
+class LocalAlgo:
+    def __init__(self, cfg=None, history_length: int = 0):
+        self.cfg = cfg or {}
+        self.history_length = history_length
+
+    @classmethod
+    def config_model(cls):
+        return LocalAlgoConfig
+""",
+        encoding="utf-8",
+    )
+    try:
+        windows_style_path = str(source_path).replace("/", "\\")
+        config = ExperimentService.from_dict({
+            "mode": "backtest",
+            "algorithm": {
+                "implementation": "LocalAlgo",
+                "source_path": windows_style_path,
+                "params": {"threshold": 3.5, "history_length": 12},
+            },
+            "portfolio": {
+                "implementation": "tests.fixtures.custom_components.CustomPortfolio",
+                "params": {},
+            },
+            "order_manager": {
+                "implementation": "tests.fixtures.custom_components.CustomOrderManager",
+                "params": {},
+            },
+            "data_provider": {
+                "implementation": "tests.fixtures.custom_components.CustomDataProvider",
+                "params": {},
+            },
+            "analysis": {"enabled": False, "log_to_mlflow": False},
+            "state_store": {"enabled": False},
+            "mlflow": {"enabled": False},
+            "logging": {},
+        })
+        built = build_runtime(config)
+
+        assert built.algorithm.cfg["threshold"] == 3.5
+        assert built.algorithm.history_length == 12
+    finally:
+        if source_path.exists():
+            source_path.unlink()
 
 
 def test_external_request_interface_from_file():

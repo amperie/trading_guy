@@ -9,10 +9,10 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from trading.config.component_loader import import_component_class, instantiate_component
 from trading.config.component_registry import AllowExtraModel, KNOWN_COMPONENT_MODELS
 from trading.config.models import ComponentConfig, ExperimentConfig
 from utils.config_manager import ConfigManager
-from utils.utils import instantiate_from_string
 
 
 LEGACY_COMPONENT_KEYS = {
@@ -56,40 +56,51 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _normalize_component(section: dict[str, Any], legacy_key: str) -> dict[str, Any]:
+    reserved_keys = {"implementation", "params", "source_url", "source_path", "class_name"}
     if "implementation" in section:
         params = copy.deepcopy(section.get("params") or {})
         passthrough = {
             k: copy.deepcopy(v)
             for k, v in section.items()
-            if k not in {"implementation", "params"}
+            if k not in reserved_keys
         }
         params.update(passthrough)
-        return {"implementation": section["implementation"], "params": params}
+        normalized = {"implementation": section["implementation"], "params": params}
+        if section.get("source_url"):
+            normalized["source_url"] = section["source_url"]
+        if section.get("source_path"):
+            normalized["source_path"] = section["source_path"]
+        if section.get("class_name"):
+            normalized["class_name"] = section["class_name"]
+        return normalized
 
-    params = {k: copy.deepcopy(v) for k, v in section.items() if k != legacy_key}
-    return {"implementation": section[legacy_key], "params": params}
+    params = {
+        k: copy.deepcopy(v)
+        for k, v in section.items()
+        if k not in {legacy_key, "source_url", "source_path", "class_name"}
+    }
+    normalized = {"implementation": section[legacy_key], "params": params}
+    if section.get("source_url"):
+        normalized["source_url"] = section["source_url"]
+    if section.get("source_path"):
+        normalized["source_path"] = section["source_path"]
+    if section.get("class_name"):
+        normalized["class_name"] = section["class_name"]
+    return normalized
 
 
-def _config_model_for(implementation: str) -> type[BaseModel]:
-    cls = _import_class(implementation)
+def _config_model_for(component: ComponentConfig) -> type[BaseModel]:
+    cls = import_component_class(component)
     config_model = getattr(cls, "config_model", None)
     if callable(config_model):
         maybe_model = config_model()
         if isinstance(maybe_model, type) and issubclass(maybe_model, BaseModel):
             return maybe_model
-    return KNOWN_COMPONENT_MODELS.get(implementation, AllowExtraModel)
-
-
-def _import_class(dotted_path: str):
-    import importlib
-
-    module_path, class_name = dotted_path.rsplit(".", 1)
-    module = importlib.import_module(module_path)
-    return getattr(module, class_name)
+    return KNOWN_COMPONENT_MODELS.get(component.implementation, AllowExtraModel)
 
 
 def _validate_component(component: ComponentConfig, role: str) -> ComponentConfig:
-    model_cls = _config_model_for(component.implementation)
+    model_cls = _config_model_for(component)
     validated = model_cls.model_validate(component.params)
     params = validated.model_dump(exclude_none=True)
     if role == "algorithm" and "history_length" in component.params:
@@ -143,10 +154,10 @@ def _build_component(spec: ComponentConfig, role: str, order_manager: Any | None
     kwargs = dict(spec.params)
     if role == "algorithm":
         history_length = kwargs.pop("history_length", 0)
-        return instantiate_from_string(spec.implementation, cfg=kwargs, history_length=history_length)
+        return instantiate_component(spec, cfg=kwargs, history_length=history_length)
     if role == "portfolio":
-        return instantiate_from_string(spec.implementation, cfg=kwargs, order_manager=order_manager)
-    return instantiate_from_string(spec.implementation, cfg=kwargs) if kwargs else instantiate_from_string(spec.implementation)
+        return instantiate_component(spec, cfg=kwargs, order_manager=order_manager)
+    return instantiate_component(spec, cfg=kwargs) if kwargs else instantiate_component(spec)
 
 
 def build_components(config: ExperimentConfig) -> BuiltComponents:

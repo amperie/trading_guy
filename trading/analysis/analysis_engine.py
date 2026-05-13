@@ -2267,6 +2267,7 @@ Trading Days:           {self._metrics.trading_days}
     def log_to_mlflow(
         self,
         experiment_name: Optional[str] = None,
+        tracking_uri: Optional[str] = None,
         run_name: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[Dict[str, Any]] = None,
@@ -2308,7 +2309,10 @@ Trading Days:           {self._metrics.trading_days}
             return
 
         # Initialize MLflow client with experiment name
-        mlflow = MLflowClient.from_config(experiment_name=experiment_name)
+        if tracking_uri is None:
+            mlflow = MLflowClient.from_config(experiment_name=experiment_name)
+        else:
+            mlflow = MLflowClient(experiment_name=experiment_name, tracking_uri=tracking_uri)
 
         if not mlflow.enabled:
             logger.info("MLflow tracking is disabled in config")
@@ -2680,6 +2684,7 @@ Trading Days:           {self._metrics.trading_days}
         self,
         log_to_mlflow: bool = True,
         experiment_name: Optional[str] = None,
+        tracking_uri: Optional[str] = None,
         run_name: Optional[str] = None,
         description: Optional[str] = None,
         tags: Optional[Dict[str, Any]] = None,
@@ -2831,11 +2836,13 @@ Trading Days:           {self._metrics.trading_days}
                     description=description,
                     tags=tags,
                     parameters=parameters,
+                    tracking_uri=tracking_uri,
                     artifact_paths=artifact_paths
                 )
             else:
                 self.log_to_mlflow(
                     experiment_name=experiment_name,
+                    tracking_uri=tracking_uri,
                     run_name=run_name,
                     description=description,
                     tags=tags,

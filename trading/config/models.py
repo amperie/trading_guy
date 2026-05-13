@@ -9,6 +9,9 @@ class ComponentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     implementation: str
+    source_url: str | None = None
+    source_path: str | None = None
+    class_name: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 
 

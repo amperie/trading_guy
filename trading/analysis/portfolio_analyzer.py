@@ -2576,75 +2576,29 @@ class PortfolioAnalyzer:
         log_signals: bool = True,
         log_report: bool = True,
     ) -> None:
-        """Log metrics and artifacts into an already-open MLflow run with optional prefix.
+        """Backward-compatible wrapper over the shared reporting service."""
+        from trading.reporting import AnalyzerReportTarget, ExperimentReporter
 
-        Called by run.py session-replay to combine replay + live logging into one run.
-
-        Args:
-            client:          Active MLflowClient with an open run (via start_run context).
-            metric_prefix:   Prefix applied to every metric name (e.g. "live_").
-            artifact_prefix: Prefix applied to every artifact filename (e.g. "live_").
-            log_charts:      Whether to save and upload chart PNGs/HTMLs.
-            log_trades:      Whether to save and upload trades.csv.
-            log_signals:     Whether to save and upload signals_orders.csv.
-            log_report:      Whether to save and upload performance_report.txt.
-        """
-        import math
-        import tempfile
-        import dataclasses as _dc
-
-        m = self.get_metrics()
-        metrics_dict = {}
-        for field in _dc.fields(m):
-            v = getattr(m, field.name)
-            if isinstance(v, (int, float)):
-                fv = float(v)
-                if not (math.isnan(fv) or math.isinf(fv)):
-                    metrics_dict[f"{metric_prefix}{field.name}"] = fv
-        client.log_metrics(metrics_dict)
-
-        if log_report:
-            try:
-                report = self.generate_report()
-                client.log_text(report, f"{artifact_prefix}performance_report.txt")
-            except Exception as e:
-                logger.warning(f"Failed to log {artifact_prefix}performance_report.txt: {e}")
-
-        if log_charts:
-            tmp = tempfile.mkdtemp()
-            artifact_map = {
-                'equity_curve.png':           self.save_equity_curve,
-                'technical_analysis.png':     self.save_technical_chart,
-                'drawdown.png':               self.save_drawdown_chart,
-                'orders_chart.png':           self.save_orders_chart,
-                'lifecycle.png':              self.save_lifecycle_chart,
-                'lifecycle_interactive.html': self.save_lifecycle_chart_interactive,
-            }
-            for fname, method in artifact_map.items():
-                fpath = os.path.join(tmp, f"{artifact_prefix}{fname}")
-                try:
-                    method(fpath)
-                    client.log_artifact(fpath)
-                except Exception as e:
-                    logger.warning(f"Failed to log {artifact_prefix}{fname}: {e}")
-
-        if log_signals:
-            tmp = tempfile.mkdtemp()
-            fpath = os.path.join(tmp, f"{artifact_prefix}signals_orders.csv")
-            try:
-                self.save_signals_orders_csv(fpath)
-                client.log_artifact(fpath)
-            except Exception as e:
-                logger.warning(f"Failed to log {artifact_prefix}signals_orders.csv: {e}")
-
-        if log_trades:
-            tmp = tempfile.mkdtemp()
-            fpath = os.path.join(tmp, f"{artifact_prefix}trades.csv")
-            try:
-                self.save_trades_csv(fpath)
-                client.log_artifact(fpath)
-            except Exception as e:
-                logger.warning(f"Failed to log {artifact_prefix}trades.csv: {e}")
+        summary = ExperimentReporter.build_single_report(
+            analyzer=self,
+            experiment_name=None,
+            run_name=None,
+            description=None,
+            tags=None,
+            parameters=None,
+        )[1]
+        target = AnalyzerReportTarget(
+            name="compat",
+            analyzer=self,
+            summary=summary,
+            metric_prefix=metric_prefix,
+            artifact_prefix=artifact_prefix,
+            log_charts=log_charts,
+            log_trades=log_trades,
+            log_signals=log_signals,
+            log_report=log_report,
+        )
+        ExperimentReporter._log_target(client, target)
 
     def log_to_mlflow(
         self,
@@ -2660,80 +2614,37 @@ class PortfolioAnalyzer:
         chart_dpi: int = 150,
         artifact_paths: Optional[list] = None,
     ) -> None:
-        """Log analysis to MLflow — same signature as AnalysisEngine.log_to_mlflow()."""
-        import tempfile
-        client = MLflowClient.from_config(experiment_name=experiment_name)
-        if not client.enabled:
-            logger.info("MLflow tracking is disabled in config")
-            return
+        """Log analysis to MLflow through the shared reporting service."""
+        from trading.reporting import AnalyzerReportTarget, ExperimentReport, ExperimentReporter
 
-        m = self.get_metrics()
-        with client.start_run(run_name=run_name, description=description, tags=tags):
-            # Metrics
-            import math
-            metrics_dict = {}
-            for field in dataclasses.fields(m):
-                v = getattr(m, field.name)
-                if isinstance(v, (int, float)):
-                    fv = float(v)
-                    if not (math.isnan(fv) or math.isinf(fv)):
-                        metrics_dict[field.name] = fv
-            client.log_metrics(metrics_dict)
-
-            # Session metadata from MongoDB is merged in automatically
-            merged_params = {**self._session_metadata, **(parameters or {})}
-            if merged_params:
-                client.log_params(_flatten_dict(merged_params))
-
-            if log_report:
-                report = self.generate_report()
-                client.log_text(report, "performance_report.txt")
-
-            if log_charts:
-                try:
-                    tmp = tempfile.mkdtemp()
-                    artifact_map = {
-                        'equity_curve.png':            self.save_equity_curve,
-                        'technical_analysis.png':      self.save_technical_chart,
-                        'drawdown.png':                self.save_drawdown_chart,
-                        'orders_chart.png':            self.save_orders_chart,
-                        'lifecycle.png':               self.save_lifecycle_chart,
-                        'lifecycle_interactive.html':  self.save_lifecycle_chart_interactive,
-                    }
-                    for fname, method in artifact_map.items():
-                        fpath = os.path.join(tmp, fname)
-                        try:
-                            method(fpath)
-                            client.log_artifact(fpath)
-                        except Exception as e:
-                            logger.warning(f"Failed to log chart {fname}: {e}")
-                except Exception as e:
-                    logger.warning(f"Could not log charts: {e}")
-
-            if log_signals or log_trades:
-                try:
-                    tmp = tempfile.mkdtemp()
-                    if log_signals:
-                        fpath = os.path.join(tmp, "signals_orders.csv")
-                        try:
-                            self.save_signals_orders_csv(fpath)
-                            client.log_artifact(fpath)
-                        except Exception as e:
-                            logger.warning(f"Failed to log signals_orders.csv: {e}")
-                    if log_trades:
-                        fpath = os.path.join(tmp, "trades.csv")
-                        try:
-                            self.save_trades_csv(fpath)
-                            client.log_artifact(fpath)
-                        except Exception as e:
-                            logger.warning(f"Failed to log trades.csv: {e}")
-                except Exception as e:
-                    logger.warning(f"Could not log CSV artifacts: {e}")
-
-            if artifact_paths:
-                for path in (artifact_paths or []):
-                    if os.path.isfile(path):
-                        client.log_artifact(path, artifact_path="config")
+        merged_params = {**self._session_metadata, **(parameters or {})}
+        report = ExperimentReport(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            description=description,
+            tags=tags,
+            parameters=_flatten_dict(merged_params) if merged_params else {},
+            analyzers=[
+                AnalyzerReportTarget(
+                    name="primary",
+                    analyzer=self,
+                    summary=ExperimentReporter.build_single_report(
+                        analyzer=self,
+                        experiment_name=experiment_name,
+                        run_name=run_name,
+                        description=description,
+                        tags=tags,
+                        parameters=None,
+                    )[1],
+                    log_charts=log_charts,
+                    log_trades=log_trades,
+                    log_signals=log_signals,
+                    log_report=log_report,
+                )
+            ],
+            config_artifact_paths=list(artifact_paths or []),
+        )
+        ExperimentReporter.log_to_mlflow(report)
 
     def run_full_analysis(
         self,
@@ -2757,39 +2668,26 @@ class PortfolioAnalyzer:
             {"trades", "metrics", "tick_returns", "daily_returns", "monthly_returns",
              "bracket_analysis", "report", "benchmarks"}
         """
-        if benchmark_paths:
-            self._benchmark_paths = benchmark_paths
+        from trading.reporting import ExperimentReporter
 
-        trades = self.get_trades()
-        metrics = self.get_metrics()
-        lifecycle_chains = self.get_lifecycle_chains()
-        tick_returns = self.get_tick_returns()
-        daily_returns = self.get_daily_returns()
-        monthly_returns = self.get_monthly_returns()
-        bracket_analysis = self.analyze_bracket_effectiveness() if metrics.bracket_trades > 0 else None
-        report = self.generate_report()
+        report_obj, summary = ExperimentReporter.build_single_report(
+            analyzer=self,
+            experiment_name=experiment_name,
+            run_name=run_name,
+            description=description,
+            tags=tags,
+            parameters=parameters,
+            benchmark_paths=benchmark_paths,
+            config_artifact_paths=[path for path in (artifact_paths or []) if path],
+        )
 
         if show_summary:
-            print("\n" + "=" * 80)
-            print("ANALYSIS COMPLETE")
-            print("=" * 80)
-            print(f"Total Return:       ${metrics.total_return:,.2f} ({metrics.total_return_pct:.2f}%)")
-            print(f"Annualized Return:  {metrics.annualized_return:.2f}%")
-            print(f"Sharpe Ratio:       {metrics.sharpe_ratio:.2f}")
-            print(f"Max Drawdown:       {metrics.max_drawdown_pct:.2f}%")
-            print(f"\nTotal Trades:       {metrics.total_trades}")
-            print(f"Win Rate:           {metrics.win_rate:.1f}%")
-            print(f"Profit Factor:      {metrics.profit_factor:.2f}")
-            if metrics.bracket_trades > 0:
-                print(f"\nBracket Orders:     {metrics.bracket_trades}")
-                print(f"Stop Loss Rate:     {metrics.bracket_stop_rate:.1f}%")
-                print(f"Profit Taker Rate:  {metrics.bracket_profit_rate:.1f}%")
-            print("=" * 80 + "\n")
+            ExperimentReporter.show_summary(summary)
 
         if save_report_locally:
             rpath = os.path.join(output_dir, "backtest_report.txt")
             with open(rpath, 'w', encoding='utf-8') as f:
-                f.write(report)
+                f.write(summary.report)
 
         if save_charts_locally:
             os.makedirs(output_dir, exist_ok=True)
@@ -2797,28 +2695,11 @@ class PortfolioAnalyzer:
 
         if log_to_mlflow:
             try:
-                self.log_to_mlflow(
-                    experiment_name=experiment_name,
-                    run_name=run_name,
-                    description=description,
-                    tags=tags,
-                    parameters=parameters,
-                    artifact_paths=artifact_paths,
-                )
+                ExperimentReporter.log_to_mlflow(report_obj)
             except Exception as e:
                 logger.warning(f"MLflow logging failed: {e}", exc_info=True)
 
-        return {
-            "trades": trades,
-            "metrics": metrics,
-            "lifecycle_chains": lifecycle_chains,
-            "tick_returns": tick_returns,
-            "daily_returns": daily_returns,
-            "monthly_returns": monthly_returns,
-            "bracket_analysis": bracket_analysis,
-            "report": report,
-            "benchmarks": self.calculate_external_benchmarks(),
-        }
+        return ExperimentReporter.summary_to_legacy_dict(summary)
 
     # -----------------------------------------------------------------------
     # MongoDB factory classmethods
@@ -3018,39 +2899,14 @@ class PortfolioAnalyzer:
         parameters: dict = None,
         tags: dict = None,
     ) -> None:
-        """Log PerformanceMetrics and all artifact files to MLflow."""
-        try:
-            m = self.get_metrics()
-        except Exception as e:
-            logger.warning(f"Cannot log to MLflow — metrics unavailable: {e}")
-            return
-
-        client = MLflowClient.from_config(experiment_name=experiment_name)
-        with client.start_run(run_name=run_name, tags=tags):
-            # Metrics
-            import math
-            metrics_dict = {}
-            for field in dataclasses.fields(m):
-                v = getattr(m, field.name)
-                if isinstance(v, (int, float)):
-                    fv = float(v)
-                    if not (math.isnan(fv) or math.isinf(fv)):
-                        metrics_dict[field.name] = fv
-            client.log_metrics(metrics_dict)
-
-            # Extra parameters (session metadata from MongoDB is merged in automatically)
-            merged_params = {**self._session_metadata, **(parameters or {})}
-            if merged_params:
-                client.log_params(_flatten_dict(merged_params))
-
-            # Artifacts
-            for filename in files:
-                if files[filename]:
-                    fpath = os.path.join(output_dir, filename)
-                    try:
-                        client.log_artifact(fpath)
-                    except Exception as e:
-                        logger.warning(f"Failed to log artifact {filename} to MLflow: {e}")
+        """Backward-compatible wrapper over shared MLflow reporting."""
+        self.log_to_mlflow(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            parameters=parameters,
+            tags=tags,
+            artifact_paths=[os.path.join(output_dir, filename) for filename, ok in files.items() if ok],
+        )
 
     # -----------------------------------------------------------------------
     # Main convenience method

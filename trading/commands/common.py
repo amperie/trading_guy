@@ -72,6 +72,12 @@ def _set_component_param(cfg: dict[str, Any], section_name: str, legacy_selector
         section[key] = value
 
 
+def _set_component_field(cfg: dict[str, Any], section_name: str, field: str, value: Any) -> None:
+    if section_name not in cfg:
+        return
+    cfg[section_name][field] = value
+
+
 def load_raw_config(config_path: str) -> dict[str, Any]:
     from utils.config_manager import ConfigManager
 
@@ -94,6 +100,15 @@ def apply_cli_overrides(raw_cfg: dict[str, Any], args: argparse.Namespace) -> di
 
     if getattr(args, "algorithm", None):
         _set_component_param(cfg, "algorithm", "algorithm", "algorithm", args.algorithm)
+
+    if getattr(args, "portfolio", None):
+        _set_component_param(cfg, "portfolio", "portfolio", "portfolio", args.portfolio)
+
+    if getattr(args, "algorithm_url", None):
+        _set_component_field(cfg, "algorithm", "source_url", args.algorithm_url)
+
+    if getattr(args, "portfolio_url", None):
+        _set_component_field(cfg, "portfolio", "source_url", args.portfolio_url)
 
     if getattr(args, "data", None):
         _set_component_param(cfg, "data_provider", "provider", "path", args.data)
