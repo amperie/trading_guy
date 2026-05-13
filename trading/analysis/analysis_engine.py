@@ -3,6 +3,10 @@ Comprehensive analysis engine for backtesting results
 Provides trade extraction, performance metrics, visualizations, and reports
 """
 from dataclasses import dataclass
+import os
+import tempfile
+import shutil
+import uuid
 from typing import Optional, Dict, Any
 from datetime import datetime
 import pandas as pd
@@ -2264,6 +2268,279 @@ Trading Days:           {self._metrics.trading_days}
 
         return fig
 
+    def _log_chart_artifact(self, mlflow, filename: str, builder, chart_dpi: int = 150) -> bool:
+        """Build and log a chart-like artifact without allowing one failure to block others."""
+        artifact_dir = None
+        try:
+            scratch_tmp = os.path.join(os.getcwd(), "scratch", "tmp_analysis_engine")
+            os.makedirs(scratch_tmp, exist_ok=True)
+            artifact_dir = os.path.join(scratch_tmp, uuid.uuid4().hex)
+            os.makedirs(artifact_dir, exist_ok=True)
+            artifact_path = os.path.join(artifact_dir, filename)
+            try:
+                result = builder(artifact_path)
+                if result is not None and hasattr(result, "savefig") and not os.path.exists(artifact_path):
+                    result.savefig(artifact_path, dpi=chart_dpi, bbox_inches="tight")
+            finally:
+                try:
+                    import matplotlib.pyplot as plt
+                    plt.close("all")
+                except Exception:
+                    pass
+
+            if not os.path.exists(artifact_path):
+                raise FileNotFoundError(f"Artifact builder did not create '{filename}'")
+            mlflow.log_artifact(artifact_path)
+            logger.debug(f"Logged artifact: {filename}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to log {filename}: {e}")
+            logger.debug("Artifact logging failure details", exc_info=True)
+            return False
+        finally:
+            if artifact_dir and os.path.isdir(artifact_dir):
+                shutil.rmtree(artifact_dir, ignore_errors=True)
+
+    def _log_portfolio_analyzer_artifacts(self, mlflow, chart_dpi: int = 150) -> None:
+        """
+        Log the legacy PortfolioAnalyzer artifact set from the AnalysisEngine path.
+
+        This keeps one MLflow logging entrypoint while preserving artifact parity with
+        the historical analyzer output that downstream workflows expect.
+        """
+        from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
+
+        analyzer = PortfolioAnalyzer(self.portfolio, self.order_manager)
+        artifact_builders = {
+            "equity_curve.png": analyzer.save_equity_curve,
+            "drawdown.png": analyzer.save_drawdown_chart,
+            "technical_analysis.png": analyzer.save_technical_chart,
+            "orders_chart.png": analyzer.save_orders_chart,
+            "lifecycle.png": analyzer.save_lifecycle_chart,
+            "lifecycle_interactive.html": analyzer.save_lifecycle_chart_interactive,
+            "performance_report.txt": analyzer.save_performance_report,
+            "signals_orders.csv": analyzer.save_signals_orders_csv,
+            "trades.csv": analyzer.save_trades_csv,
+        }
+        for filename, builder in artifact_builders.items():
+            self._log_chart_artifact(mlflow, filename, builder, chart_dpi=chart_dpi)
+
+    def _log_analysis_engine_artifacts(self, mlflow, chart_dpi: int = 150) -> None:
+        """Log AnalysisEngine-native supplemental charts independently."""
+        chart_builders = {
+            "portfolio_with_trades.png": lambda path: self.plot_portfolio_with_trades(show=False, save_path=path),
+            "trade_pnl.png": (lambda path: self.plot_trade_pnl(show=False, save_path=path)) if self._trades else None,
+            "returns_distribution.png": lambda path: self.plot_returns_distribution(show=False, save_path=path),
+            "stock_performance.png": lambda path: self.plot_stock_performance(show=False, save_path=path),
+            "dashboard.png": lambda path: self.plot_comprehensive_dashboard(save_path=path),
+            "orders_timeline.png": lambda path: self.plot_orders_timeline(show=False, save_path=path),
+            "interactive_portfolio.html": lambda path: self.plot_interactive_portfolio(show=False, save_path=path),
+        }
+        for filename, builder in chart_builders.items():
+            if builder is None:
+                continue
+            self._log_chart_artifact(mlflow, filename, builder, chart_dpi=chart_dpi)
+
+    def _log_to_mlflow_unified(
+        self,
+        experiment_name: Optional[str] = None,
+        tracking_uri: Optional[str] = None,
+        run_name: Optional[str] = None,
+        description: Optional[str] = None,
+        tags: Optional[Dict[str, Any]] = None,
+        parameters: Optional[Dict[str, Any]] = None,
+        log_charts: bool = True,
+        log_trades: bool = True,
+        log_signals: bool = True,
+        log_report: bool = True,
+        chart_dpi: int = 150,
+        artifact_paths: Optional[list] = None,
+    ):
+        from utils.mlflow_client import MLflowClient
+
+        if tracking_uri is None:
+            mlflow = MLflowClient.from_config(experiment_name=experiment_name)
+        else:
+            mlflow = MLflowClient(experiment_name=experiment_name, tracking_uri=tracking_uri)
+
+        if not mlflow.enabled:
+            logger.info("MLflow tracking is disabled in config")
+            return
+
+        with mlflow.start_run(run_name=run_name, description=description, tags=tags):
+            logger.info("Logging analysis results to MLflow...")
+
+            if self._metrics is None:
+                self.calculate_metrics()
+            if self._trades is None:
+                self.extract_trades()
+
+            if parameters:
+                mlflow.log_params(parameters)
+                logger.debug(f"Logged {len(parameters)} parameters")
+
+            mlflow.log_metrics({
+                "total_return": self._metrics.total_return,
+                "total_return_pct": self._metrics.total_return_pct,
+                "annualized_return": self._metrics.annualized_return,
+                "sharpe_ratio": self._metrics.sharpe_ratio,
+                "sortino_ratio": self._metrics.sortino_ratio,
+                "max_drawdown": self._metrics.max_drawdown,
+                "max_drawdown_pct": self._metrics.max_drawdown_pct,
+                "max_drawdown_duration": self._metrics.max_drawdown_duration,
+                "calmar_ratio": self._metrics.calmar_ratio,
+                "ulcer_index": self._metrics.ulcer_index,
+                "volatility": self._metrics.volatility,
+                "total_trades": float(self._metrics.total_trades),
+                "winning_trades": float(self._metrics.winning_trades),
+                "losing_trades": float(self._metrics.losing_trades),
+                "win_rate": self._metrics.win_rate,
+                "avg_win": self._metrics.avg_win,
+                "avg_loss": self._metrics.avg_loss,
+                "largest_win": self._metrics.largest_win,
+                "largest_loss": self._metrics.largest_loss,
+                "profit_factor": self._metrics.profit_factor,
+                "avg_trade_pnl": self._metrics.avg_trade_pnl,
+                "avg_trade_duration_hours": self._metrics.avg_trade_duration,
+                "avg_bars_in_trade": self._metrics.avg_bars_in_trade,
+                "bracket_trades": float(self._metrics.bracket_trades),
+                "bracket_stop_triggers": float(self._metrics.bracket_stop_triggers),
+                "bracket_profit_triggers": float(self._metrics.bracket_profit_triggers),
+                "bracket_manual_exits": float(self._metrics.bracket_manual_exits),
+                "bracket_stop_rate": self._metrics.bracket_stop_rate,
+                "bracket_profit_rate": self._metrics.bracket_profit_rate,
+                "best_day": self._metrics.best_day,
+                "worst_day": self._metrics.worst_day,
+                "avg_daily_return": self._metrics.avg_daily_return,
+                "skewness": self._metrics.skewness,
+                "kurtosis": self._metrics.kurtosis,
+                "final_equity": self._metrics.final_equity,
+                "initial_equity": self._metrics.initial_equity,
+                "peak_equity": self._metrics.peak_equity,
+                "total_days": self._metrics.total_days,
+                "trading_days": float(self._metrics.trading_days),
+            })
+
+            try:
+                ext_benchmarks = self.calculate_external_benchmarks()
+                if ext_benchmarks:
+                    bm_metrics = {}
+                    for bm_symbol, bm in ext_benchmarks.items():
+                        prefix = f"bm_{bm_symbol.lower()}"
+                        bm_metrics[f"{prefix}_return_pct"] = bm["total_return_pct"]
+                        bm_metrics[f"{prefix}_sharpe"] = bm["sharpe_ratio"]
+                        bm_metrics[f"{prefix}_volatility"] = bm["volatility"]
+                        bm_metrics[f"{prefix}_max_drawdown_pct"] = bm["max_drawdown_pct"]
+                        if "alpha" in bm:
+                            bm_metrics[f"{prefix}_alpha"] = bm["alpha"]
+                    mlflow.log_metrics(bm_metrics)
+            except Exception as e:
+                logger.warning(f"Could not log external benchmark metrics: {e}")
+
+            if log_charts:
+                self._log_portfolio_analyzer_artifacts(mlflow, chart_dpi=chart_dpi)
+                self._log_analysis_engine_artifacts(mlflow, chart_dpi=chart_dpi)
+
+            if log_trades and self._trades:
+                trades_data = [
+                    {
+                        "symbol": t.symbol,
+                        "entry_time": t.entry_time.isoformat(),
+                        "exit_time": t.exit_time.isoformat(),
+                        "entry_price": t.entry_price,
+                        "exit_price": t.exit_price,
+                        "quantity": t.quantity,
+                        "pnl": t.pnl,
+                        "pnl_pct": t.pnl_pct,
+                        "duration_seconds": t.duration,
+                        "duration_hours": t.duration / 3600,
+                        "is_bracket": t.is_bracket,
+                        "bracket_exit_type": t.bracket_exit_type,
+                    }
+                    for t in self._trades
+                ]
+                mlflow.log_json(trades_data, "trades.json")
+
+            if self._metrics.bracket_trades > 0:
+                mlflow.log_json(self.analyze_bracket_effectiveness(), "bracket_analysis.json")
+
+            if log_signals and hasattr(self.portfolio, "signals_history") and self.portfolio.signals_history:
+                from utils.utils import serialize_signals_history, serialize_signals_history_flat
+
+                sorted_timestamps = sorted(self.portfolio.signals_history.keys())
+                signals_list = [self.portfolio.signals_history[ts] for ts in sorted_timestamps]
+                mlflow.log_json(serialize_signals_history(signals_list), "signals_history.json")
+                mlflow.log_json(serialize_signals_history_flat(signals_list), "signals_history_flat.json")
+
+                try:
+                    signals_orders_report = self.generate_signals_orders_report()
+                    if signals_orders_report and "No signals history" not in signals_orders_report:
+                        mlflow.log_text(signals_orders_report, "signals_to_orders_report.txt")
+                except Exception as e:
+                    logger.warning(f"Failed to generate signals-to-orders report: {e}")
+
+                try:
+                    signals_df = self.generate_signals_orders_dataframe()
+                    if not signals_df.empty:
+                        scratch_tmp = os.path.join(os.getcwd(), "scratch", "tmp_analysis_engine")
+                        os.makedirs(scratch_tmp, exist_ok=True)
+                        temp_dir = os.path.join(scratch_tmp, uuid.uuid4().hex)
+                        os.makedirs(temp_dir, exist_ok=True)
+                        try:
+                            csv_path = os.path.join(temp_dir, "signals_orders_dataframe.csv")
+                            signals_df.to_csv(csv_path, index=False)
+                            mlflow.log_artifact(csv_path)
+                            try:
+                                parquet_path = os.path.join(temp_dir, "signals_orders_dataframe.parquet")
+                                signals_df.to_parquet(parquet_path, index=False)
+                                mlflow.log_artifact(parquet_path)
+                            except ImportError:
+                                pass
+                            except Exception as e:
+                                logger.debug(f"Parquet export failed: {e}")
+                        finally:
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception as e:
+                    logger.warning(f"Failed to generate signals-to-orders DataFrame: {e}")
+
+            if log_report:
+                mlflow.log_text(self.generate_report(), "analysis_engine_performance_report.txt")
+
+            try:
+                all_orders_report = self.generate_all_orders_report()
+                if all_orders_report:
+                    mlflow.log_text(all_orders_report, "all_orders_report.txt")
+            except Exception as e:
+                logger.warning(f"Failed to generate comprehensive orders report: {e}")
+
+            markdown_summary = f"""# Backtest Analysis Summary
+
+## Performance Overview
+- **Total Return:** ${self._metrics.total_return:,.2f} ({self._metrics.total_return_pct:.2f}%)
+- **Annualized Return:** {self._metrics.annualized_return:.2f}%
+- **Initial Equity:** ${self._metrics.initial_equity:,.2f}
+- **Final Equity:** ${self._metrics.final_equity:,.2f}
+- **Peak Equity:** ${self._metrics.peak_equity:,.2f}
+
+## Risk Metrics
+- **Sharpe Ratio:** {self._metrics.sharpe_ratio:.2f}
+- **Sortino Ratio:** {self._metrics.sortino_ratio:.2f}
+- **Max Drawdown:** {self._metrics.max_drawdown_pct:.2f}%
+- **Volatility (Ann.):** {self._metrics.volatility:.2f}%
+- **Calmar Ratio:** {self._metrics.calmar_ratio:.2f}
+"""
+            mlflow.log_markdown(markdown_summary, "summary.md")
+
+            if artifact_paths:
+                for path in artifact_paths:
+                    if os.path.isfile(path):
+                        mlflow.log_artifact(path, artifact_path="config")
+
+            run_url = mlflow.get_run_url()
+            logger.info("Analysis logged to MLflow successfully!")
+            if run_url:
+                logger.info(f"View results: {run_url}")
+
     def log_to_mlflow(
         self,
         experiment_name: Optional[str] = None,
@@ -2302,6 +2579,21 @@ Trading Days:           {self._metrics.trading_days}
                 parameters={"sma_short": 5, "sma_long": 20, "symbol": "AAPL"}
             )
         """
+        return self._log_to_mlflow_unified(
+            experiment_name=experiment_name,
+            tracking_uri=tracking_uri,
+            run_name=run_name,
+            description=description,
+            tags=tags,
+            parameters=parameters,
+            log_charts=log_charts,
+            log_trades=log_trades,
+            log_signals=log_signals,
+            log_report=log_report,
+            chart_dpi=chart_dpi,
+            artifact_paths=artifact_paths,
+        )
+
         try:
             from utils.mlflow_client import MLflowClient
         except ImportError:

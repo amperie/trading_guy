@@ -205,6 +205,7 @@ data/                         # Market data CSV files
 
 ## Further Reading
 
+- [Detailed `run.py` Guide](docs/RUN_PY_GUIDE.md)
 - [Alpaca Live Trading Setup](docs/ALPACA_SETUP.md)
 - [Remote Ray Cluster Setup](docs/REMOTE_RAY_SETUP.md)
 - [MLflow Experiment Tracking](docs/README_MLFLOW.md)

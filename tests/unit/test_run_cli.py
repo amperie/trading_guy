@@ -53,6 +53,21 @@ def test_build_parser_hpo_from_mlflow_args():
     assert args.editor == "vim"
 
 
+def test_build_parser_promote_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "promote",
+        "--run-url", "http://localhost:5000/#/experiments/1/runs/abc123",
+        "--tracking-uri", "http://localhost:5000",
+        "--name", "spy-live",
+    ])
+
+    assert args.command == "promote"
+    assert args.run_url == "http://localhost:5000/#/experiments/1/runs/abc123"
+    assert args.tracking_uri == "http://localhost:5000"
+    assert args.name == "spy-live"
+
+
 def test_root_help_mentions_hpo_from_mlflow(capsys):
     parser = build_parser()
     with pytest.raises(SystemExit):
@@ -65,6 +80,7 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "--portfolio-url" in help_text
     assert "--tracking-uri" in help_text
     assert "--editor vim" in help_text
+    assert "promote" in help_text
 
 
 def test_backtest_help_mentions_remote_component_options(capsys):
@@ -86,3 +102,13 @@ def test_hpo_from_mlflow_help_mentions_editor(capsys):
     assert "--editor" in help_text
     assert "notepad.exe" in help_text
     assert "vim" in help_text
+
+
+def test_promote_help_mentions_name(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["promote", "-h"])
+    help_text = capsys.readouterr().out
+    assert "--run-url" in help_text
+    assert "--tracking-uri" in help_text
+    assert "--name" in help_text
