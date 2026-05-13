@@ -1,0 +1,20 @@
+{
+  "source_run_id": "c5f0894c65404e44ab466e5c8fc17ab0",
+  "source_run_name": "volatility_filtered_rsi_mean_reversion_backtest",
+  "source_run_url": "http://hp.lan:8899/#/experiments/420095082393863008/runs/c5f0894c65404e44ab466e5c8fc17ab0",
+  "source_tracking_uri": "http://hp.lan:8899",
+  "config_path": "configs/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c.yaml",
+  "launch_example": "python run.py live --config trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c.yaml --account <account> --session-id <session-id>",
+  "components": {
+    "algorithm": {
+      "implementation": "VolatilityFilteredRsiMeanReversionAlgorithm",
+      "class_name": "VolatilityFilteredRsiMeanReversionAlgorithm",
+      "source_path": "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py"
+    },
+    "portfolio": {
+      "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+      "class_name": "SingleSymbolPortfolio",
+      "source_path": "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/single_symbol_portfolio.py"
+    }
+  }
+}
