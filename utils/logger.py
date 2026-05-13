@@ -45,9 +45,25 @@ class ColorLogger:
 
     def __init__(self, logger: logging.Logger):
         self._logger = logger
+        self._logger_name = getattr(logger, "name", "")
 
     def __getattr__(self, name):
-        return getattr(self._logger, name)
+        logger = self.__dict__.get("_logger")
+        if logger is None:
+            logger_name = self.__dict__.get("_logger_name", "")
+            logger = logging.getLogger(str(logger_name or ""))
+            self._logger = logger
+        return getattr(logger, name)
+
+    def __getstate__(self):
+        logger = self.__dict__.get("_logger")
+        logger_name = getattr(logger, "name", None) or self.__dict__.get("_logger_name", "")
+        return {"logger_name": str(logger_name or "")}
+
+    def __setstate__(self, state):
+        logger_name = str((state or {}).get("logger_name") or "")
+        self._logger_name = logger_name
+        self._logger = logging.getLogger(logger_name)
 
     def _log_with_color(self, method_name, msg, *args, **kwargs):
         color = kwargs.pop("color", None)

@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from trading.commands import backtest as backtest_cmd
+from trading.commands import live as live_cmd
+
+
+class StubEngine:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.ran = False
+
+    def run(self):
+        self.ran = True
+
+
+def test_cmd_backtest_smoke(monkeypatch):
+    raw_cfg = {
+        "mode": "backtest",
+        "analysis": {"enabled": False},
+        "aggregation": {"enabled": False},
+        "state_store": {"enabled": False},
+        "data_provider": {"provider": "dummy.Provider"},
+    }
+    built = SimpleNamespace(
+        data_provider=object(),
+        algorithm=object(),
+        order_manager=object(),
+        portfolio=SimpleNamespace(total_value=1000.0, cash=500.0, positions={}),
+    )
+    captured = {}
+
+    monkeypatch.setattr(backtest_cmd, "load_raw_config", lambda path: dict(raw_cfg))
+    monkeypatch.setattr(backtest_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(backtest_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(backtest_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(backtest_cmd, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
+    monkeypatch.setattr(backtest_cmd, "build_experiment_config", lambda cfg: "normalized-config")
+    monkeypatch.setattr(backtest_cmd.ExperimentService, "build", lambda cfg: built)
+    monkeypatch.setattr(
+        backtest_cmd.ExperimentService,
+        "describe",
+        lambda cfg: SimpleNamespace(config_hash="hash1234"),
+    )
+
+    def fake_engine(*args, **kwargs):
+        engine = StubEngine(*args, **kwargs)
+        captured["engine"] = engine
+        return engine
+
+    monkeypatch.setattr(backtest_cmd, "BacktestingEngine", fake_engine)
+    monkeypatch.setattr(backtest_cmd, "run_analysis", lambda cfg, pf, om, config_path=None: None)
+
+    args = SimpleNamespace(config="cfg.yaml", account="paper")
+    backtest_cmd.cmd_backtest(args)
+
+    assert captured["engine"].ran is True
+
+
+def test_cmd_live_smoke(monkeypatch):
+    raw_cfg = {
+        "mode": "live",
+        "alpaca": {
+            "api_key": "key",
+            "secret_key": "secret",
+            "symbols_to_subscribe": ["SPY"],
+        },
+        "analysis": {"enabled": False},
+        "aggregation": {"enabled": False},
+        "optimization": {"enabled": False},
+        "state_store": {"enabled": True, "session_id": "sess-1"},
+        "order_manager": {"order_manager": "dummy.OM"},
+    }
+    built = SimpleNamespace(
+        data_provider=None,
+        algorithm=object(),
+        order_manager=object(),
+        portfolio=object(),
+    )
+    captured = {}
+
+    monkeypatch.setattr(live_cmd, "load_raw_config", lambda path: dict(raw_cfg))
+    monkeypatch.setattr(live_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(live_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(live_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(live_cmd, "load_account_creds", lambda account: {"api_key": "key", "secret_key": "secret"})
+    monkeypatch.setattr(live_cmd, "resolve_alpaca_credentials", lambda cfg, creds: cfg)
+    monkeypatch.setattr(live_cmd, "build_experiment_config", lambda cfg: "normalized-config")
+    monkeypatch.setattr(live_cmd.ExperimentService, "build", lambda cfg: built)
+    monkeypatch.setattr(
+        live_cmd.ExperimentService,
+        "describe",
+        lambda cfg: SimpleNamespace(config_hash="hash5678"),
+    )
+
+    def fake_engine(*args, **kwargs):
+        engine = StubEngine(*args, **kwargs)
+        captured["engine"] = engine
+        return engine
+
+    monkeypatch.setattr(live_cmd, "AlpacaRealTimeEngine", fake_engine)
+
+    args = SimpleNamespace(config="cfg.yaml", account="paper", session_id="sess-1")
+    live_cmd.cmd_live(args)
+
+    assert captured["engine"].ran is True

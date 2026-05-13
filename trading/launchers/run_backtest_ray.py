@@ -139,6 +139,7 @@ def run_backtest_core(
         run_name=run_name,
         description=desc,
         parameters=params,
+        tracking_uri=backtest_cfg.get("tracking_uri"),
         log_to_mlflow=True,
         save_charts_locally=False,
         save_report_locally=False,
@@ -413,6 +414,7 @@ def run_single_backtest(
         run_name=run_name,
         description=desc,
         parameters=params,
+        tracking_uri=backtest_cfg.get("tracking_uri"),
         log_to_mlflow=True,
         save_charts_locally=False,
         save_report_locally=False
