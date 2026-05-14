@@ -35,6 +35,7 @@ from trading.core.om.order_manager import OrderManager
 from trading.data_providers.data_provider import DataProvider
 from abc import ABC, abstractmethod
 import asyncio
+import signal
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
@@ -149,8 +150,33 @@ class BaseEngine(ABC):
         self.pf = pf
         self.state_store = None
         self.session_id = None
+        self._debug_requested = False
+        self._debug_repl = None
+        self._install_debug_handler()
         self._init_state_store()
         logger.debug(f"Engine initialized: {self.__class__.__name__} al={type(al).__name__ if al else None} pf={type(pf).__name__ if pf else None} om={type(om).__name__ if om else None}")
+
+    def _install_debug_handler(self):
+        """Replace SIGINT with a handler that sets a flag instead of raising."""
+        def _handler(signum, frame):
+            self._debug_requested = True
+        try:
+            signal.signal(signal.SIGINT, _handler)
+        except (ValueError, OSError):
+            pass  # can't install from a non-main thread; debug mode unavailable
+
+    def _check_debug(self):
+        """Enter the debug REPL if Ctrl-C was pressed since the last tick."""
+        if not self._debug_requested:
+            return
+        self._debug_requested = False
+        if self._debug_repl is None:
+            from utils.debug_repl import DebugREPL
+            self._debug_repl = DebugREPL()
+            self._debug_repl.attach(al=self.al, pf=self.pf, om=self.om)
+        self._debug_repl.enter()
+        if self._debug_repl._quit:
+            raise SystemExit(0)
 
     def _init_state_store(self):
         """Initialize TradingStateStore from config if enabled."""
@@ -503,6 +529,11 @@ class AsyncEngine(BaseEngine):
                 logger.exception("on_tick raised an exception")
             finally:
                 self._queue.task_done()
+            # Enter the debug REPL between ticks if Ctrl-C was pressed.
+            # Runs in a thread so the event loop stays alive for WebSocket
+            # keepalives while the user is at the prompt.
+            if self._debug_requested:
+                await asyncio.to_thread(self._check_debug)
 
     @abstractmethod
     async def _connect(self):

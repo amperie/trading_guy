@@ -73,7 +73,12 @@
       "Bash(where pytest:*)",
       "Bash(.venv/Scripts/pytest:*)",
       "Bash(python3:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(.venv/bin/python -c \"from utils.debug_repl import DebugREPL; print\\('OK'\\)\")",
+      "Bash(.venv/bin/python -c \"from trading.engines.base_engine import BaseEngine, AsyncEngine; print\\('OK'\\)\")",
+      "Bash(.venv/bin/python -c \"from trading.engines.backtest_engine import BacktestingEngine; print\\('OK'\\)\")",
+      "Bash(.venv/bin/python -c \"from trading.core.algorithm import Algorithm; print\\('OK'\\)\")",
+      "Bash(uv run *)"
     ],
     "deny": [],
     "ask": []

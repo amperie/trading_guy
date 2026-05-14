@@ -284,6 +284,17 @@ class Algorithm(ABC):
         """
         raise NotImplementedError("on_data_logic needs to be overriden")
 
+    def get_indicator_dataframe(self):
+        """Return a DataFrame of calculated indicator values for debug dumps.
+
+        Override in your algorithm to expose indicator series to the debug
+        REPL's 'dump al.indicators' command. Return a pandas DataFrame with
+        at minimum a 'timestamp' column plus one column per indicator.
+
+        Returns None by default (no indicators exposed).
+        """
+        return None
+
     def reconfigure(self, new_params: dict) -> None:
         """Update algorithm parameters without losing price history.
 
