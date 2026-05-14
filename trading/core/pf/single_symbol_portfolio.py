@@ -67,6 +67,9 @@ class SingleSymbolPortfolio(Portfolio):
         logger.debug(f"[bracket] {symbol} price={price:.2f} cash={self.cash:.2f} signal={signal.type.name if signal else None} positions={list(self.positions.keys())}")
 
         if signal is not None and signal.type == SignalType.BUY:
+            if symbol in self.positions or self.find_active_bracket(symbol) is not None:
+                logger.debug(f"BUY signal for {symbol} ignored - active position or bracket already exists")
+                return TickResults(orders=[])
             available = self.buying_power if self.buying_power is not None else self.cash
             quantity = int(available / price)
             stop_price = price * (1.0 - stop_pct / 100.0)

@@ -52,12 +52,12 @@ def test_promote_run_writes_live_bundle(monkeypatch):
             },
             "order_manager": {
                 "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
-                "params": {},
+                "params": {"paper": False},
             },
             "analysis": {"enabled": True, "log_to_mlflow": True},
-            "state_store": {"enabled": False},
+            "state_store": {"enabled": False, "connection_uri": "mongodb://localhost:27017", "database": "live_trading"},
             "alpaca": {},
-            "aggregation": {"enabled": False},
+            "aggregation": {"enabled": True, "aggregation_period_minutes": 5},
             "optimization": {"enabled": True},
             "mlflow": {"tracking_uri": "http://localhost:5000"},
             "logging": {},
@@ -83,13 +83,22 @@ def test_promote_run_writes_live_bundle(monkeypatch):
 
         cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
         assert cfg["mode"] == "live"
-        assert cfg["analysis"]["enabled"] is False
-        assert cfg["analysis"]["log_to_mlflow"] is False
+        assert cfg["algorithm"]["algorithm"] == "pkg.algos.DemoAlgo"
+        assert cfg["algorithm"]["lookback"] == 10
+        assert cfg["algorithm"]["history_length"] == 20
+        assert cfg["analysis"]["enabled"] is True
+        assert cfg["analysis"]["log_to_mlflow"] is True
         assert cfg["state_store"]["enabled"] is True
         assert cfg["state_store"]["session_id"] == ""
-        assert cfg["optimization"]["enabled"] is False
-        assert cfg["order_manager"]["implementation"] == "trading.core.om.alpaca_om.AlpacaOrderManager"
+        assert cfg["state_store"]["connection_uri"] == "mongodb://localhost:27017"
+        assert cfg["order_manager"]["order_manager"] == "trading.core.om.alpaca_om.AlpacaOrderManager"
+        assert cfg["order_manager"]["paper"] is False
         assert cfg["alpaca"]["symbols_to_subscribe"] == ["SPY"]
+        assert "override_url" in cfg["alpaca"]
+        assert cfg["alpaca"]["override_url"] == "ws://hp.lan:8765"
+        assert cfg["alpaca"]["warmup"]["symbols"] == ["SPY"]
+        assert cfg["aggregation"]["enabled"] is True
+        assert cfg["aggregation"]["aggregation_period_minutes"] == 5
         assert cfg["algorithm"]["source_path"].startswith("trading/promoted/demo_promotion/")
         assert cfg["portfolio"]["source_path"].startswith("trading/promoted/demo_promotion/")
         assert (Path.cwd() / cfg["algorithm"]["source_path"]).exists()

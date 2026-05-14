@@ -5,6 +5,7 @@ import sys
 
 from trading.commands.analysis import run_analysis
 from trading.commands.common import (
+    adapt_live_config_to_mongo_backtest,
     apply_cli_overrides,
     apply_session_log_file,
     build_experiment_config,
@@ -25,6 +26,10 @@ def cmd_backtest(args: argparse.Namespace):
     raw_cfg = apply_cli_overrides(raw_cfg, args)
     apply_session_log_file(raw_cfg, args)
     validate_session_id(raw_cfg)
+    raw_cfg = adapt_live_config_to_mongo_backtest(
+        raw_cfg,
+        force=getattr(args, "mongo_backtest", False),
+    )
 
     creds = load_account_creds(args.account)
 
@@ -41,6 +46,12 @@ def cmd_backtest(args: argparse.Namespace):
 
     experiment = build_experiment_config(raw_cfg)
     built = ExperimentService.build(experiment)
+    if built.data_provider is None:
+        logger.error(
+            "Backtest requires a data_provider. "
+            "Pass a backtest config, or use mongo-backtest with a promoted/live bundle plus --session-id."
+        )
+        sys.exit(1)
 
     logger.info(
         f"Starting backtest with profile: {args.config} "
@@ -71,3 +82,11 @@ def cmd_backtest(args: argparse.Namespace):
         f"Cash: ${built.portfolio.cash:,.2f}, Positions: {list(built.portfolio.positions.keys())}"
     )
     run_analysis(raw_cfg, built.portfolio, built.order_manager, config_path=args.config)
+
+
+def cmd_mongo_backtest(args: argparse.Namespace):
+    if not getattr(args, "session_id", None):
+        logger.error("mongo-backtest requires --session-id <id>.")
+        sys.exit(1)
+    args.mongo_backtest = True
+    cmd_backtest(args)

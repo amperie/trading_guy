@@ -19,6 +19,7 @@ Inspect a specific command:
 
 ```bash
 python run.py backtest -h
+python run.py mongo-backtest -h
 python run.py live -h
 python run.py promote -h
 ```
@@ -28,6 +29,7 @@ python run.py promote -h
 `run.py` currently supports these subcommands:
 
 - `backtest`: run a historical simulation over a configured data source
+- `mongo-backtest`: run a historical simulation over bars already stored in MongoDB for a prior session
 - `live`: start a live Alpaca-driven trading session
 - `walk-forward`: run rolling out-of-sample evaluation
 - `hpo`: run a standalone hyperparameter search
@@ -55,6 +57,7 @@ Most commands use a shared set of flags:
 Important details:
 - `live` requires `--session-id`
 - `backtest` also supports `--data`
+- `mongo-backtest` requires `--session-id` and forces MongoDB bars plus the backtesting order manager
 - `hpo` also supports `--num-samples` and `--max-concurrent-trials`
 - `hpo-from-mlflow` and `promote` operate from MLflow run URLs instead of local config paths
 
@@ -109,6 +112,42 @@ When analysis logging is enabled, the system now attempts to log:
 - analysis outputs such as trades, charts, and reports
 
 Those extra config artifacts are important for later `promote` and `hpo-from-mlflow` flows.
+
+### Using a promoted bundle with `backtest`
+
+`backtest` can still accept a promoted live bundle plus `--session-id` and auto-adapt it onto MongoDB bars.
+
+Example:
+
+```bash
+python run.py backtest --config trading/promoted/winner_v1/winner_v1.yaml --account paper --session-id live-20260513-winner
+```
+
+Prefer `mongo-backtest` when you want that intent to be explicit.
+
+## Mongo Backtest
+
+Basic example:
+
+```bash
+python run.py mongo-backtest --config trading/promoted/winner_v1/winner_v1.yaml --account paper --session-id live-20260513-winner
+```
+
+What `mongo-backtest` does:
+- keeps the config file intact on disk
+- reuses the configured algorithm and portfolio wiring from that config
+- forces the runtime to use `MongoDBDataProvider`
+- forces the runtime to use `BacktestingOrderManager`
+- runs analysis and MLflow logging the same way `backtest` does
+
+Use this when:
+- you want a normal backtest execution path
+- the bar data already exists in MongoDB under a previous `session_id`
+- you want to run a promoted bundle unchanged instead of authoring a separate backtest YAML
+
+Important distinction:
+- `mongo-backtest` reuses MongoDB bars only
+- `session-replay` reconstructs more live-session context and also performs the Alpaca historical replay flow
 
 ## Live
 
@@ -297,6 +336,12 @@ python run.py promote --run-url http://localhost:5000/#/experiments/1/runs/<run_
 
 ```bash
 python run.py live --config trading/promoted/winner_v1/winner_v1.yaml --account paper --session-id live-20260513-winner
+```
+
+### Run the promoted config as a Mongo-backed backtest
+
+```bash
+python run.py mongo-backtest --config trading/promoted/winner_v1/winner_v1.yaml --account paper --session-id live-20260513-winner
 ```
 
 ### Replay the live session later

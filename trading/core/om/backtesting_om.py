@@ -185,11 +185,14 @@ class BacktestingOrderManager(OrderManager):
             raise ValueError("Backtesting OM requires positions to be set")
         # Process all orders and create a return value list of just the ones that changed
         ret_val = []
+        working_positions = self._clone_positions_snapshot(positions)
+        working_cash = pf_cash
         for order in orders.values():
             original_status = order.status
-            order = self._update_order_status_from_backend(order, current_tick, positions, pf_cash)
+            order = self._update_order_status_from_backend(order, current_tick, working_positions, working_cash)
             if order.status != original_status:
                 ret_val.append(order.order_id)
+                working_positions, working_cash = self._apply_order_to_snapshot(order, working_positions, working_cash)
         return ret_val
 
 

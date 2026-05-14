@@ -13,6 +13,7 @@ from trading.commands import (
     cmd_backtest,
     cmd_hpo,
     cmd_live,
+    cmd_mongo_backtest,
     cmd_promote,
     cmd_session_replay,
     cmd_walk_forward,
@@ -33,6 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
             "    --config --account [--data] [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
             "    [--no-mlflow] [--run-name] [--session-id] [--agg-period]\n"
             "    Example: python run.py backtest --config configs/example_backtest.yaml --account paper\n"
+            "    Example: python run.py backtest --config trading/promoted/my_live_bundle/my_live_bundle.yaml --account paper --session-id live-20260513-a\n"
+            "  mongo-backtest:\n"
+            "    Run a simulation against bars already stored in MongoDB for a prior session.\n"
+            "    --config --account --session-id [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
+            "    [--no-mlflow] [--run-name] [--agg-period]\n"
+            "    Example: python run.py mongo-backtest --config trading/promoted/my_live_bundle/my_live_bundle.yaml --account paper --session-id live-20260513-a\n"
             "  live:\n"
             "    Start a live trading session using the configured broker, strategy, and portfolio wiring.\n"
             "    --config --account [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
@@ -108,6 +115,17 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_p = subparsers.add_parser("backtest", parents=[shared], help="Run a backtest")
     backtest_p.add_argument("--data", help="Override data provider path")
     backtest_p.set_defaults(func=cmd_backtest)
+
+    mongo_backtest_p = subparsers.add_parser(
+        "mongo-backtest",
+        parents=[shared],
+        help="Run a backtest against MongoDB bars for a stored session",
+        description=(
+            "Reuse the algorithm and portfolio wiring from the provided config, but force the runtime "
+            "onto MongoDBDataProvider plus BacktestingOrderManager for the supplied session_id."
+        ),
+    )
+    mongo_backtest_p.set_defaults(func=cmd_mongo_backtest, mongo_backtest=True)
 
     live_p = subparsers.add_parser("live", parents=[shared], help="Run live trading")
     live_p.add_argument("--alpaca-override-url", dest="alpaca_override_url", help="Override Alpaca websocket URL")

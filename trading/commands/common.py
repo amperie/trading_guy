@@ -159,5 +159,36 @@ def validate_session_id(cfg: dict[str, Any]) -> None:
         sys.exit(1)
 
 
+def adapt_live_config_to_mongo_backtest(raw_cfg: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
+    """
+    Allow promoted live bundles to run through `backtest` unchanged.
+
+    Promoted configs are intentionally written as `mode: live` bundles with an
+    Alpaca order manager and no data_provider section. When a caller supplies a
+    session_id, reinterpret that bundle as a backtest over the stored MongoDB
+    ticks for that session.
+    """
+    cfg = copy.deepcopy(raw_cfg)
+    ss_cfg = cfg.get("state_store", {})
+    if not ss_cfg.get("session_id"):
+        return cfg
+
+    if not force and (cfg.get("mode") != "live" or cfg.get("data_provider")):
+        return cfg
+
+    cfg["mode"] = "backtest"
+    cfg["order_manager"] = {
+        "order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager",
+        "market_hours_only": True,
+    }
+    cfg["data_provider"] = {
+        "provider": "trading.data_providers.mongodb_data_provider.MongoDBDataProvider",
+        "session_id": ss_cfg["session_id"],
+        "connection_uri": ss_cfg.get("connection_uri"),
+        "database": ss_cfg.get("database"),
+    }
+    return cfg
+
+
 def build_experiment_config(raw_cfg: dict[str, Any]) -> ExperimentConfig:
     return ExperimentService.from_dict(raw_cfg)
