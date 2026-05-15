@@ -1,142 +1,60 @@
-logging:
-  level: INFO
-  console: true
-  file_logging: false
-  folder: logs
-  filename: trading.log
-  retention_days: 7
-  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-  quiet_loggers:
-  - websockets.client
-  - pymongo
-  - pymongo.connection
-  - pymongo.serverSelection
-mlflow:
-  enabled: true
-  tracking_uri: http://hp.lan:8899
-  experiment_name: Trading Backtest
-  auto_log_system_info: true
-state_store:
-  enabled: true
-  connection_uri: mongodb://hp.lan:27017
-  database: live_trading
-  session_id: ''
 mode: live
 algorithm:
-  implementation: VolatilityFilteredRsiMeanReversionAlgorithm
-  params:
-    symbol: UPRO
-    symbols:
-    - UPRO
-    tradable_symbols:
-    - UPRO
-    macro_symbols: []
-    regime_detection:
-      ma_short_period: 50
-      ma_long_period: 200
-      ma_proximity_tolerance: 0.02
-      atr_period: 14
-      atr_percentile_window: 20
-      atr_percentile_level: 50
-    rsi_config:
-      rsi_period: 14
-      rsi_oversold_threshold: 30
-      rsi_overbought_threshold: 70
-    price_confirmation:
-      reversal_bar_lookback: 2
-    history_length: 260
+  algorithm: VolatilityFilteredRsiMeanReversionAlgorithm
+  symbol: UPRO
+  symbols:
+  - UPRO
+  tradable_symbols:
+  - UPRO
+  macro_symbols: []
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+  price_confirmation:
+    reversal_bar_lookback: 2
+  history_length: 260
+  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/algorithm_VolatilityFilteredRsiMeanReversionAlgorithm.py
   class_name: VolatilityFilteredRsiMeanReversionAlgorithm
-  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py
 portfolio:
-  implementation: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
-  params:
-    cash: 100000.0
-    keep_history: true
-    stop_pct: 1.5
-    profit_pct: 2.0
-    tx_cost: 1.5
-    symbol: UPRO
-  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/single_symbol_portfolio.py
+  portfolio: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
+  cash: 100000.0
+  keep_history: true
+  stop_pct: 1.5
+  profit_pct: 2.0
+  tx_cost: 1.5
+  symbol: UPRO
+  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/portfolio_single_symbol_portfolio.py
   class_name: SingleSymbolPortfolio
 order_manager:
-  implementation: trading.core.om.alpaca_om.AlpacaOrderManager
-  params:
-    paper: true
-    time_in_force: day
-analysis:
-  enabled: false
-  log_to_mlflow: false
-  experiment_name: volatility_filtered_rsi_mean_reversion_backtest_HPO
-  run_name: volatility_filtered_rsi_mean_reversion_backtest
-  description: Recreated HPO from source MLflow run ddea820c81e843d1831ba531bd4c14ce
-    (http://hp.lan:8899/#/experiments/596060974901698399/runs/ddea820c81e843d1831ba531bd4c14ce)
-  benchmarks: {}
-  mlflow_policy:
-    annualized_return_threshold: 0.0
-    sample_negative_rate: 20
-aggregation:
-  enabled: false
-  aggregation_period_minutes: 1
-walk_forward:
-  optimization_window_days: 90
-  trading_window_days: 30
-  improvement_threshold_pct: 5.0
-  num_trials: 20
-  max_concurrent_trials: 4
-hpo:
-  objective_metric: sharpe_ratio
-  num_samples: 100
-  max_concurrent_trials: 8
-  algorithm_param_keys:
-  - rsi_period
-  - rsi_oversold_threshold
-  - rsi_overbought_threshold
-  - atr_percentile_window
-  - ma_proximity_tolerance
-  portfolio_param_keys:
-  - stop_pct
-  - profit_pct
-  search_space:
-    rsi_period:
-      type: randint
-      low: 5
-      high: 40
-    rsi_oversold_threshold:
-      type: randint
-      low: 10
-      high: 40
-    rsi_overbought_threshold:
-      type: randint
-      low: 60
-      high: 90
-    atr_percentile_window:
-      type: randint
-      low: 10
-      high: 50
-    ma_proximity_tolerance:
-      type: uniform
-      low: 0.01
-      high: 0.05
-    stop_pct:
-      type: uniform
-      low: 0.5
-      high: 20.0
-    profit_pct:
-      type: uniform
-      low: 0.5
-      high: 20.0
-  optimization_target: joint
-optimization:
-  target: joint
-  enabled: false
+  order_manager: trading.core.om.alpaca_om.AlpacaOrderManager
+  paper: true
+  time_in_force: day
 alpaca:
   api_key: ''
   secret_key: ''
-  symbols_to_subscribe:
+  symbols_to_subscribe: &id001
   - UPRO
   override_url: "ws://hp.lan:8765"
   subscribe_to_bars: true
   subscribe_to_quotes: false
   subscribe_to_trades: false
+  override_url: ws://hp.lan:8765
   warmup:
     provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+    symbols: *id001
+analysis:
+  enabled: true
+  log_to_mlflow: true
+state_store:
+  enabled: true
+  session_id: ''
+  connection_uri: mongodb://hp.lan:27017
+  database: live_trading

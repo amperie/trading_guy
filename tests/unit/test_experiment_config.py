@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from trading.commands.common import apply_cli_overrides
+from trading.commands.common import adapt_live_config_to_mongo_backtest, apply_cli_overrides
 from trading.config import component_loader
 from trading.config import ExperimentService
 from trading.experiments import ExperimentRequest, build_runtime, describe_experiment, load_experiment
@@ -182,6 +182,67 @@ def test_apply_cli_overrides_supports_new_style_sections():
     assert updated["state_store"]["session_id"] == "sess-123"
     assert updated["aggregation"]["aggregation_period_minutes"] == 15
     assert updated["aggregation"]["enabled"] is True
+
+
+def test_adapt_live_config_to_mongo_backtest_builds_runtime_sections():
+    raw = {
+        "mode": "live",
+        "algorithm": {
+            "algorithm": "tests.fixtures.custom_components.CustomAlgorithm",
+            "source_path": "trading/promoted/demo/algorithm_demo.py",
+        },
+        "portfolio": {
+            "portfolio": "tests.fixtures.custom_components.CustomPortfolio",
+            "source_path": "trading/promoted/demo/portfolio_demo.py",
+            "cash": 2500,
+        },
+        "order_manager": {
+            "order_manager": "trading.core.om.alpaca_om.AlpacaOrderManager",
+            "paper": True,
+        },
+        "state_store": {
+            "enabled": True,
+            "session_id": "live-demo-1",
+            "connection_uri": "mongodb://example:27017",
+            "database": "live_trading",
+        },
+    }
+
+    adapted = adapt_live_config_to_mongo_backtest(raw)
+
+    assert adapted["mode"] == "backtest"
+    assert adapted["algorithm"]["source_path"] == "trading/promoted/demo/algorithm_demo.py"
+    assert adapted["portfolio"]["source_path"] == "trading/promoted/demo/portfolio_demo.py"
+    assert adapted["order_manager"]["order_manager"] == "trading.core.om.backtesting_om.BacktestingOrderManager"
+    assert adapted["order_manager"]["market_hours_only"] is True
+    assert adapted["data_provider"]["provider"] == "trading.data_providers.mongodb_data_provider.MongoDBDataProvider"
+    assert adapted["data_provider"]["session_id"] == "live-demo-1"
+    assert adapted["data_provider"]["connection_uri"] == "mongodb://example:27017"
+    assert adapted["data_provider"]["database"] == "live_trading"
+
+
+def test_adapt_live_config_to_mongo_backtest_leaves_regular_backtest_unchanged():
+    raw = _legacy_backtest_config()
+    adapted = adapt_live_config_to_mongo_backtest(raw)
+
+    assert adapted == raw
+
+
+def test_adapt_live_config_to_mongo_backtest_force_rewrites_existing_runtime_sections():
+    raw = _legacy_backtest_config()
+    raw["state_store"] = {
+        "enabled": True,
+        "session_id": "mongo-force-1",
+        "connection_uri": "mongodb://example:27017",
+        "database": "live_trading",
+    }
+
+    adapted = adapt_live_config_to_mongo_backtest(raw, force=True)
+
+    assert adapted["mode"] == "backtest"
+    assert adapted["order_manager"]["order_manager"] == "trading.core.om.backtesting_om.BacktestingOrderManager"
+    assert adapted["data_provider"]["provider"] == "trading.data_providers.mongodb_data_provider.MongoDBDataProvider"
+    assert adapted["data_provider"]["session_id"] == "mongo-force-1"
 
 
 def test_remote_component_config_and_runtime(monkeypatch):

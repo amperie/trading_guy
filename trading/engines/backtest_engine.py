@@ -60,6 +60,7 @@ class BacktestingEngine(BaseEngine):
                 logger.info(f"Running iteration {iters} of {length} for timestamp {ts}")
 
             self.on_tick(tick)
+            self._check_debug()
 
         logger.info(
             f"Backtest complete: {iters} ticks processed"

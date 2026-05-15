@@ -91,7 +91,8 @@ h1 {
   gap: 12px;
 }
 
-input {
+input,
+select {
   flex: 1;
   background: var(--panel);
   border: 1px solid transparent;
@@ -99,9 +100,25 @@ input {
   color: var(--text);
   padding: 12px 14px;
   font-size: 0.95rem;
+  font-family: inherit;
 }
 
-input:focus {
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238d96b3' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+select option {
+  background: var(--panel);
+  color: var(--text);
+}
+
+input:focus,
+select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(255, 107, 61, 0.2);
@@ -246,6 +263,23 @@ button:hover {
   box-shadow: none;
   transform: none;
   border-color: rgba(255, 255, 255, 0.2);
+}
+
+.reset-zoom {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.reset-zoom:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: none;
+  transform: none;
 }
 
 .symbol-filters {

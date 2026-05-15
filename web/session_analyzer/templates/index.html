@@ -13,6 +13,8 @@
     <link rel="stylesheet" href="/static/app.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
   </head>
   <body>
     <div class="page">
@@ -28,10 +30,12 @@
           </div>
           <div class="session-input">
             <label for="dbName">Database</label>
-            <input id="dbName" type="text" placeholder="e.g. trading_z_desktop" />
+            <input id="dbName" type="text" placeholder="e.g. trading_z_desktop" value="live_trading" />
             <label for="sessionId">Session ID</label>
             <div class="session-controls">
-              <input id="sessionId" type="text" placeholder="paste session_id" />
+              <select id="sessionId">
+                <option value="">-- loading sessions --</option>
+              </select>
               <button id="loadBtn">Analyze</button>
             </div>
             <p id="status" class="status">Waiting for a session.</p>
@@ -97,6 +101,7 @@
             <div class="panel-actions">
               <button id="exportEquity">Export Equity CSV</button>
               <button id="exportJson">Export JSON</button>
+              <button id="resetEquity" class="reset-zoom">Reset Zoom</button>
             </div>
           </div>
           <canvas id="equityChart"></canvas>
@@ -104,14 +109,20 @@
         <div class="panel">
           <div class="panel-header">
             <h2>Drawdown</h2>
-            <p class="panel-note">Peak-to-trough depth</p>
+            <div class="panel-actions">
+              <p class="panel-note">Peak-to-trough depth</p>
+              <button id="resetDrawdown" class="reset-zoom">Reset Zoom</button>
+            </div>
           </div>
           <canvas id="drawdownChart"></canvas>
         </div>
         <div class="panel">
           <div class="panel-header">
             <h2>Returns Distribution</h2>
-            <p class="panel-note">Daily returns</p>
+            <div class="panel-actions">
+              <p class="panel-note">Daily returns</p>
+              <button id="resetReturns" class="reset-zoom">Reset Zoom</button>
+            </div>
           </div>
           <canvas id="returnsChart"></canvas>
         </div>
@@ -121,7 +132,10 @@
         <div class="panel wide">
           <div class="panel-header">
             <h2>Symbol Price Tape</h2>
-            <div id="symbolFilters" class="symbol-filters"></div>
+            <div class="panel-actions">
+              <div id="symbolFilters" class="symbol-filters"></div>
+              <button id="resetSymbol" class="reset-zoom">Reset Zoom</button>
+            </div>
           </div>
           <canvas id="symbolChart"></canvas>
         </div>

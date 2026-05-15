@@ -31,7 +31,7 @@ Implementations:
     - BacktestingOM:       Instant fills, simulated bracket logic
     - AlpacaOrderManager:  Live execution via Alpaca Trading API
 """
-from trading.core.classes import Order, PriceData, OrderStatus, Position, BracketOrder, OrderType
+from trading.core.classes import Order, PriceData, OrderStatus, Position, BracketOrder, OrderType, OrderAction
 from utils.utils import trim_dictionary
 from abc import ABC, abstractmethod
 from typing import final, Union
@@ -153,6 +153,52 @@ class OrderManager(ABC):
         """Every order ever submitted, regardless of current status."""
         return self._all_orders
 
+    def _clone_positions_snapshot(self, positions: dict[str, Position] | None) -> dict[str, Position]:
+        if positions is None:
+            return {}
+        return {
+            symbol: Position(pos.symbol, pos.quantity)
+            for symbol, pos in positions.items()
+        }
+
+    def _apply_order_to_snapshot(
+            self,
+            order: Union[BracketOrder, Order],
+            positions: dict[str, Position],
+            pf_cash: float) -> tuple[dict[str, Position], float]:
+        if order.type == OrderType.MARKET and order.status == OrderStatus.FILLED:
+            if order.action == OrderAction.BUY:
+                pf_cash -= order.cash + order.tx_cost
+                if order.symbol in positions:
+                    positions[order.symbol].quantity += order.quantity
+                else:
+                    positions[order.symbol] = Position(order.symbol, order.quantity)
+            elif order.action == OrderAction.SELL and order.symbol in positions:
+                pf_cash += order.cash - order.tx_cost
+                positions[order.symbol].quantity -= order.quantity
+                if positions[order.symbol].quantity <= 0:
+                    del positions[order.symbol]
+            return positions, pf_cash
+
+        if order.type == OrderType.BRACKET and order.status == OrderStatus.PENDING_SALE:
+            pf_cash -= order.cash + order.tx_cost
+            if order.symbol in positions:
+                positions[order.symbol].quantity += order.quantity
+            else:
+                positions[order.symbol] = Position(order.symbol, order.quantity)
+            return positions, pf_cash
+
+        if order.type == OrderType.BRACKET and order.status == OrderStatus.FILLED and order.SOLD_ORDER is not None:
+            so = order.SOLD_ORDER
+            if so.symbol in positions:
+                pf_cash += so.cash - so.tx_cost
+                positions[so.symbol].quantity -= so.quantity
+                if positions[so.symbol].quantity <= 0:
+                    del positions[so.symbol]
+            return positions, pf_cash
+
+        return positions, pf_cash
+
     @final
     def submit_order(
             self, order: Order, current_tick: list[PriceData] = None,
@@ -217,9 +263,12 @@ class OrderManager(ABC):
             List of submitted Order objects with statuses updated.
         """
         ret_val = []
+        working_positions = self._clone_positions_snapshot(positions)
+        working_cash = pf_cash
         for order in orders:
-            so = self.submit_order(order, current_tick, positions, pf_cash)
+            so = self.submit_order(order, current_tick, working_positions, working_cash)
             ret_val.append(so)
+            working_positions, working_cash = self._apply_order_to_snapshot(so, working_positions, working_cash)
         return ret_val
 
 

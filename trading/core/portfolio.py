@@ -198,6 +198,20 @@ class Portfolio(ABC):
         logger.info(f"Portfolio initialized - Cash: ${self.cash:,.2f}, Positions: {len(starting_positions or {})}, History: {keep_history}")
 
     @final
+    def find_active_bracket(self, symbol: str) -> BracketOrder | None:
+        """Return the currently active pending bracket for a symbol, if any."""
+        if self.om is None:
+            return None
+        for order in self.om.pending_orders_by_id.values():
+            if (
+                isinstance(order, BracketOrder)
+                and order.symbol == symbol
+                and order.status in {OrderStatus.PENDING, OrderStatus.PENDING_SALE}
+            ):
+                return order
+        return None
+
+    @final
     def get_price(self, symbol: str, tick: list[PriceData]) -> float | None:
         """
         Get the closing price for a symbol from the current tick, falling back
@@ -307,7 +321,7 @@ class Portfolio(ABC):
             raise Exception(f"Cannot SELL {order.symbol} - No position exists")
         if self.positions[order.symbol].quantity < order.quantity:
             logger.error(f"SELL {order.symbol} - Insufficient quantity (Have: {self.positions[order.symbol].quantity}, Need: {order.quantity})")
-            raise Exception("SELL {order.symbol} - Insufficient quantity")
+            raise Exception(f"SELL {order.symbol} - Insufficient quantity")
 
         self.cash = self.cash + order.cash - order.tx_cost
         self.positions[order.symbol].quantity -= order.quantity
@@ -315,7 +329,10 @@ class Portfolio(ABC):
             del self.positions[order.symbol]
         order.processed_by_portfolio = True
 
-        logger.info(f"SELL executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} (Proceeds: ${order.cash - order.tx_cost:,.2f})")
+        logger.info(
+            f"SELL executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} "
+            f"(Proceeds: ${order.cash - order.tx_cost:,.2f}) order_id={order.order_id}"
+        )
         remaining_qty = self.positions[order.symbol].quantity if order.symbol in self.positions else 0
         logger.debug(f"Cash after SELL: ${self.cash:,.2f}, Remaining position: {remaining_qty}")
 
@@ -361,7 +378,10 @@ class Portfolio(ABC):
                     logger.info(f"MARKET BUY order {order.symbol}: {order.quantity} @ ${order.price:.2f}")
                     return order
                 elif order.action == OrderAction.SELL:
-                    logger.info(f"MARKET SELL order {order.symbol}: {order.quantity} @ ${order.price:.2f}")
+                    logger.info(
+                        f"MARKET SELL order {order.symbol}: {order.quantity} @ ${order.price:.2f} "
+                        f"order_id={order.order_id}"
+                    )
                     self._update_pf_sell(order)
                     return order
                 else:
@@ -392,7 +412,8 @@ class Portfolio(ABC):
                 exit_type = "STOP-LOSS" if so.type == OrderType.STOP_LOSS else "PROFIT-TAKER" if so.type == OrderType.PROFIT_TAKER else "MANUAL"
                 logger.info(
                     f"BRACKET order {order.symbol} - Exited via {exit_type} @ ${so.price:.2f}///"
-                    f"${(so.price - order.price) * so.quantity:.2f} net"
+                    f"${(so.price - order.price) * so.quantity:.2f} net "
+                    f"parent_order_id={order.order_id} exit_order_id={so.order_id}"
                 )
                 return order
             else:

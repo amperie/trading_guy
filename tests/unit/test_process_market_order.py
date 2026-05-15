@@ -253,10 +253,56 @@ class TestBulkOrderStatusUpdate:
         assert b2.order_id in changed
         assert len(changed) == 2
 
+    def test_pending_bracket_entries_consume_cash_sequentially(self):
+        om = BacktestingOrderManager()
+        b1 = BracketOrder.create_bracket_order("AAPL", 55.0, 45.0, 150, 0.0, [_pd("AAPL", 50.0)])
+        b2 = BracketOrder.create_bracket_order("AAPL", 55.0, 45.0, 150, 0.0, [_pd("AAPL", 50.0)])
+        orders = {b1.order_id: b1, b2.order_id: b2}
+
+        changed = om._update_orders_statuses_from_backend(orders, [_pd("AAPL", 50.0)], {}, 10000.0)
+
+        assert changed == [b1.order_id, b2.order_id]
+        assert b1.status == OrderStatus.PENDING_SALE
+        assert b2.status == OrderStatus.PENDING_SALE
+        assert b1.quantity == 150
+        assert b2.quantity == 50
+
+    def test_pending_bracket_exits_consume_position_sequentially(self):
+        om = BacktestingOrderManager()
+        b1 = self._pending_sale_bracket("AAPL", 50.0, 40.0, 60.0, qty=60)
+        b2 = self._pending_sale_bracket("AAPL", 50.0, 40.0, 60.0, qty=60)
+        orders = {b1.order_id: b1, b2.order_id: b2}
+
+        changed = om._update_orders_statuses_from_backend(
+            orders,
+            [_pd("AAPL", 62.0)],
+            {"AAPL": Position("AAPL", 100)},
+            0.0,
+        )
+
+        assert changed == [b1.order_id, b2.order_id]
+        assert b1.SOLD_ORDER.quantity == 60
+        assert b2.SOLD_ORDER.quantity == 40
+
     def test_raises_when_tick_is_none(self):
         om = BacktestingOrderManager()
         with pytest.raises(ValueError):
             om._update_orders_statuses_from_backend({}, None, {}, 0.0)
+
+
+class TestSequentialSubmitOrders:
+
+    def test_submit_orders_consumes_cash_sequentially(self):
+        om = BacktestingOrderManager()
+        orders = [
+            _market_order("AAPL", OrderAction.BUY, 150),
+            _market_order("AAPL", OrderAction.BUY, 150),
+        ]
+
+        submitted = om.submit_orders(orders, [_pd("AAPL", 50.0)], {}, 10000.0)
+
+        assert submitted[0].quantity == 150
+        assert submitted[1].quantity == 50
 
     def test_raises_when_positions_is_none(self):
         om = BacktestingOrderManager()

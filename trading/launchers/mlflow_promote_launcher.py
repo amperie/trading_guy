@@ -15,6 +15,7 @@ from trading.launchers.mlflow_hpo_launcher import SourceRunContext, load_source_
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+REFERENCE_LIVE_CONFIG_PATH = Path("configs") / "example_live_spy_trend_macd.yaml"
 
 
 @dataclass(slots=True)
@@ -108,51 +109,150 @@ def _infer_symbols(cfg: dict[str, Any]) -> list[str]:
     return symbols
 
 
-def _build_live_config(source_context: SourceRunContext, bundle_name: str, promoted_dir: Path) -> dict[str, Any]:
-    cfg = copy.deepcopy(source_context.raw_config)
-    cfg["mode"] = "live"
-    cfg.pop("data_provider", None)
-    cfg.setdefault("optimization", {})["enabled"] = False
+def _load_reference_live_config() -> dict[str, Any]:
+    with open(REFERENCE_LIVE_CONFIG_PATH, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
 
-    analysis_cfg = cfg.setdefault("analysis", {})
-    analysis_cfg["enabled"] = False
-    analysis_cfg["log_to_mlflow"] = False
-    analysis_cfg.setdefault("run_name", f"{bundle_name}_live")
-    analysis_cfg.setdefault(
-        "description",
-        f"Promoted live config from MLflow run {source_context.run_id} ({source_context.source_url})",
+
+def _legacy_component_section(component: dict[str, Any], role: str) -> dict[str, Any]:
+    selector_key = {
+        "algorithm": "algorithm",
+        "portfolio": "portfolio",
+        "order_manager": "order_manager",
+    }[role]
+    implementation = component.get("implementation") or component.get(role)
+    section = {selector_key: implementation}
+    params = component.get("params", {})
+    if isinstance(params, dict):
+        section.update(copy.deepcopy(params))
+    if component.get("source_path"):
+        section["source_path"] = component["source_path"]
+    if component.get("class_name"):
+        section["class_name"] = component["class_name"]
+    return section
+
+
+def _minimal_state_store_section(source_cfg: dict[str, Any]) -> dict[str, Any]:
+    source_state = source_cfg.get("state_store", {})
+    section = {"enabled": True, "session_id": ""}
+    for key in ("connection_uri", "database"):
+        value = source_state.get(key)
+        if value:
+            section[key] = value
+    return section
+
+
+def _minimal_aggregation_section(source_cfg: dict[str, Any]) -> dict[str, Any] | None:
+    aggregation = source_cfg.get("aggregation", {})
+    if not aggregation.get("enabled", False):
+        return None
+    section = {"enabled": True}
+    for key in (
+        "aggregation_period_minutes",
+        "aggregation_start_minutes",
+        "use_market_open",
+        "market_open_hour",
+        "market_open_minute",
+        "batch_symbols",
+        "expected_symbols",
+        "batch_timeout_seconds",
+    ):
+        if key in aggregation:
+            section[key] = copy.deepcopy(aggregation[key])
+    return section
+
+
+def _minimal_alpaca_section(source_cfg: dict[str, Any], symbols: list[str], reference_cfg: dict[str, Any]) -> dict[str, Any]:
+    source_alpaca = source_cfg.get("alpaca", {})
+    reference_alpaca = reference_cfg.get("alpaca", {})
+
+    section = {
+        "api_key": "",
+        "secret_key": "",
+        "symbols_to_subscribe": symbols,
+        "subscribe_to_bars": source_alpaca.get(
+            "subscribe_to_bars",
+            reference_alpaca.get("subscribe_to_bars", True),
+        ),
+        "subscribe_to_quotes": source_alpaca.get(
+            "subscribe_to_quotes",
+            reference_alpaca.get("subscribe_to_quotes", False),
+        ),
+        "subscribe_to_trades": source_alpaca.get(
+            "subscribe_to_trades",
+            reference_alpaca.get("subscribe_to_trades", False),
+        ),
+        "override_url": source_alpaca.get(
+            "override_url",
+            reference_alpaca.get("override_url"),
+        ),
+    }
+
+    warmup_provider = source_alpaca.get("warmup", {}).get(
+        "provider",
+        reference_alpaca.get("warmup", {}).get(
+            "provider",
+            "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+        ),
     )
+    section["warmup"] = {
+        "provider": warmup_provider,
+        "symbols": symbols,
+    }
 
-    state_store_cfg = cfg.setdefault("state_store", {})
-    state_store_cfg["enabled"] = True
-    state_store_cfg["session_id"] = ""
+    timeframe = source_alpaca.get("warmup", {}).get("timeframe")
+    if timeframe:
+        section["warmup"]["timeframe"] = timeframe
 
-    alpaca_cfg = cfg.setdefault("alpaca", {})
-    alpaca_cfg["api_key"] = ""
-    alpaca_cfg["secret_key"] = ""
-    alpaca_cfg["symbols_to_subscribe"] = _infer_symbols(cfg)
-    alpaca_cfg.setdefault("subscribe_to_bars", True)
-    alpaca_cfg.setdefault("subscribe_to_quotes", False)
-    alpaca_cfg.setdefault("subscribe_to_trades", False)
-    warmup_cfg = alpaca_cfg.setdefault("warmup", {})
-    warmup_cfg.setdefault("provider", "trading.data_providers.alpaca_data_provider.AlpacaDataProvider")
+    return section
 
-    cfg["order_manager"] = {
+
+def _build_live_config(source_context: SourceRunContext, bundle_name: str, promoted_dir: Path) -> dict[str, Any]:
+    source_cfg = copy.deepcopy(source_context.raw_config)
+    reference_cfg = _load_reference_live_config()
+    symbols = _infer_symbols(source_cfg)
+
+    cfg = {"mode": "live"}
+
+    order_manager_cfg = source_cfg.get("order_manager", {})
+    reference_order_manager = reference_cfg.get("order_manager", {})
+
+    source_cfg["order_manager"] = {
         "implementation": "trading.core.om.alpaca_om.AlpacaOrderManager",
         "params": {
-            "paper": True,
-            "time_in_force": "day",
+            "paper": order_manager_cfg.get("params", {}).get(
+                "paper",
+                reference_order_manager.get("paper", True),
+            ),
+            "time_in_force": order_manager_cfg.get("params", {}).get(
+                "time_in_force",
+                reference_order_manager.get("time_in_force", "day"),
+            ),
         },
     }
 
     for role in ("algorithm", "portfolio"):
-        component = cfg.get(role)
+        component = source_cfg.get(role)
         if not isinstance(component, dict):
             continue
         promoted_rel_path = _copy_component_source(component, role, promoted_dir)
         if promoted_rel_path:
             component["source_path"] = promoted_rel_path
             component["class_name"] = _component_class_name(component, role)
+
+    cfg["algorithm"] = _legacy_component_section(source_cfg["algorithm"], "algorithm")
+    cfg["portfolio"] = _legacy_component_section(source_cfg["portfolio"], "portfolio")
+    cfg["order_manager"] = _legacy_component_section(source_cfg["order_manager"], "order_manager")
+    cfg["alpaca"] = _minimal_alpaca_section(source_cfg, symbols, reference_cfg)
+    cfg["analysis"] = {
+        "enabled": True,
+        "log_to_mlflow": True,
+    }
+    cfg["state_store"] = _minimal_state_store_section(source_cfg)
+
+    aggregation_section = _minimal_aggregation_section(source_cfg)
+    if aggregation_section:
+        cfg["aggregation"] = aggregation_section
 
     return cfg
 

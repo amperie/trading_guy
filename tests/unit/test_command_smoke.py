@@ -36,6 +36,7 @@ def test_cmd_backtest_smoke(monkeypatch):
     monkeypatch.setattr(backtest_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
     monkeypatch.setattr(backtest_cmd, "apply_session_log_file", lambda cfg, args: None)
     monkeypatch.setattr(backtest_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(backtest_cmd, "adapt_live_config_to_mongo_backtest", lambda cfg, force=False: cfg)
     monkeypatch.setattr(backtest_cmd, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
     monkeypatch.setattr(backtest_cmd, "build_experiment_config", lambda cfg: "normalized-config")
     monkeypatch.setattr(backtest_cmd.ExperimentService, "build", lambda cfg: built)
@@ -57,6 +58,27 @@ def test_cmd_backtest_smoke(monkeypatch):
     backtest_cmd.cmd_backtest(args)
 
     assert captured["engine"].ran is True
+
+
+def test_cmd_mongo_backtest_sets_flag_and_reuses_backtest(monkeypatch):
+    captured = {}
+
+    def fake_cmd_backtest(args):
+        captured["mongo_backtest"] = args.mongo_backtest
+        captured["session_id"] = args.session_id
+
+    monkeypatch.setattr(backtest_cmd, "cmd_backtest", fake_cmd_backtest)
+
+    args = SimpleNamespace(
+        config="cfg.yaml",
+        account="paper",
+        session_id="sess-1",
+        mongo_backtest=False,
+    )
+    backtest_cmd.cmd_mongo_backtest(args)
+
+    assert captured["mongo_backtest"] is True
+    assert captured["session_id"] == "sess-1"
 
 
 def test_cmd_live_smoke(monkeypatch):

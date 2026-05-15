@@ -96,6 +96,9 @@ python run.py live --config configs/example_live_self_optimizing.yaml
 # Replay a stored live session against Alpaca historical bars
 python run.py session-replay --config configs/example_session_replay.yaml --session-id <id>
 
+# Run a promoted or live-style config as a normal backtest using bars stored in MongoDB
+python run.py mongo-backtest --config trading/promoted/<bundle>/<bundle>.yaml --session-id <id>
+
 # Walk-forward backtest (rolling HPO + out-of-sample)
 python run.py walk-forward --config configs/example_walk_forward.yaml
 

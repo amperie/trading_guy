@@ -23,6 +23,21 @@ def test_build_parser_backtest_args():
     assert args.func is not None
 
 
+def test_build_parser_mongo_backtest_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "mongo-backtest",
+        "--config", "trading/promoted/winner_v1/winner_v1.yaml",
+        "--account", "paper",
+        "--session-id", "live-20260513-winner",
+    ])
+
+    assert args.command == "mongo-backtest"
+    assert args.session_id == "live-20260513-winner"
+    assert args.mongo_backtest is True
+    assert args.func is not None
+
+
 def test_build_parser_session_replay_args():
     parser = build_parser()
     args = parser.parse_args([
@@ -81,6 +96,8 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "--tracking-uri" in help_text
     assert "--editor vim" in help_text
     assert "promote" in help_text
+    assert "trading/promoted/my_live_bundle/my_live_bundle.yaml" in help_text
+    assert "mongo-backtest" in help_text
 
 
 def test_backtest_help_mentions_remote_component_options(capsys):
@@ -90,6 +107,16 @@ def test_backtest_help_mentions_remote_component_options(capsys):
     help_text = capsys.readouterr().out
     assert "--algorithm-url" in help_text
     assert "--portfolio-url" in help_text
+
+
+def test_mongo_backtest_help_mentions_session_id(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["mongo-backtest", "-h"])
+    help_text = capsys.readouterr().out
+    assert "--session-id" in help_text
+    assert "MongoDBDataProvider" in help_text
+    assert "BacktestingOrderManager" in help_text
 
 
 def test_hpo_from_mlflow_help_mentions_editor(capsys):

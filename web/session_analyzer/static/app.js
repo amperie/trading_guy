@@ -67,6 +67,20 @@ function histogram(data, buckets = 20) {
   return { labels, counts };
 }
 
+function zoomConfig(mode = "x") {
+  return {
+    zoom: {
+      wheel: { enabled: true },
+      pinch: { enabled: true },
+      mode,
+    },
+    pan: {
+      enabled: true,
+      mode,
+    },
+  };
+}
+
 function buildChart(id, config) {
   if (state.charts[id]) {
     state.charts[id].destroy();
@@ -193,6 +207,7 @@ function renderEquityChart() {
     options: {
       plugins: {
         legend: { labels: { color: "#c9d2ef" } },
+        zoom: zoomConfig("x"),
       },
       scales: {
         x: { type: "time", time: { tooltipFormat: "MMM d HH:mm" }, ticks: { color: "#8d96b3" } },
@@ -217,7 +232,7 @@ function renderEquityChart() {
       ],
     },
     options: {
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false }, zoom: zoomConfig("x") },
       scales: {
         x: { type: "time", ticks: { color: "#8d96b3" } },
         y: { ticks: { color: "#8d96b3", callback: (v) => `${v.toFixed(0)}%` } },
@@ -240,7 +255,7 @@ function renderEquityChart() {
       ],
     },
     options: {
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false }, zoom: zoomConfig("xy") },
       scales: {
         x: { ticks: { color: "#8d96b3" } },
         y: { ticks: { color: "#8d96b3" } },
@@ -269,7 +284,7 @@ function renderSymbolChart() {
     type: "line",
     data: { datasets },
     options: {
-      plugins: { legend: { labels: { color: "#c9d2ef" } } },
+      plugins: { legend: { labels: { color: "#c9d2ef" } }, zoom: zoomConfig("x") },
       scales: {
         x: { type: "time", ticks: { color: "#8d96b3" } },
         y: { ticks: { color: "#8d96b3" } },
@@ -286,6 +301,29 @@ function renderAll(data) {
   renderSymbols(data.symbols);
   renderEquityChart();
   renderSymbolChart();
+}
+
+async function loadSessionList() {
+  const db = $("dbName").value.trim();
+  const sel = $("sessionId");
+  sel.innerHTML = '<option value="">-- loading --</option>';
+  try {
+    const url = db ? `/api/sessions?db=${encodeURIComponent(db)}` : "/api/sessions";
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to list sessions");
+    const sessions = await res.json();
+    sel.innerHTML = '<option value="">-- select a session --</option>';
+    sessions.forEach((s) => {
+      const opt = document.createElement("option");
+      opt.value = s.session_id;
+      const date = s.created_at ? new Date(s.created_at).toLocaleString() : "";
+      opt.textContent = date ? `${s.name} (${date})` : s.name;
+      sel.appendChild(opt);
+    });
+    if (sessions.length > 0) sel.value = sessions[0].session_id;
+  } catch (err) {
+    sel.innerHTML = '<option value="">-- error loading sessions --</option>';
+  }
 }
 
 async function loadSession() {
@@ -348,21 +386,26 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   $("loadBtn").addEventListener("click", loadSession);
-  $("sessionId").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") loadSession();
-  });
   $("dbName").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") loadSession();
+    if (event.key === "Enter") loadSessionList();
   });
+  $("dbName").addEventListener("change", loadSessionList);
   $("exportEquity").addEventListener("click", exportEquityCsv);
   $("exportJson").addEventListener("click", exportJson);
+  $("resetEquity").addEventListener("click", () => state.charts["equityChart"]?.resetZoom());
+  $("resetDrawdown").addEventListener("click", () => state.charts["drawdownChart"]?.resetZoom());
+  $("resetReturns").addEventListener("click", () => state.charts["returnsChart"]?.resetZoom());
+  $("resetSymbol").addEventListener("click", () => state.charts["symbolChart"]?.resetZoom());
 
   const params = new URLSearchParams(window.location.search);
   const sessionId = params.get("session_id");
   const db = params.get("db");
   if (db) $("dbName").value = db;
-  if (sessionId) {
-    $("sessionId").value = sessionId;
-    loadSession();
-  }
+
+  loadSessionList().then(() => {
+    if (sessionId) {
+      $("sessionId").value = sessionId;
+      loadSession();
+    }
+  });
 });
