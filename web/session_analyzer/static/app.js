@@ -316,8 +316,12 @@ async function loadSessionList() {
     sessions.forEach((s) => {
       const opt = document.createElement("option");
       opt.value = s.session_id;
-      const date = s.created_at ? new Date(s.created_at).toLocaleString() : "";
-      opt.textContent = date ? `${s.name} (${date})` : s.name;
+      const name = s.name.length > 22 ? s.name.slice(0, 22) + "…" : s.name;
+      const d = s.created_at ? new Date(s.created_at) : null;
+      const date = d
+        ? `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`
+        : "";
+      opt.textContent = date ? `${name} (${date})` : name;
       sel.appendChild(opt);
     });
     if (sessions.length > 0) sel.value = sessions[0].session_id;

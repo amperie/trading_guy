@@ -32,12 +32,10 @@
             <label for="dbName">Database</label>
             <input id="dbName" type="text" placeholder="e.g. trading_z_desktop" value="live_trading" />
             <label for="sessionId">Session ID</label>
-            <div class="session-controls">
-              <select id="sessionId">
-                <option value="">-- loading sessions --</option>
-              </select>
-              <button id="loadBtn">Analyze</button>
-            </div>
+            <select id="sessionId">
+              <option value="">-- loading sessions --</option>
+            </select>
+            <button id="loadBtn">Analyze</button>
             <p id="status" class="status">Waiting for a session.</p>
           </div>
         </div>
