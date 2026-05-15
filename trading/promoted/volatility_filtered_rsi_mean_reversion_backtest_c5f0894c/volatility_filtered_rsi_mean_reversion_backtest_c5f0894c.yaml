@@ -42,6 +42,7 @@ alpaca:
   secret_key: ''
   symbols_to_subscribe: &id001
   - UPRO
+  override_url: "ws://hp.lan:8765"
   subscribe_to_bars: true
   subscribe_to_quotes: false
   subscribe_to_trades: false
