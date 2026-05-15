@@ -99,6 +99,27 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/sessions")
+def list_sessions():
+    try:
+        db = request.args.get("db") or None
+        store = _get_state_store(db=db)
+        sessions = store.list_sessions()
+        result = []
+        for s in sessions:
+            session_id = s.get("session_id") or str(s.get("_id", ""))
+            name = s.get("name") or session_id
+            created = s.get("created_at")
+            result.append({
+                "session_id": session_id,
+                "name": name,
+                "created_at": created.isoformat() if isinstance(created, datetime) else str(created or ""),
+            })
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/session/<session_id>")
 def session_data(session_id: str):
     try:
