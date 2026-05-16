@@ -140,6 +140,23 @@ button:hover {
   box-shadow: 0 12px 20px rgba(255, 107, 61, 0.3);
 }
 
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-range input {
+  flex: 1;
+  min-width: 0;
+}
+
+.date-sep {
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
 .status {
   font-size: 0.85rem;
   color: var(--muted);

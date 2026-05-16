@@ -44,6 +44,8 @@ def cmd_walk_forward(args: argparse.Namespace):
         "experiment_name": raw_cfg.get("analysis", {}).get("experiment_name", "Walk Forward Backtest"),
         "run_name": raw_cfg.get("analysis", {}).get("run_name", "WalkForward"),
         "description": raw_cfg.get("analysis", {}).get("description", ""),
+        "log_to_mlflow": raw_cfg.get("analysis", {}).get("log_to_mlflow", True),
+        "tracking_uri": raw_cfg.get("mlflow", {}).get("tracking_uri"),
         "state_store": raw_cfg.get("state_store", {}),
     }
 

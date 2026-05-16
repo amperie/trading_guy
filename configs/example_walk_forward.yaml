@@ -78,10 +78,10 @@ walk_forward:
   # Hyperparameter search space — these ranges are explored by Ray Tune + Optuna
   # Supported types: randint, uniform, choice, loguniform
   search_space:
-    macd_fastperiod:    { type: uniform, low: 5, high: 100 }
-    macd_slowperiod:    { type: uniform, low: 50, high: 500 }
-    macd_signalperiod:  { type: uniform, low: 5, high: 100 }
-    rsi_period:         { type: uniform, low: 5, high: 100 }
+    macd_fastperiod:    { type: randint, low: 5, high: 100 }
+    macd_slowperiod:    { type: randint, low: 50, high: 500 }
+    macd_signalperiod:  { type: randint, low: 5, high: 100 }
+    rsi_period:         { type: randint, low: 5, high: 100 }
     stop_pct:           { type: uniform, low: 1.0, high: 20.0 }
     profit_pct:         { type: uniform, low: 1.0, high: 25.0 }
 

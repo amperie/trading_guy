@@ -75,11 +75,15 @@ class WalkForwardEngine(BaseEngine):
         self.experiment_name = cfg.get("experiment_name", "Walk Forward Backtest")
         self.run_name = cfg.get("run_name", "WalkForward")
         self.description = cfg.get("description", "")
+        self.log_to_mlflow = cfg.get("log_to_mlflow", True)
+        self.tracking_uri = cfg.get("tracking_uri")
 
         # Store original configs for re-initialization
         self.original_dp_cfg = copy.deepcopy(dp.cfg) if dp else {}
         self.original_al_cfg = copy.deepcopy(al.cfg) if (al and hasattr(al, "cfg")) else {}
         self.original_pf_cfg = copy.deepcopy(pf.cfg) if (pf and hasattr(pf, "cfg")) else {}
+        self.original_al_history_length = getattr(al, "history_length", 0) if al else 0
+        self.original_pf_keep_history = getattr(pf, "keep_history", True) if pf else True
         self.starting_cash = pf.cash if pf else 0.0
 
         # Component classes
@@ -117,12 +121,12 @@ class WalkForwardEngine(BaseEngine):
 
         while True:
             opt_end = opt_start + timedelta(days=self.optimization_window_days)
-            trade_start = opt_end
+            trade_start = opt_end + timedelta(days=1)
             trade_end = trade_start + timedelta(days=self.trading_window_days)
 
             if trade_end > data_end:
                 # If we can fit at least some trading days, use remaining data
-                if trade_start < data_end:
+                if trade_start <= data_end:
                     trade_end = data_end
                 else:
                     break
@@ -151,19 +155,28 @@ class WalkForwardEngine(BaseEngine):
         dp_cfg["end_date"] = end.strftime("%Y-%m-%d")
         return self._dp_class(dp_cfg)
 
-    def _run_backtest(
-        self, al_cfg: dict, dp: DataProvider
-    ) -> dict:
-        """Run a single backtest with given config and return analysis results."""
-        om = self._om_class()
-        al = self._al_class(al_cfg)
-        pf = self._pf_class(
-            copy.deepcopy(self.original_pf_cfg),
+    def _build_algorithm(self, al_cfg: dict) -> Algorithm:
+        return self._al_class(
+            copy.deepcopy(al_cfg),
+            history_length=self.original_al_history_length,
+        )
+
+    def _build_portfolio(self, pf_cfg: dict, om: OrderManager) -> Portfolio:
+        return self._pf_class(
+            copy.deepcopy(pf_cfg),
             om,
             self.starting_cash,
             {},
-            True,
+            self.original_pf_keep_history,
         )
+
+    def _run_backtest(
+        self, al_cfg: dict, pf_cfg: dict, dp: DataProvider
+    ) -> dict:
+        """Run a single backtest with given config and return analysis results."""
+        om = self._om_class()
+        al = self._build_algorithm(al_cfg)
+        pf = self._build_portfolio(pf_cfg, om)
 
         engine = BacktestingEngine({}, dp, al, om, pf)
         engine.run()
@@ -346,12 +359,12 @@ class WalkForwardEngine(BaseEngine):
         if period_idx > 0:
             logger.info("Running baseline backtest with current params...")
             opt_dp_baseline = self._create_dp_for_range(opt_start, opt_end)
-            baseline_result = self._run_backtest(current_al_cfg, opt_dp_baseline)
+            baseline_result = self._run_backtest(current_al_cfg, current_pf_cfg, opt_dp_baseline)
             current_metric = baseline_result["metrics"].annualized_return or 0.0
 
             logger.info("Running HPO-best backtest on opt window...")
             opt_dp_best = self._create_dp_for_range(opt_start, opt_end)
-            best_result = self._run_backtest(best_al_cfg, opt_dp_best)
+            best_result = self._run_backtest(best_al_cfg, best_pf_cfg, opt_dp_best)
             best_metric = best_result["metrics"].annualized_return or 0.0
 
             # 4. Decide whether to adopt
@@ -386,15 +399,9 @@ class WalkForwardEngine(BaseEngine):
         logger.info("Running out-of-sample trading backtest...")
         trade_dp = self._create_dp_for_range(trade_start, trade_end)
 
-        # Update pf_cfg with the chosen portfolio params
-        pf_cfg_for_trade = copy.deepcopy(self.original_pf_cfg)
-        for key in self.portfolio_param_keys:
-            if key in trade_pf_cfg:
-                pf_cfg_for_trade[key] = trade_pf_cfg[key]
-
         om = self._om_class()
-        al = self._al_class(trade_al_cfg)
-        pf = self._pf_class(pf_cfg_for_trade, om, self.starting_cash, {}, True)
+        al = self._build_algorithm(trade_al_cfg)
+        pf = self._build_portfolio(trade_pf_cfg, om)
 
         trade_engine = BacktestingEngine({}, trade_dp, al, om, pf)
         trade_engine.run()
@@ -509,7 +516,13 @@ class WalkForwardEngine(BaseEngine):
         """Try to create an MLflow client from config."""
         try:
             from utils.mlflow_client import MLflowClient
-            return MLflowClient.from_config()
+            if not self.log_to_mlflow:
+                return None
+            return MLflowClient(
+                experiment_name=self.experiment_name,
+                tracking_uri=self.tracking_uri,
+                enabled=True,
+            )
         except Exception:
             logger.warning("MLflow client not available — results will not be logged")
             return None

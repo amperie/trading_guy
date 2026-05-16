@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from trading.commands import backtest as backtest_cmd
 from trading.commands import live as live_cmd
+from trading.commands import walk_forward as walk_forward_cmd
 
 
 class StubEngine:
@@ -128,3 +129,53 @@ def test_cmd_live_smoke(monkeypatch):
     live_cmd.cmd_live(args)
 
     assert captured["engine"].ran is True
+
+
+def test_cmd_walk_forward_passes_mlflow_settings(monkeypatch):
+    raw_cfg = {
+        "mode": "walk-forward",
+        "analysis": {
+            "experiment_name": "WF Experiment",
+            "run_name": "WF Run",
+            "description": "WF Desc",
+            "log_to_mlflow": False,
+        },
+        "mlflow": {"tracking_uri": "http://mlflow.local"},
+        "walk_forward": {"optimization_window_days": 30},
+        "state_store": {"enabled": False},
+        "data_provider": {"provider": "dummy.Provider"},
+    }
+    built = SimpleNamespace(
+        data_provider=object(),
+        algorithm=object(),
+        order_manager=object(),
+        portfolio=SimpleNamespace(total_value=1000.0, cash=500.0, positions={}),
+    )
+    captured = {}
+
+    monkeypatch.setattr(walk_forward_cmd, "load_raw_config", lambda path: dict(raw_cfg))
+    monkeypatch.setattr(walk_forward_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(walk_forward_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(walk_forward_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(walk_forward_cmd, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
+    monkeypatch.setattr(walk_forward_cmd, "build_experiment_config", lambda cfg: "normalized-config")
+    monkeypatch.setattr(walk_forward_cmd.ExperimentService, "build", lambda cfg: built)
+    monkeypatch.setattr(
+        walk_forward_cmd.ExperimentService,
+        "describe",
+        lambda cfg: SimpleNamespace(config_hash="hash9012"),
+    )
+
+    def fake_engine(*args, **kwargs):
+        engine = StubEngine(*args, **kwargs)
+        engine.run = lambda: {"aggregate": {}}
+        captured["engine"] = engine
+        return engine
+
+    monkeypatch.setattr(walk_forward_cmd, "WalkForwardEngine", fake_engine)
+
+    args = SimpleNamespace(config="cfg.yaml", account="paper", session_id=None)
+    walk_forward_cmd.cmd_walk_forward(args)
+
+    assert captured["engine"].kwargs["cfg"]["log_to_mlflow"] is False
+    assert captured["engine"].kwargs["cfg"]["tracking_uri"] == "http://mlflow.local"

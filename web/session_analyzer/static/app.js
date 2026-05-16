@@ -1,5 +1,6 @@
 const state = {
   raw: null,
+  filtered: null,
   charts: {},
   symbols: [],
   selectedSymbols: new Set(),
@@ -176,7 +177,7 @@ function renderSymbols(symbols) {
 }
 
 function renderEquityChart() {
-  const equitySeries = parseSeries(state.raw.portfolio.total_value);
+  const equitySeries = parseSeries(state.filtered.portfolio.total_value);
   const datasets = [
     {
       label: "Portfolio",
@@ -188,7 +189,7 @@ function renderEquityChart() {
     },
   ];
 
-  const spySeries = state.raw.symbols.SPY ? parseSeries(state.raw.symbols.SPY) : null;
+  const spySeries = state.filtered.symbols.SPY ? parseSeries(state.filtered.symbols.SPY) : null;
   if (spySeries && spySeries.length) {
     const scale = equitySeries.length ? equitySeries[0].y / spySeries[0].y : 1;
     const normalizedSpy = spySeries.map((pt) => ({ x: pt.x, y: pt.y * scale }));
@@ -269,7 +270,7 @@ function renderSymbolChart() {
   const datasets = [];
   let colorIndex = 0;
   state.selectedSymbols.forEach((symbol) => {
-    const series = state.raw.symbols[symbol];
+    const series = state.filtered.symbols[symbol];
     if (!series) return;
     datasets.push({
       label: symbol,
@@ -298,7 +299,7 @@ function renderNormalizedSymbolChart() {
   const datasets = [];
   let colorIndex = 0;
   state.selectedSymbols.forEach((symbol) => {
-    const series = state.raw.symbols[symbol];
+    const series = state.filtered.symbols[symbol];
     if (!series || series.length === 0) return;
     const firstPrice = series[0].y;
     datasets.push({
@@ -332,15 +333,133 @@ function renderNormalizedSymbolChart() {
   });
 }
 
-function renderAll(data) {
-  state.raw = data;
-  renderMetadata(data.session, data.orders);
-  renderMetrics(data.metrics, data.benchmark || {});
-  renderTradeTable(data.trades);
-  renderSymbols(data.symbols);
+function filterSeries(series, start, end) {
+  return series.filter((pt) => {
+    const t = new Date(pt.x);
+    return (!start || t >= start) && (!end || t <= end);
+  });
+}
+
+function recomputeMetrics(equitySeries, trades) {
+  if (!equitySeries.length) return {};
+  const values = equitySeries.map((pt) => pt.y);
+  const first = values[0];
+  const last = values[values.length - 1];
+  const totalReturn = ((last - first) / first) * 100;
+
+  let peak = -Infinity;
+  let maxDD = 0;
+  for (const v of values) {
+    peak = Math.max(peak, v);
+    const dd = peak ? ((v - peak) / peak) * 100 : 0;
+    maxDD = Math.min(maxDD, dd);
+  }
+
+  const dailyReturns = [];
+  for (let i = 1; i < values.length; i++) {
+    dailyReturns.push(((values[i] - values[i - 1]) / values[i - 1]) * 100);
+  }
+  const mean = dailyReturns.length ? dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length : 0;
+  const variance = dailyReturns.length
+    ? dailyReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / dailyReturns.length
+    : 0;
+  const std = Math.sqrt(variance);
+  const sharpe = std ? (mean / std) * Math.sqrt(252) : null;
+  const downReturns = dailyReturns.filter((r) => r < 0);
+  const downStd = Math.sqrt(
+    downReturns.length ? downReturns.reduce((a, b) => a + b ** 2, 0) / downReturns.length : 0
+  );
+  const sortino = downStd ? (mean / downStd) * Math.sqrt(252) : null;
+
+  const startDate = new Date(equitySeries[0].x);
+  const endDate = new Date(equitySeries[equitySeries.length - 1].x);
+  const years = (endDate - startDate) / (365.25 * 24 * 3600 * 1000);
+  const annualizedReturn = years > 0 ? (Math.pow(last / first, 1 / years) - 1) * 100 : totalReturn;
+  const calmar = maxDD ? annualizedReturn / Math.abs(maxDD) : null;
+
+  const winning = trades.filter((t) => t.pnl > 0);
+  const losing = trades.filter((t) => t.pnl < 0);
+  const winRate = trades.length ? (winning.length / trades.length) * 100 : null;
+  const avgTradePnl = trades.length ? trades.reduce((a, t) => a + t.pnl, 0) / trades.length : null;
+  const grossProfit = winning.reduce((a, t) => a + t.pnl, 0);
+  const grossLoss = Math.abs(losing.reduce((a, t) => a + t.pnl, 0));
+  const profitFactor = grossLoss ? grossProfit / grossLoss : null;
+
+  return {
+    total_return_pct: totalReturn,
+    annualized_return: annualizedReturn,
+    sharpe_ratio: sharpe,
+    sortino_ratio: sortino,
+    max_drawdown_pct: maxDD,
+    calmar_ratio: calmar,
+    volatility: std * Math.sqrt(252),
+    win_rate: winRate,
+    profit_factor: profitFactor,
+    total_trades: trades.length,
+    avg_trade_pnl: avgTradePnl,
+  };
+}
+
+function recomputeBenchmark(equitySeries, spySeries) {
+  if (!spySeries || !spySeries.length || !equitySeries.length) return {};
+  const startDate = new Date(equitySeries[0].x);
+  const endDate = new Date(equitySeries[equitySeries.length - 1].x);
+  const filteredSpy = spySeries.filter((pt) => {
+    const t = new Date(pt.x);
+    return t >= startDate && t <= endDate;
+  });
+  if (!filteredSpy.length) return {};
+  const spyReturn = ((filteredSpy[filteredSpy.length - 1].y - filteredSpy[0].y) / filteredSpy[0].y) * 100;
+  const portfolioReturn = ((equitySeries[equitySeries.length - 1].y - equitySeries[0].y) / equitySeries[0].y) * 100;
+  return { _comparison: { alpha: portfolioReturn - spyReturn, outperformance: portfolioReturn > spyReturn } };
+}
+
+function applyDateFilter(raw, start, end) {
+  if (!start && !end) return raw;
+  const filteredValue = filterSeries(raw.portfolio.total_value, start, end);
+  const filteredCash = filterSeries(raw.portfolio.cash, start, end);
+  const filteredSymbols = {};
+  for (const [sym, series] of Object.entries(raw.symbols)) {
+    filteredSymbols[sym] = filterSeries(series, start, end);
+  }
+  const filteredTrades = raw.trades.filter((t) => {
+    const entry = new Date(t.entry_time);
+    return (!start || entry >= start) && (!end || entry <= end);
+  });
+  return {
+    ...raw,
+    portfolio: { total_value: filteredValue, cash: filteredCash },
+    symbols: filteredSymbols,
+    trades: filteredTrades,
+    metrics: recomputeMetrics(filteredValue, filteredTrades),
+    benchmark: recomputeBenchmark(filteredValue, filteredSymbols.SPY),
+  };
+}
+
+function applyAndRender() {
+  if (!state.raw) return;
+  const fromVal = $("dateFrom").value;
+  const toVal = $("dateTo").value;
+  const start = fromVal ? new Date(fromVal) : null;
+  const end = toVal ? new Date(toVal + "T23:59:59") : null;
+  state.filtered = applyDateFilter(state.raw, start, end);
+  const d = state.filtered;
+  renderMetadata(d.session, d.orders);
+  renderMetrics(d.metrics, d.benchmark || {});
+  renderTradeTable(d.trades);
+  renderSymbols(d.symbols);
   renderEquityChart();
   renderSymbolChart();
   renderNormalizedSymbolChart();
+}
+
+function renderAll(data) {
+  state.raw = data;
+  const firstTs = data.portfolio.total_value[0]?.x;
+  const lastTs = data.portfolio.total_value[data.portfolio.total_value.length - 1]?.x;
+  if (firstTs) $("dateFrom").value = firstTs.slice(0, 10);
+  if (lastTs) $("dateTo").value = lastTs.slice(0, 10);
+  applyAndRender();
 }
 
 async function loadSessionList() {
@@ -393,10 +512,10 @@ async function loadSession() {
 }
 
 function exportEquityCsv() {
-  if (!state.raw) return;
+  if (!state.filtered) return;
   const rows = [["timestamp", "total_value", "cash"]];
-  const values = state.raw.portfolio.total_value;
-  const cash = state.raw.portfolio.cash;
+  const values = state.filtered.portfolio.total_value;
+  const cash = state.filtered.portfolio.cash;
   for (let i = 0; i < values.length; i++) {
     rows.push([values[i].x, values[i].y, cash[i] ? cash[i].y : ""]);
   }
@@ -412,8 +531,8 @@ function exportEquityCsv() {
 }
 
 function exportJson() {
-  if (!state.raw) return;
-  const blob = new Blob([JSON.stringify(state.raw, null, 2)], {
+  if (!state.filtered) return;
+  const blob = new Blob([JSON.stringify(state.filtered, null, 2)], {
     type: "application/json",
   });
   const url = URL.createObjectURL(blob);
@@ -436,6 +555,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("dbName").addEventListener("change", loadSessionList);
   $("exportEquity").addEventListener("click", exportEquityCsv);
   $("exportJson").addEventListener("click", exportJson);
+  $("dateFrom").addEventListener("change", applyAndRender);
+  $("dateTo").addEventListener("change", applyAndRender);
   $("resetEquity").addEventListener("click", () => state.charts["equityChart"]?.resetZoom());
   $("resetDrawdown").addEventListener("click", () => state.charts["drawdownChart"]?.resetZoom());
   $("resetReturns").addEventListener("click", () => state.charts["returnsChart"]?.resetZoom());

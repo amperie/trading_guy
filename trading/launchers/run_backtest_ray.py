@@ -19,6 +19,12 @@ from ray.tune.search.optuna import OptunaSearch
 logger = Logger().get_logger(__name__)
 
 
+def _build_algorithm(algorithm_class: Type[Algorithm], alg_cfg: dict) -> Algorithm:
+    alg_cfg_local = dict(alg_cfg)
+    history_length = alg_cfg_local.pop("history_length", 0)
+    return algorithm_class(alg_cfg_local, history_length=history_length)
+
+
 def create_multiple_backtests(
     algorithm_class: Type[Algorithm] = MacdRsiAlgorithm,
     portfolio_class: Type[Portfolio] = SingleSymbolPortfolio,
@@ -124,7 +130,7 @@ def run_backtest_core(
     print(f"Running backtest for {backtest_cfg}")
 
     om = order_manager_class()
-    al = algorithm_class(alg_cfg)
+    al = _build_algorithm(algorithm_class, alg_cfg)
     dp = data_provider_class(dp_cfg)
     pf = portfolio_class(pf_cfg, om, starting_cash, {}, True)
 

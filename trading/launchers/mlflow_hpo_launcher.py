@@ -510,7 +510,7 @@ def log_hpo_launcher_summary(
 
 
 def prompt_for_hpo_launch(source_context: SourceRunContext) -> str:
-    default_experiment_name = f"{source_context.run_name}_HPO"
+    default_experiment_name = "hpo_from_mlflow"
     return _prompt("MLflow experiment name for the recreated HPO", default_experiment_name)
 
 
