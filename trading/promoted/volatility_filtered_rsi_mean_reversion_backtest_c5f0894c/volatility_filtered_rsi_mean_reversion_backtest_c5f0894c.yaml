@@ -33,7 +33,7 @@ portfolio:
   symbol: UPRO
   source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/portfolio_single_symbol_portfolio.py
   class_name: SingleSymbolPortfolio
-order_manager:
+order_manager:add another
   order_manager: trading.core.om.alpaca_om.AlpacaOrderManager
   paper: true
   time_in_force: day

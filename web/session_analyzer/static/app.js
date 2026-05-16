@@ -169,6 +169,7 @@ function renderSymbols(symbols) {
         btn.classList.add("active");
       }
       renderSymbolChart();
+      renderNormalizedSymbolChart();
     });
     filters.appendChild(btn);
   });
@@ -293,6 +294,44 @@ function renderSymbolChart() {
   });
 }
 
+function renderNormalizedSymbolChart() {
+  const datasets = [];
+  let colorIndex = 0;
+  state.selectedSymbols.forEach((symbol) => {
+    const series = state.raw.symbols[symbol];
+    if (!series || series.length === 0) return;
+    const firstPrice = series[0].y;
+    datasets.push({
+      label: symbol,
+      data: parseSeries(series).map((pt) => ({
+        x: pt.x,
+        y: ((pt.y - firstPrice) / firstPrice) * 100,
+      })),
+      borderColor: palette[colorIndex % palette.length],
+      tension: 0.25,
+      fill: false,
+    });
+    colorIndex += 1;
+  });
+
+  buildChart("normalizedChart", {
+    type: "line",
+    data: { datasets },
+    options: {
+      plugins: { legend: { labels: { color: "#c9d2ef" } }, zoom: zoomConfig("x") },
+      scales: {
+        x: { type: "time", ticks: { color: "#8d96b3" } },
+        y: {
+          ticks: {
+            color: "#8d96b3",
+            callback: (v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}%`,
+          },
+        },
+      },
+    },
+  });
+}
+
 function renderAll(data) {
   state.raw = data;
   renderMetadata(data.session, data.orders);
@@ -301,6 +340,7 @@ function renderAll(data) {
   renderSymbols(data.symbols);
   renderEquityChart();
   renderSymbolChart();
+  renderNormalizedSymbolChart();
 }
 
 async function loadSessionList() {
@@ -400,6 +440,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("resetDrawdown").addEventListener("click", () => state.charts["drawdownChart"]?.resetZoom());
   $("resetReturns").addEventListener("click", () => state.charts["returnsChart"]?.resetZoom());
   $("resetSymbol").addEventListener("click", () => state.charts["symbolChart"]?.resetZoom());
+  $("resetNormalized").addEventListener("click", () => state.charts["normalizedChart"]?.resetZoom());
 
   const params = new URLSearchParams(window.location.search);
   const sessionId = params.get("session_id");
