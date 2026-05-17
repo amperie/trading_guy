@@ -40,7 +40,7 @@ order_manager:
 alpaca:
   api_key: ''
   secret_key: ''
-  symbols_to_subscribe: &id001
+  symbols_to_subscribe:
   - UPRO
   subscribe_to_bars: true
   subscribe_to_quotes: false
@@ -48,7 +48,7 @@ alpaca:
   override_url: ws://hp.lan:8765
   warmup:
     provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
-    symbols: *id001
+    symbols: ["UPRO"]
 analysis:
   enabled: true
   log_to_mlflow: true
