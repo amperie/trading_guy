@@ -33,7 +33,7 @@ portfolio:
   symbol: UPRO
   source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/portfolio_single_symbol_portfolio.py
   class_name: SingleSymbolPortfolio
-order_manager:add another
+order_manager:
   order_manager: trading.core.om.alpaca_om.AlpacaOrderManager
   paper: true
   time_in_force: day
@@ -42,7 +42,6 @@ alpaca:
   secret_key: ''
   symbols_to_subscribe: &id001
   - UPRO
-  override_url: "ws://hp.lan:8765"
   subscribe_to_bars: true
   subscribe_to_quotes: false
   subscribe_to_trades: false
