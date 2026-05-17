@@ -1,4 +1,4 @@
-# Walk-forward backtest with MACD RSI algorithm and weekly HPO re-optimization
+# Walk-forward backtest with MACD RSI algorithm and periodic HPO re-optimization
 #
 # Usage:
 #   python run.py walk-forward --config configs/example_walk_forward.yaml
@@ -19,7 +19,8 @@
 #
 # Requirements:
 #   - ray[tune], optuna (pip install "ray[tune]" optuna)
-#   - Data file at the path below (multi-symbol CSV with timestamp, symbol, OHLCV columns)
+#   - alpaca-py
+#   - Alpaca API credentials via accounts.yaml / --account or directly below
 #
 # MLflow output:
 #   - Parent run: "MACD_RSI_WalkForward_aggregate" with mean return, Sharpe, total trades
@@ -28,15 +29,20 @@
 mode: walk-forward
 
 # ---------------------------------------------------------------------------
-# Data provider — historical CSV with SPY 5-minute bars
+# Data provider - Alpaca historical bars
 # ---------------------------------------------------------------------------
 data_provider:
-  provider: "trading.data_providers.test_data_provider.TestDataProvider"
-  path: "data/SPY_5min.csv"
-  truncate: 0  # 0 = use all data
+  provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+  symbols: ["SPY"]
+  timeframe: "Minute"
+  start_date: "2026-01-01"
+  end_date: "2026-03-31"
+  adjustment: "split"
+  market_hours_only: true
+  # api_key / secret_key are filled from the selected account when using --account
 
 # ---------------------------------------------------------------------------
-# Algorithm — MACD RSI with default starting parameters
+# Algorithm - MACD RSI with default starting parameters
 # The walk-forward engine will override these with HPO-optimized values
 # ---------------------------------------------------------------------------
 algorithm:
@@ -48,7 +54,7 @@ algorithm:
   extra_history_period: 200
 
 # ---------------------------------------------------------------------------
-# Portfolio — single-symbol with bracket orders (stop-loss + profit-taker)
+# Portfolio - single-symbol with bracket orders (stop-loss + profit-taker)
 # stop_pct and profit_pct are also tuned by HPO
 # ---------------------------------------------------------------------------
 portfolio:
@@ -60,7 +66,7 @@ portfolio:
   profit_pct: 10.0
 
 # ---------------------------------------------------------------------------
-# Order manager — backtesting (instant fills)
+# Order manager - backtesting (instant fills)
 # ---------------------------------------------------------------------------
 order_manager:
   order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
@@ -69,13 +75,13 @@ order_manager:
 # Walk-forward configuration
 # ---------------------------------------------------------------------------
 walk_forward:
-  optimization_window_days: 90   # Days of data used for HPO at each period
-  trading_window_days: 30        # Days of out-of-sample trading after each HPO
-  improvement_threshold_pct: 5.0 # Only adopt new params if improvement >= this %
-  num_trials: 50                 # Number of Ray Tune trials per optimization period
-  max_concurrent_trials: 8       # Parallel Ray workers
+  optimization_window_days: 90
+  trading_window_days: 30
+  improvement_threshold_pct: 5.0
+  num_trials: 50
+  max_concurrent_trials: 8
 
-  # Hyperparameter search space — these ranges are explored by Ray Tune + Optuna
+  # Hyperparameter search space explored by Ray Tune + Optuna
   # Supported types: randint, uniform, choice, loguniform
   search_space:
     macd_fastperiod:    { type: randint, low: 5, high: 100 }
@@ -85,7 +91,6 @@ walk_forward:
     stop_pct:           { type: uniform, low: 1.0, high: 20.0 }
     profit_pct:         { type: uniform, low: 1.0, high: 25.0 }
 
-  # Which search_space keys go to which component
   algorithm_param_keys:
     - macd_fastperiod
     - macd_slowperiod
@@ -96,11 +101,11 @@ walk_forward:
     - profit_pct
 
 # ---------------------------------------------------------------------------
-# Analysis / MLflow — results are logged per-period as nested runs
+# Analysis / MLflow - results are logged per-period as nested runs
 # ---------------------------------------------------------------------------
 analysis:
   enabled: true
   log_to_mlflow: true
   experiment_name: "MACD RSI Walk-Forward"
   run_name: "MACD_RSI_WalkForward"
-  description: "Walk-forward optimization for MACD RSI strategy on SPY 5min data"
+  description: "Walk-forward optimization for MACD RSI strategy on SPY Alpaca minute bars"
