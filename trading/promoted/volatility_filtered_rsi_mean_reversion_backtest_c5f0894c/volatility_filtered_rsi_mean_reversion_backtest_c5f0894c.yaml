@@ -21,7 +21,7 @@ algorithm:
   price_confirmation:
     reversal_bar_lookback: 2
   history_length: 260
-  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/algorithm_VolatilityFilteredRsiMeanReversionAlgorithm.py
+  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py
   class_name: VolatilityFilteredRsiMeanReversionAlgorithm
 portfolio:
   portfolio: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
@@ -31,7 +31,7 @@ portfolio:
   profit_pct: 2.0
   tx_cost: 1.5
   symbol: UPRO
-  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/portfolio_single_symbol_portfolio.py
+  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/single_symbol_portfolio.py
   class_name: SingleSymbolPortfolio
 order_manager:
   order_manager: trading.core.om.alpaca_om.AlpacaOrderManager

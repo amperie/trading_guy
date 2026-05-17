@@ -81,10 +81,6 @@ def _copy_component_source(
     target_dir.mkdir(parents=True, exist_ok=True)
     source_name = source_path.name
     target_name = source_name
-    if role == "portfolio" and (target_dir / target_name).exists():
-        target_name = f"portfolio_{source_name}"
-    if role == "algorithm" and (target_dir / target_name).exists():
-        target_name = f"algorithm_{source_name}"
 
     destination = target_dir / target_name
     shutil.copy2(source_path, destination)

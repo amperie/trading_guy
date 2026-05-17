@@ -9,12 +9,12 @@
     "algorithm": {
       "implementation": "VolatilityFilteredRsiMeanReversionAlgorithm",
       "class_name": "VolatilityFilteredRsiMeanReversionAlgorithm",
-      "source_path": "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/algorithm_VolatilityFilteredRsiMeanReversionAlgorithm.py"
+      "source_path": "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py"
     },
     "portfolio": {
       "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
       "class_name": "SingleSymbolPortfolio",
-      "source_path": "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/portfolio_single_symbol_portfolio.py"
+      "source_path": "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/single_symbol_portfolio.py"
     }
   }
 }
