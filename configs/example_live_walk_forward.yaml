@@ -68,6 +68,7 @@ optimization:
   objective_metric: annualized_return
   num_trials: 25
   max_concurrent_trials: 8
+  log_ray_worker_output: true
 
   search_space:
     macd_fast_period:   { type: randint, low: 5,  high: 25 }

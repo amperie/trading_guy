@@ -450,6 +450,7 @@ def tune_backtest_hyperparameters(
     num_samples: int = 50,
     max_concurrent_trials: int = 8,
     log_to_mlflow: bool = False,
+    log_ray_worker_output: bool = True,
 ) -> dict:
     """
     Generic hyperparameter optimization using Ray Tune with Optuna.
@@ -490,6 +491,7 @@ def tune_backtest_hyperparameters(
         ignore_reinit_error=True,
         dashboard_host="0.0.0.0",
         dashboard_port=8265,
+        log_to_driver=log_ray_worker_output,
     )
 
     # Bind all parameters to the objective function

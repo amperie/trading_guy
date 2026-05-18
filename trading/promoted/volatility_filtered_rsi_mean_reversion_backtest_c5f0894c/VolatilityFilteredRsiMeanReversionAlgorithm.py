@@ -19,25 +19,30 @@ class VolatilityFilteredRsiMeanReversionAlgorithm(Algorithm):
 
         # Regime detection config
         regime_cfg = self.cfg.get("regime_detection", {})
-        self.ma_short_period = regime_cfg.get("ma_short_period", 50)
-        self.ma_long_period = regime_cfg.get("ma_long_period", 200)
+        self.ma_short_period = self._coerce_int(regime_cfg.get("ma_short_period", 50))
+        self.ma_long_period = self._coerce_int(regime_cfg.get("ma_long_period", 200))
         self.ma_proximity_tolerance = regime_cfg.get("ma_proximity_tolerance", 0.02)
-        self.atr_period = regime_cfg.get("atr_period", 14)
-        self.atr_percentile_window = regime_cfg.get("atr_percentile_window", 20)
-        self.atr_percentile_level = regime_cfg.get("atr_percentile_level", 50)
+        self.atr_period = self._coerce_int(regime_cfg.get("atr_period", 14))
+        self.atr_percentile_window = self._coerce_int(regime_cfg.get("atr_percentile_window", 20))
+        self.atr_percentile_level = self._coerce_int(regime_cfg.get("atr_percentile_level", 50))
 
         # RSI config
         rsi_cfg = self.cfg.get("rsi_config", {})
-        self.rsi_period = rsi_cfg.get("rsi_period", 14)
-        self.rsi_oversold_threshold = rsi_cfg.get("rsi_oversold_threshold", 30)
-        self.rsi_overbought_threshold = rsi_cfg.get("rsi_overbought_threshold", 70)
+        self.rsi_period = self._coerce_int(rsi_cfg.get("rsi_period", 14))
+        self.rsi_oversold_threshold = self._coerce_int(rsi_cfg.get("rsi_oversold_threshold", 30))
+        self.rsi_overbought_threshold = self._coerce_int(rsi_cfg.get("rsi_overbought_threshold", 70))
 
         # Price confirmation config
         price_cfg = self.cfg.get("price_confirmation", {})
-        self.reversal_bar_lookback = price_cfg.get("reversal_bar_lookback", 2)
+        self.reversal_bar_lookback = self._coerce_int(price_cfg.get("reversal_bar_lookback", 2))
 
         # Internal ATR history for percentile calculation
         self.atr_history = {}
+
+    @staticmethod
+    def _coerce_int(value) -> int:
+        """Coerce HPO-sampled numeric values into integer periods/thresholds."""
+        return int(round(float(value)))
 
     def _calculate_atr(self, highs: deque, lows: deque, closes: deque, period: int) -> float:
         """Calculate Average True Range."""
@@ -229,31 +234,35 @@ class VolatilityFilteredRsiMeanReversionAlgorithm(Algorithm):
         super().reconfigure(new_params)
 
         regime_cfg = self.cfg.get("regime_detection", {})
-        self.ma_short_period = regime_cfg.get("ma_short_period", self.ma_short_period)
-        self.ma_long_period = regime_cfg.get("ma_long_period", self.ma_long_period)
+        self.ma_short_period = self._coerce_int(
+            regime_cfg.get("ma_short_period", self.ma_short_period)
+        )
+        self.ma_long_period = self._coerce_int(
+            regime_cfg.get("ma_long_period", self.ma_long_period)
+        )
         self.ma_proximity_tolerance = regime_cfg.get(
             "ma_proximity_tolerance", self.ma_proximity_tolerance
         )
-        self.atr_period = regime_cfg.get("atr_period", self.atr_period)
-        self.atr_percentile_window = regime_cfg.get(
-            "atr_percentile_window", self.atr_percentile_window
+        self.atr_period = self._coerce_int(regime_cfg.get("atr_period", self.atr_period))
+        self.atr_percentile_window = self._coerce_int(
+            regime_cfg.get("atr_percentile_window", self.atr_percentile_window)
         )
-        self.atr_percentile_level = regime_cfg.get(
-            "atr_percentile_level", self.atr_percentile_level
+        self.atr_percentile_level = self._coerce_int(
+            regime_cfg.get("atr_percentile_level", self.atr_percentile_level)
         )
 
         rsi_cfg = self.cfg.get("rsi_config", {})
-        self.rsi_period = rsi_cfg.get("rsi_period", self.rsi_period)
-        self.rsi_oversold_threshold = rsi_cfg.get(
-            "rsi_oversold_threshold", self.rsi_oversold_threshold
+        self.rsi_period = self._coerce_int(rsi_cfg.get("rsi_period", self.rsi_period))
+        self.rsi_oversold_threshold = self._coerce_int(
+            rsi_cfg.get("rsi_oversold_threshold", self.rsi_oversold_threshold)
         )
-        self.rsi_overbought_threshold = rsi_cfg.get(
-            "rsi_overbought_threshold", self.rsi_overbought_threshold
+        self.rsi_overbought_threshold = self._coerce_int(
+            rsi_cfg.get("rsi_overbought_threshold", self.rsi_overbought_threshold)
         )
 
         price_cfg = self.cfg.get("price_confirmation", {})
-        self.reversal_bar_lookback = price_cfg.get(
-            "reversal_bar_lookback", self.reversal_bar_lookback
+        self.reversal_bar_lookback = self._coerce_int(
+            price_cfg.get("reversal_bar_lookback", self.reversal_bar_lookback)
         )
 
 

@@ -124,8 +124,9 @@ class MLflowClient:
         mlflow.set_tracking_uri(self.tracking_uri)
 
         # Create or get experiment
-        self.experiment = self._get_or_create_experiment()
-        self.experiment_id = self.experiment.experiment_id
+        self.experiment = None
+        self.experiment_id = None
+        self._refresh_experiment()
 
         # Track active run
         self._active_run = None
@@ -147,7 +148,7 @@ class MLflowClient:
         return cls(experiment_name=experiment_name)
 
     def _get_or_create_experiment(self):
-        """Get existing experiment or create new one"""
+        """Get existing experiment or create new one."""
         experiment = mlflow.get_experiment_by_name(self.experiment_name)
 
         if experiment is None:
@@ -160,11 +161,19 @@ class MLflowClient:
                 experiment_id = mlflow.create_experiment(self.experiment_name)
 
             experiment = mlflow.get_experiment(experiment_id)
-            logger.info(f"Created new MLflow experiment: {self.experiment_name}")
+            logger.info(f"Created new MLflow experiment: {self.experiment_name} ({experiment_id})")
         else:
-            logger.info(f"Using existing MLflow experiment: {self.experiment_name}")
+            logger.info(
+                f"Using existing MLflow experiment: {self.experiment_name} ({experiment.experiment_id})"
+            )
 
         return experiment
+
+    def _refresh_experiment(self):
+        """Resolve and cache the current experiment id, creating it when missing."""
+        self.experiment = self._get_or_create_experiment()
+        self.experiment_id = self.experiment.experiment_id
+        return self.experiment
 
     def _log_system_info(self):
         """Log system and environment information"""
@@ -214,11 +223,27 @@ class MLflowClient:
         if run_name and self.run_name_prefix:
             run_name = f"{self.run_name_prefix}{run_name}"
 
-        self._active_run = mlflow.start_run(
-            experiment_id=self.experiment_id,
-            run_name=run_name,
-            nested=nested
-        )
+        # Re-resolve the experiment before creating a run in case the cached
+        # experiment id is stale or the server lost state since client init.
+        self._refresh_experiment()
+
+        try:
+            self._active_run = mlflow.start_run(
+                experiment_id=self.experiment_id,
+                run_name=run_name,
+                nested=nested
+            )
+        except Exception as exc:
+            logger.warning(
+                f"MLflow start_run failed for experiment '{self.experiment_name}' "
+                f"(id={self.experiment_id}). Re-resolving experiment and retrying once: {exc}"
+            )
+            self._refresh_experiment()
+            self._active_run = mlflow.start_run(
+                experiment_id=self.experiment_id,
+                run_name=run_name,
+                nested=nested
+            )
         self._run_id = self._active_run.info.run_id
 
         # Log description as a tag if provided

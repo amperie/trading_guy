@@ -38,6 +38,7 @@ class LiveWalkForwardEngine:
         self.objective_metric = optimization_cfg.get("objective_metric", "annualized_return")
         self.num_trials = optimization_cfg.get("num_trials", 50)
         self.max_concurrent_trials = optimization_cfg.get("max_concurrent_trials", 8)
+        self.log_ray_worker_output = optimization_cfg.get("log_ray_worker_output", True)
         self.adoption_policy = optimization_cfg.get("adoption_policy", "next_optimization_boundary")
 
         self._search_space_cfg = optimization_cfg.get("search_space", {})
@@ -168,6 +169,7 @@ class LiveWalkForwardEngine:
                 num_samples=self.num_trials,
                 max_concurrent_trials=self.max_concurrent_trials,
                 log_to_mlflow=False,
+                log_ray_worker_output=self.log_ray_worker_output,
             )
 
             challenger_al_cfg = apply_tunable_config(

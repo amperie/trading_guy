@@ -77,6 +77,7 @@ class SelfOptimizingLiveEngine:
         self.improvement_threshold_pct = optimization_cfg.get("improvement_threshold_pct", 5.0)
         self.num_trials = optimization_cfg.get("num_trials", 50)
         self.max_concurrent_trials = optimization_cfg.get("max_concurrent_trials", 8)
+        self.log_ray_worker_output = optimization_cfg.get("log_ray_worker_output", True)
 
         self._search_space_cfg = optimization_cfg.get("search_space", {})
         self.algorithm_param_keys = optimization_cfg.get("algorithm_param_keys", [])
@@ -183,6 +184,7 @@ class SelfOptimizingLiveEngine:
                 num_samples=self.num_trials,
                 max_concurrent_trials=self.max_concurrent_trials,
                 log_to_mlflow=False,
+                log_ray_worker_output=self.log_ray_worker_output,
             )
 
             logger.info(f"HPO complete. Best config: {best_config}")
