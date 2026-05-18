@@ -1,0 +1,11 @@
+{
+  "confidence_threshold": 0.6165103601113788,
+  "lasso_c_parameter": 0.017321461151394723,
+  "max_features_to_select": 585,
+  "mi_percentile_threshold": 47139,
+  "mi_target_window": 3474,
+  "position_size_pct": 1.3926544453207113,
+  "position_size_scaling": 0.5015090877646162,
+  "profit_pct": 12.012731182512663,
+  "stop_pct": 11.831821871639798
+}

@@ -1,0 +1,10 @@
+{
+  "adx_period": 10326,
+  "bb_period": 429,
+  "logistic_c": 5.5707862973751086,
+  "logistic_probability_threshold": 0.7160004593030298,
+  "macd_fast": 2062,
+  "macd_slow": 25858,
+  "rsi_period": 12922,
+  "volatility_period": 16039
+}

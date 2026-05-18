@@ -1,0 +1,11 @@
+{
+  "atr_percentile_threshold": 15133,
+  "base_position_size_pct": 1.0963847608150326,
+  "confirmation_bars": 2302,
+  "exit_rsi_threshold": 8207,
+  "max_bars_held": 1574,
+  "profit_pct": 3.4096381317757802,
+  "rsi_oversold_threshold": 4932,
+  "rsi_period": 6342,
+  "stop_pct": 7.274641650692091
+}

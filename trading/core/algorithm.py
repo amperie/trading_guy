@@ -295,6 +295,18 @@ class Algorithm(ABC):
         """
         return None
 
+    def get_bias(self, data: list[PriceData] | None = None) -> float:
+        """Return the algorithm's current directional bias on a [-1, 1] scale.
+
+        This hook is optional and exists primarily for ensemble/meta-strategy
+        use cases. A value of +1 indicates maximum bullish conviction, -1
+        indicates maximum bearish conviction, and 0 indicates neutral/no edge.
+
+        Existing algorithms do not need to override this method; the default
+        implementation returns 0.0 so legacy behavior remains unchanged.
+        """
+        return 0.0
+
     def reconfigure(self, new_params: dict) -> None:
         """Update algorithm parameters without losing price history.
 

@@ -1,0 +1,13 @@
+{
+  "hold_period_bars": 4605,
+  "kmeans_k": 335,
+  "pca_n_components": 204,
+  "position_size_pct": 3.389697580617164,
+  "profit_pct": 13.46153814580074,
+  "reversion_rsi_high": 48964,
+  "reversion_rsi_low": 13212,
+  "stop_pct": 14.04180230130411,
+  "trend_adx_threshold": 12056,
+  "trend_sma_fast": 8801,
+  "trend_sma_slow": 9144
+}

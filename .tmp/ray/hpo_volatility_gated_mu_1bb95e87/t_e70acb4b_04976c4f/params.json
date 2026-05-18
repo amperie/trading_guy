@@ -1,0 +1,15 @@
+{
+  "adx_scaling_factor": 1.029206034454941,
+  "hold_period_bars": 94,
+  "position_size_pct": 3.857692283579261,
+  "profit_pct": 11.956705068709732,
+  "reversion_rsi_threshold_high": 31352,
+  "reversion_rsi_threshold_low": 12329,
+  "stop_pct": 4.367349481406056,
+  "trend_adx_threshold": 7716,
+  "trend_sma_fast": 8256,
+  "trend_sma_slow": 30273,
+  "vol_lookback_bars": 19094,
+  "vol_percentile_high": 51618,
+  "vol_percentile_low": 49719
+}

@@ -1,0 +1,124 @@
+logging:
+  level: INFO
+  console: true
+  file_logging: false
+  folder: logs
+  filename: trading.log
+  retention_days: 7
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  quiet_loggers:
+  - websockets.client
+  - pymongo
+  - pymongo.connection
+  - pymongo.serverSelection
+mlflow:
+  enabled: true
+  tracking_uri: http://hp.lan:8899
+  experiment_name: Trading Backtest
+  auto_log_system_info: true
+state_store:
+  enabled: false
+  connection_uri: mongodb://hp.lan:27017
+  database: live_trading
+  session_id: live_UPRO_UPRO_SPXU
+mode: hpo
+algorithm:
+  implementation: BollingerBandsPercentAlgorithm
+  params:
+    symbol: UPRO
+    symbols:
+    - UPRO
+    tradable_symbols:
+    - UPRO
+    macro_symbols: []
+    bb_period: 20
+    bb_std_dev: 2.0
+    bb_percent_threshold_lower: 0.1
+    bb_percent_threshold_upper: 0.9
+    bb_signal_strength: 0.5
+    history_length: 490
+  class_name: BollingerBandsPercentAlgorithm
+  source_path: C:\Users\pablo\AppData\Local\Temp\tmpfuobzcu8\BollingerBandsPercentAlgorithm.py
+portfolio:
+  implementation: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
+  params:
+    cash: 100000.0
+    keep_history: true
+    stop_pct: 2.0
+    profit_pct: 3.0
+    tx_cost: 0.001
+    symbol: UPRO
+order_manager:
+  implementation: trading.core.om.backtesting_om.BacktestingOrderManager
+  params: {}
+data_provider:
+  implementation: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+  params:
+    provider: alpaca
+    api_key: '***redacted***'
+    secret_key: '***redacted***'
+    symbols:
+    - UPRO
+    timeframe: Minute
+    adjustment: split
+    market_hours_only: true
+    start_date: '2023-01-01'
+    end_date: '2025-12-31'
+    limit: 400000
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: hpo_from_mlflow
+  run_name: 'BB% threshold: backtest [0.1, 0.2, 0.3]_backtest'
+  description: Recreated HPO from source MLflow run 40f22a93dffc447e86b37525dbd2065d
+    (http://hp.lan:8899/#/experiments/596060974901698399/runs/40f22a93dffc447e86b37525dbd2065d)
+  benchmarks: {}
+  mlflow_policy:
+    annualized_return_threshold: 0.0
+    sample_negative_rate: 20
+aggregation:
+  enabled: false
+  aggregation_period_minutes: 1
+walk_forward:
+  optimization_window_days: 90
+  trading_window_days: 30
+  improvement_threshold_pct: 5.0
+  num_trials: 20
+  max_concurrent_trials: 4
+hpo:
+  objective_metric: annualized_return
+  num_samples: 36
+  max_concurrent_trials: 4
+  log_progress: true
+  progress_report_interval_seconds: 15
+  algorithm_param_keys:
+  - bb_period
+  - bb_std_dev
+  - bb_percent_threshold_lower
+  - bb_percent_threshold_upper
+  - bb_signal_strength
+  portfolio_param_keys: []
+  search_space:
+    bb_period:
+      type: randint
+      low: 1
+      high: 20001
+    bb_std_dev:
+      type: uniform
+      low: 1.0
+      high: 4.0
+    bb_percent_threshold_lower:
+      type: uniform
+      low: 0.0
+      high: 0.3
+    bb_percent_threshold_upper:
+      type: uniform
+      low: 0.7
+      high: 1.0
+    bb_signal_strength:
+      type: uniform
+      low: 0.3
+      high: 0.9
+  optimization_target: algorithm
+optimization:
+  target: algorithm

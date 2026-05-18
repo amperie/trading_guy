@@ -1,4 +1,5 @@
-# Walk-forward backtest with MACD RSI algorithm and periodic HPO re-optimization
+# Walk-forward backtest with the promoted volatility-filtered RSI mean-reversion
+# algorithm and periodic HPO re-optimization
 #
 # Usage:
 #   python run.py walk-forward --config configs/example_walk_forward.yaml
@@ -23,7 +24,8 @@
 #   - Alpaca API credentials via accounts.yaml / --account or directly below
 #
 # MLflow output:
-#   - Parent run: "MACD_RSI_WalkForward_aggregate" with mean return, Sharpe, total trades
+#   - Parent run: "VolatilityFilteredRSIMeanReversion_WalkForward_aggregate"
+#     with mean return, Sharpe, total trades
 #   - Nested runs: one per period with per-period metrics, HPO best config, adopted flag
 
 mode: walk-forward
@@ -35,27 +37,40 @@ data_provider:
   provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
   symbols: ["SPY"]
   timeframe: "Minute"
-  start_date: "2026-01-01"
-  end_date: "2026-03-31"
+  start_date: "2025-01-01"
+  end_date: "2026-05-17"
   adjustment: "split"
   market_hours_only: true
   # api_key / secret_key are filled from the selected account when using --account
 
 # ---------------------------------------------------------------------------
-# Algorithm - MACD RSI with default starting parameters
-# The walk-forward engine will override these with HPO-optimized values
+# Algorithm - promoted volatility-filtered RSI mean-reversion strategy
+# The current walk-forward engine only applies tuned values to top-level config
+# keys, so this example keeps algorithm settings fixed and tunes portfolio exits.
 # ---------------------------------------------------------------------------
 algorithm:
-  algorithm: "trading.core.algorithms.macd_rsi_algorithm.MacdRsiAlgorithm"
-  macd_fastperiod: 12
-  macd_slowperiod: 26
-  macd_signalperiod: 9
-  rsi_period: 14
-  extra_history_period: 200
+  algorithm: "VolatilityFilteredRsiMeanReversionAlgorithm"
+  source_path: "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py"
+  class_name: "VolatilityFilteredRsiMeanReversionAlgorithm"
+  symbol: "SPY"
+  history_length: 260
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+  price_confirmation:
+    reversal_bar_lookback: 2
 
 # ---------------------------------------------------------------------------
 # Portfolio - single-symbol with bracket orders (stop-loss + profit-taker)
-# stop_pct and profit_pct are also tuned by HPO
+# stop_pct and profit_pct are tuned by HPO
 # ---------------------------------------------------------------------------
 portfolio:
   portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
@@ -84,18 +99,10 @@ walk_forward:
   # Hyperparameter search space explored by Ray Tune + Optuna
   # Supported types: randint, uniform, choice, loguniform
   search_space:
-    macd_fastperiod:    { type: randint, low: 5, high: 100 }
-    macd_slowperiod:    { type: randint, low: 50, high: 500 }
-    macd_signalperiod:  { type: randint, low: 5, high: 100 }
-    rsi_period:         { type: randint, low: 5, high: 100 }
     stop_pct:           { type: uniform, low: 1.0, high: 20.0 }
     profit_pct:         { type: uniform, low: 1.0, high: 25.0 }
 
-  algorithm_param_keys:
-    - macd_fastperiod
-    - macd_slowperiod
-    - macd_signalperiod
-    - rsi_period
+  algorithm_param_keys: []
   portfolio_param_keys:
     - stop_pct
     - profit_pct
@@ -106,6 +113,6 @@ walk_forward:
 analysis:
   enabled: true
   log_to_mlflow: true
-  experiment_name: "MACD RSI Walk-Forward"
-  run_name: "MACD_RSI_WalkForward"
-  description: "Walk-forward optimization for MACD RSI strategy on SPY Alpaca minute bars"
+  experiment_name: "Volatility Filtered RSI Mean Reversion Walk-Forward"
+  run_name: "VolatilityFilteredRSIMeanReversion_WalkForward"
+  description: "Walk-forward optimization for the promoted volatility-filtered RSI mean-reversion strategy on SPY Alpaca minute bars"

@@ -1,0 +1,11 @@
+{
+  "arima_d_range": 1,
+  "arima_p_range": 2,
+  "arima_q_range": 4,
+  "ci_multiplier": 2.4853840971910017,
+  "forecast_horizon": 2032,
+  "gmm_n_regimes": 832,
+  "position_size_pct": 1.4365340682336245,
+  "profit_pct": 19.067655007995427,
+  "stop_pct": 8.074102746480182
+}

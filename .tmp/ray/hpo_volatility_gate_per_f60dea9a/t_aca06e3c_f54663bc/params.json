@@ -1,0 +1,5 @@
+{
+  "volatility_lookback_days": 5460,
+  "volatility_percentile_gate": 54593,
+  "volatility_period": 19983
+}

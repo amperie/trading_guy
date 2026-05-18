@@ -1,0 +1,150 @@
+logging:
+  level: INFO
+  console: true
+  file_logging: false
+  folder: logs
+  filename: trading.log
+  retention_days: 7
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  quiet_loggers:
+  - websockets.client
+  - pymongo
+  - pymongo.connection
+  - pymongo.serverSelection
+mlflow:
+  enabled: true
+  tracking_uri: http://hp.lan:8899
+  experiment_name: Trading Backtest
+  auto_log_system_info: true
+state_store:
+  enabled: false
+  connection_uri: mongodb://hp.lan:27017
+  database: live_trading
+  session_id: live_SPY_UPRO_SPXU
+mode: hpo
+algorithm:
+  implementation: AdxMomentumFilterEmaAlgorithm
+  params:
+    symbol: SPY
+    symbols:
+    - SPY
+    tradable_symbols:
+    - SPY
+    macro_symbols: []
+    adx_config:
+      adx_period: 14
+      trend_threshold: 25
+      strong_trend_threshold: 35
+      weak_trend_lower_bound: 20
+    strong_trend_ema_params:
+      fast_ema_period: 8
+      mid_ema_period: 40
+      slow_ema_period: 100
+    moderate_trend_ema_params:
+      fast_ema_period: 12
+      mid_ema_period: 40
+      slow_ema_period: 150
+    history_length: 310
+  class_name: AdxMomentumFilterEmaAlgorithm
+  source_path: C:\Users\pablo\AppData\Local\Temp\tmpxr6x800k\AdxMomentumFilterEmaAlgorithm.py
+portfolio:
+  implementation: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
+  params:
+    cash: 100000.0
+    keep_history: true
+    stop_pct: 2.0
+    profit_pct: 3.0
+    tx_cost: 1.5
+    symbol: SPY
+order_manager:
+  implementation: trading.core.om.backtesting_om.BacktestingOrderManager
+  params: {}
+data_provider:
+  implementation: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+  params:
+    provider: alpaca
+    api_key: '***redacted***'
+    secret_key: '***redacted***'
+    symbols:
+    - SPY
+    timeframe: Minute
+    adjustment: split
+    market_hours_only: true
+    start_date: '2023-01-01'
+    end_date: '2025-12-31'
+    limit: 750000
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: hpo_from_mlflow
+  run_name: adx_momentum_filter_ema_crossover_backtest
+  description: Recreated HPO from source MLflow run fa85886fa68e4cddb954b8aa78bd1f9b
+    (http://hp.lan:8899/#/experiments/596060974901698399/runs/fa85886fa68e4cddb954b8aa78bd1f9b)
+  benchmarks: {}
+  mlflow_policy:
+    annualized_return_threshold: 0.0
+    sample_negative_rate: 20
+aggregation:
+  enabled: false
+  aggregation_period_minutes: 1
+walk_forward:
+  optimization_window_days: 90
+  trading_window_days: 30
+  improvement_threshold_pct: 5.0
+  num_trials: 20
+  max_concurrent_trials: 4
+hpo:
+  objective_metric: sharpe_ratio
+  num_samples: 110
+  max_concurrent_trials: 8
+  algorithm_param_keys:
+  - trend_threshold
+  - strong_trend_threshold
+  - strong_trend_fast_ema
+  - strong_trend_slow_ema
+  - moderate_trend_fast_ema
+  - moderate_trend_slow_ema
+  - mid_ema_period
+  portfolio_param_keys:
+  - stop_pct
+  - profit_pct
+  search_space:
+    trend_threshold:
+      type: randint
+      low: 15
+      high: 35
+    strong_trend_threshold:
+      type: randint
+      low: 25
+      high: 50
+    strong_trend_fast_ema:
+      type: randint
+      low: 1
+      high: 20
+    strong_trend_slow_ema:
+      type: randint
+      low: 50
+      high: 200
+    moderate_trend_fast_ema:
+      type: randint
+      low: 5
+      high: 30
+    moderate_trend_slow_ema:
+      type: randint
+      low: 80
+      high: 250
+    mid_ema_period:
+      type: randint
+      low: 20
+      high: 80
+    stop_pct:
+      type: uniform
+      low: 0.5
+      high: 20.0
+    profit_pct:
+      type: uniform
+      low: 0.5
+      high: 20.0
+  optimization_target: joint
+optimization:
+  target: joint

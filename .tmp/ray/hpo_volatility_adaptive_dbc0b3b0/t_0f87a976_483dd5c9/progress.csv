@@ -1,0 +1,2 @@
+_metric,_trial_error,timestamp,checkpoint_dir_name,done,training_iteration,trial_id,date,time_this_iter_s,time_total_s,pid,hostname,node_ip,time_since_restore,iterations_since_restore
+-1000000000.0,"atr_percentile_threshold must be 0-100, got 4274",1779015762,,False,1,0f87a976,2026-05-17_04-02-42,0.4415106773376465,0.4415106773376465,53112,w11,127.0.0.1,0.4415106773376465,1
