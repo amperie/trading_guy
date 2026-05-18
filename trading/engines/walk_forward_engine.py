@@ -57,6 +57,7 @@ class WalkForwardEngine(BaseEngine):
         self.objective_metric = wf.get("objective_metric", "annualized_return")
         self.num_trials = wf.get("num_trials", 50)
         self.max_concurrent_trials = wf.get("max_concurrent_trials", 8)
+        self.log_ray_worker_output = wf.get("log_ray_worker_output", True)
 
         self._search_space_cfg = wf.get("search_space", {})
         self.algorithm_param_keys = wf.get("algorithm_param_keys", [])
@@ -263,6 +264,7 @@ class WalkForwardEngine(BaseEngine):
             num_samples=self.num_trials,
             max_concurrent_trials=self.max_concurrent_trials,
             log_to_mlflow=False,
+            log_ray_worker_output=self.log_ray_worker_output,
         )
 
     def _apply_config(self, best_config: dict) -> tuple[dict, dict]:
@@ -616,46 +618,48 @@ class WalkForwardEngine(BaseEngine):
 
         metrics = analysis_results["metrics"]
         event_rows = self._build_optimization_events_rows(plans)
-
-        with mlflow_client.start_run(
-            run_name=self.run_name,
-            description=self.description or f"Walk-forward backtest with {len(plans)} periods",
-        ):
-            mlflow_client.log_params(
-                {
-                    "optimization_window_days": self.optimization_window_days,
-                    "validation_window_days": self.validation_window_days,
-                    "trading_window_days": self.trading_window_days,
-                    "num_periods": len(plans),
-                    "num_trials": self.num_trials,
-                    "improvement_threshold_pct": self.improvement_threshold_pct,
-                    "min_validation_trades": self.min_validation_trades,
-                    "objective_metric": self.objective_metric,
-                }
-            )
-            mlflow_client.log_metrics(
-                {
-                    **{
-                        k: v
-                        for k, v in asdict(metrics).items()
-                        if isinstance(v, (int, float)) and v is not None
-                    },
-                    **{
-                        k: v
-                        for k, v in aggregate.items()
-                        if isinstance(v, (int, float)) and v is not None
-                    },
-                }
-            )
-            mlflow_client.log_text(analysis_results["report"], "walk_forward_report.txt")
-            mlflow_client.log_chart(analysis.plot_equity_curve(show=False), "equity_curve", format="png", dpi=150)
-            mlflow_client.log_chart(
-                self._plot_equity_with_events(analysis, plans),
-                "walk_forward_equity_with_events",
-                format="png",
-                dpi=150,
-            )
-            self._log_optimization_events_artifacts(mlflow_client, event_rows)
+        try:
+            with mlflow_client.start_run(
+                run_name=self.run_name,
+                description=self.description or f"Walk-forward backtest with {len(plans)} periods",
+            ):
+                mlflow_client.log_params(
+                    {
+                        "optimization_window_days": self.optimization_window_days,
+                        "validation_window_days": self.validation_window_days,
+                        "trading_window_days": self.trading_window_days,
+                        "num_periods": len(plans),
+                        "num_trials": self.num_trials,
+                        "improvement_threshold_pct": self.improvement_threshold_pct,
+                        "min_validation_trades": self.min_validation_trades,
+                        "objective_metric": self.objective_metric,
+                    }
+                )
+                mlflow_client.log_metrics(
+                    {
+                        **{
+                            k: v
+                            for k, v in asdict(metrics).items()
+                            if isinstance(v, (int, float)) and v is not None
+                        },
+                        **{
+                            k: v
+                            for k, v in aggregate.items()
+                            if isinstance(v, (int, float)) and v is not None
+                        },
+                    }
+                )
+                mlflow_client.log_text(analysis_results["report"], "walk_forward_report.txt")
+                mlflow_client.log_chart(analysis.plot_equity_curve(show=False), "equity_curve", format="png", dpi=150)
+                mlflow_client.log_chart(
+                    self._plot_equity_with_events(analysis, plans),
+                    "walk_forward_equity_with_events",
+                    format="png",
+                    dpi=150,
+                )
+                self._log_optimization_events_artifacts(mlflow_client, event_rows)
+        except Exception as exc:
+            logger.warning(f"Failed to log walk-forward run to MLflow: {exc}")
 
     def run(self):
         periods = self._compute_periods()

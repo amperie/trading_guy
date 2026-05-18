@@ -343,6 +343,41 @@ def test_run_logs_single_mlflow_run(monkeypatch):
     assert results["aggregate"]["num_periods"] == 1
 
 
+def test_log_full_run_to_mlflow_ignores_start_run_failures(monkeypatch):
+    engine = _build_engine(
+        {
+            "experiment_name": "wf-exp",
+            "run_name": "wf-run",
+            "description": "wf-desc",
+            "log_to_mlflow": True,
+        }
+    )
+
+    class FailingClient:
+        def start_run(self, run_name=None, description=None):
+            raise RuntimeError("mlflow unavailable")
+
+    monkeypatch.setattr(engine, "_create_mlflow_client", lambda: FailingClient())
+    monkeypatch.setattr(engine, "_build_optimization_events_rows", lambda plans: [])
+
+    engine._log_full_run_to_mlflow(
+        analysis=SimpleNamespace(),
+        analysis_results={
+            "metrics": SimpleNamespace(
+                total_return_pct=2.0,
+                annualized_return=3.0,
+                sharpe_ratio=1.5,
+                max_drawdown_pct=-4.0,
+                total_trades=1,
+                final_equity=1020.0,
+            ),
+            "report": "wf report",
+        },
+        plans=[],
+        aggregate={"num_periods": 0},
+    )
+
+
 def test_run_backtest_core_preserves_history_length(monkeypatch):
     captured = {}
 

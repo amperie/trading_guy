@@ -36,7 +36,7 @@ mode: walk-forward
 # ---------------------------------------------------------------------------
 data_provider:
   provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
-  symbols: ["SPY"]
+  symbols: ["UPRO"]
   timeframe: "Minute"
   start_date: "2025-01-01"
   end_date: "2026-05-17"
@@ -52,7 +52,7 @@ algorithm:
   algorithm: "VolatilityFilteredRsiMeanReversionAlgorithm"
   source_path: "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py"
   class_name: "VolatilityFilteredRsiMeanReversionAlgorithm"
-  symbol: "SPY"
+  symbol: "UPRO"
   history_length: 260
   regime_detection:
     ma_short_period: 50
@@ -74,7 +74,7 @@ algorithm:
 # ---------------------------------------------------------------------------
 portfolio:
   portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
-  symbol: "SPY"
+  symbol: "UPRO"
   cash: 10000
   keep_history: true
   stop_pct: 5.0
@@ -94,8 +94,8 @@ order_manager:
 #   trading_window_days:      next out-of-sample window
 # ---------------------------------------------------------------------------
 walk_forward:
-  optimization_window_days: 90
-  validation_window_days: 20
+  optimization_window_days: 180
+  validation_window_days: 30
   trading_window_days: 30
 
   # Adoption rule:
@@ -111,7 +111,8 @@ walk_forward:
   objective_metric: annualized_return
 
   num_trials: 50
-  max_concurrent_trials: 8
+  max_concurrent_trials: 16
+  log_ray_worker_output: true
 
   # Hyperparameter search space explored by Ray Tune + Optuna.
   # Dotted keys are applied into nested algorithm config blocks.
@@ -124,7 +125,7 @@ walk_forward:
     rsi_config.rsi_oversold_threshold:        { type: randint, low: 20, high: 40 }
     rsi_config.rsi_overbought_threshold:      { type: randint, low: 60, high: 80 }
     stop_pct:           { type: uniform, low: 1.0, high: 20.0 }
-    profit_pct:         { type: uniform, low: 1.0, high: 25.0 }
+    profit_pct:         { type: uniform, low: 1.0, high: 15.0 }
 
   algorithm_param_keys:
     - regime_detection.ma_short_period
@@ -143,6 +144,6 @@ walk_forward:
 analysis:
   enabled: true
   log_to_mlflow: true
-  experiment_name: "Volatility Filtered RSI Mean Reversion Walk-Forward"
+  experiment_name: "walk_forward_runs"
   run_name: "VolatilityFilteredRSIMeanReversion_WalkForward"
-  description: "Walk-forward optimization for the promoted volatility-filtered RSI mean-reversion strategy on SPY Alpaca minute bars"
+  description: "Walk-forward optimization for the promoted volatility-filtered RSI mean-reversion strategy on UPRO Alpaca minute bars"
