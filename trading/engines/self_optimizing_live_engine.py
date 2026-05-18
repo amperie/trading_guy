@@ -34,6 +34,7 @@ from trading.engines.base_engine import AsyncEngine
 from trading.core.classes import PriceData, TickResults
 from utils.logger import Logger
 from utils.performance_tracker import PerformanceTracker
+from utils.utils import apply_tunable_config, build_tunable_patch
 
 logger = Logger().get_logger(__name__)
 
@@ -181,6 +182,7 @@ class SelfOptimizingLiveEngine:
                 portfolio_param_keys=self.portfolio_param_keys,
                 num_samples=self.num_trials,
                 max_concurrent_trials=self.max_concurrent_trials,
+                log_to_mlflow=False,
             )
 
             logger.info(f"HPO complete. Best config: {best_config}")
@@ -199,14 +201,12 @@ class SelfOptimizingLiveEngine:
 
             # 4. Run best config on same data
             hist_dp_best = self._create_historical_dp()
-            best_al_cfg = copy.deepcopy(self._current_al_params)
-            best_pf_cfg = copy.deepcopy(self._current_pf_params)
-            for key in self.algorithm_param_keys:
-                if key in best_config:
-                    best_al_cfg[key] = best_config[key]
-            for key in self.portfolio_param_keys:
-                if key in best_config:
-                    best_pf_cfg[key] = best_config[key]
+            best_al_cfg = apply_tunable_config(
+                self._current_al_params, best_config, self.algorithm_param_keys
+            )
+            best_pf_cfg = apply_tunable_config(
+                self._current_pf_params, best_config, self.portfolio_param_keys
+            )
 
             om2 = BacktestingOrderManager()
             al2 = al_class(best_al_cfg)
@@ -232,8 +232,8 @@ class SelfOptimizingLiveEngine:
                 logger.info("Reconfiguring algorithm and portfolio with HPO-best params")
                 with self._hpo_lock:
                     # Extract algo params
-                    algo_params = {k: best_config[k] for k in self.algorithm_param_keys if k in best_config}
-                    pf_params = {k: best_config[k] for k in self.portfolio_param_keys if k in best_config}
+                    algo_params = build_tunable_patch(best_config, self.algorithm_param_keys)
+                    pf_params = build_tunable_patch(best_config, self.portfolio_param_keys)
 
                     if algo_params:
                         self.inner.al.reconfigure(algo_params)

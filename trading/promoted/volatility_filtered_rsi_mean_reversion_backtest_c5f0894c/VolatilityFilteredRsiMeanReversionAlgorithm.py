@@ -225,6 +225,37 @@ class VolatilityFilteredRsiMeanReversionAlgorithm(Algorithm):
 
         return signals
 
+    def reconfigure(self, new_params: dict) -> None:
+        super().reconfigure(new_params)
+
+        regime_cfg = self.cfg.get("regime_detection", {})
+        self.ma_short_period = regime_cfg.get("ma_short_period", self.ma_short_period)
+        self.ma_long_period = regime_cfg.get("ma_long_period", self.ma_long_period)
+        self.ma_proximity_tolerance = regime_cfg.get(
+            "ma_proximity_tolerance", self.ma_proximity_tolerance
+        )
+        self.atr_period = regime_cfg.get("atr_period", self.atr_period)
+        self.atr_percentile_window = regime_cfg.get(
+            "atr_percentile_window", self.atr_percentile_window
+        )
+        self.atr_percentile_level = regime_cfg.get(
+            "atr_percentile_level", self.atr_percentile_level
+        )
+
+        rsi_cfg = self.cfg.get("rsi_config", {})
+        self.rsi_period = rsi_cfg.get("rsi_period", self.rsi_period)
+        self.rsi_oversold_threshold = rsi_cfg.get(
+            "rsi_oversold_threshold", self.rsi_oversold_threshold
+        )
+        self.rsi_overbought_threshold = rsi_cfg.get(
+            "rsi_overbought_threshold", self.rsi_overbought_threshold
+        )
+
+        price_cfg = self.cfg.get("price_confirmation", {})
+        self.reversal_bar_lookback = price_cfg.get(
+            "reversal_bar_lookback", self.reversal_bar_lookback
+        )
+
 
 if __name__ == "__main__":
     # Smoke test: instantiate and run synthetic ticks

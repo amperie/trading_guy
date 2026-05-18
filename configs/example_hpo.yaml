@@ -10,7 +10,8 @@
 #   Runs Ray Tune with Optuna (Bayesian optimisation) over the full date range
 #   of the data file. Each trial backtests one combination of MACD parameters
 #   + bracket order percentages and returns the annualized return.
-#   The best config is printed at the end and each trial is logged to MLflow.
+#   The best config is printed at the end. Trial-level MLflow logging is
+#   configurable via hpo.log_trials_to_mlflow.
 #
 # Requirements:
 #   pip install "ray[tune]" optuna
@@ -62,6 +63,7 @@ order_manager:
 hpo:
   num_samples: 200          # total Ray Tune trials (Optuna Bayesian search)
   max_concurrent_trials: 8  # parallel Ray workers (set to CPU count or less)
+  log_trials_to_mlflow: false
 
   # Search space — parameter ranges explored by Ray Tune + Optuna
   # Supported types: randint, uniform, choice, loguniform

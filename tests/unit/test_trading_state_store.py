@@ -549,6 +549,34 @@ class TestAnalysisEngineIntegration:
         assert trades[0].pnl > 0  # Profitable trade
 
 
+class TestOptimizationEvents:
+
+    def test_save_and_list_optimization_events(self, store):
+        sid = store.create_session(name="WF Live")
+        event_id = store.save_optimization_event(
+            sid,
+            {
+                "event_type": "walk_forward_live",
+                "created_at": datetime(2024, 6, 15, 12, 0, 0),
+                "objective_metric": "annualized_return",
+                "adopted": True,
+                "status": "pending_activation",
+            },
+        )
+
+        store.update_optimization_event(
+            sid,
+            event_id,
+            {"status": "activated", "activation_time": datetime(2024, 6, 15, 12, 5, 0)},
+        )
+
+        events = store.list_optimization_events(sid)
+        assert len(events) == 1
+        assert events[0]["event_id"] == event_id
+        assert events[0]["status"] == "activated"
+        assert events[0]["objective_metric"] == "annualized_return"
+
+
 # ------------------------------------------------------------------ #
 #  PortfolioShell and OrderManagerShell tests
 # ------------------------------------------------------------------ #

@@ -131,6 +131,58 @@ def test_cmd_live_smoke(monkeypatch):
     assert captured["engine"].ran is True
 
 
+def test_cmd_live_walk_forward_mode(monkeypatch):
+    raw_cfg = {
+        "mode": "live",
+        "alpaca": {
+            "api_key": "key",
+            "secret_key": "secret",
+            "symbols_to_subscribe": ["SPY"],
+        },
+        "analysis": {"enabled": False},
+        "aggregation": {"enabled": False},
+        "optimization": {
+            "enabled": True,
+            "mode": "walk_forward_live",
+            "historical_data_provider": {"provider": "dummy.Provider"},
+        },
+        "state_store": {"enabled": True, "session_id": "sess-1"},
+        "order_manager": {"order_manager": "dummy.OM"},
+    }
+    built = SimpleNamespace(
+        data_provider=None,
+        algorithm=object(),
+        order_manager=object(),
+        portfolio=object(),
+    )
+    captured = {}
+
+    monkeypatch.setattr(live_cmd, "load_raw_config", lambda path: dict(raw_cfg))
+    monkeypatch.setattr(live_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(live_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(live_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(live_cmd, "load_account_creds", lambda account: {"api_key": "key", "secret_key": "secret"})
+    monkeypatch.setattr(live_cmd, "resolve_alpaca_credentials", lambda cfg, creds: cfg)
+    monkeypatch.setattr(live_cmd, "build_experiment_config", lambda cfg: "normalized-config")
+    monkeypatch.setattr(live_cmd.ExperimentService, "build", lambda cfg: built)
+    monkeypatch.setattr(live_cmd.ExperimentService, "describe", lambda cfg: SimpleNamespace(config_hash="hashwalk"))
+
+    def fake_live_engine(*args, **kwargs):
+        return SimpleNamespace(run=lambda: None)
+
+    def fake_wrapper(inner, cfg):
+        captured["cfg"] = cfg
+        return StubEngine(inner, cfg)
+
+    monkeypatch.setattr(live_cmd, "AlpacaRealTimeEngine", fake_live_engine)
+    monkeypatch.setattr("trading.engines.live_walk_forward_engine.LiveWalkForwardEngine", fake_wrapper)
+
+    args = SimpleNamespace(config="cfg.yaml", account="paper", session_id="sess-1")
+    live_cmd.cmd_live(args)
+
+    assert captured["cfg"]["mode"] == "walk_forward_live"
+
+
 def test_cmd_walk_forward_passes_mlflow_settings(monkeypatch):
     raw_cfg = {
         "mode": "walk-forward",

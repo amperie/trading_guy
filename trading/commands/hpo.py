@@ -93,6 +93,7 @@ def run_hpo_from_raw_config(
         portfolio_param_keys=hpo_cfg.get("portfolio_param_keys", []),
         num_samples=hpo_cfg.get("num_samples", 50),
         max_concurrent_trials=hpo_cfg.get("max_concurrent_trials", 8),
+        log_to_mlflow=hpo_cfg.get("log_trials_to_mlflow", analysis_cfg.get("log_to_mlflow", True)),
     )
     return best_config
 

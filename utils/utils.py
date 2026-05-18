@@ -1,3 +1,4 @@
+import copy
 import importlib
 from datetime import datetime
 from typing import Any, Union
@@ -66,6 +67,46 @@ def trim_dictionary(dictionary: dict, keys_to_delete: list[str]) -> dict:
             del dictionary[key]
 
     return dictionary
+
+
+def set_nested_config_value(config: dict, key_path: str, value: Any) -> dict:
+    """Set a config value using a dotted path, creating intermediate dicts."""
+    parts = key_path.split(".")
+    current = config
+    for part in parts[:-1]:
+        child = current.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            current[part] = child
+        current = child
+    current[parts[-1]] = value
+    return config
+
+
+def merge_nested_config(base: dict, patch: dict) -> dict:
+    """Deep-merge a patch dict into base config and return the mutated base."""
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            merge_nested_config(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def build_tunable_patch(config: dict, param_keys: list[str]) -> dict:
+    """Build a nested patch dict from sampled HPO config values."""
+    patch: dict[str, Any] = {}
+    for key in param_keys:
+        if key in config:
+            set_nested_config_value(patch, key, config[key])
+    return patch
+
+
+def apply_tunable_config(base_config: dict, sampled_config: dict, param_keys: list[str]) -> dict:
+    """Return a deep-copied config with sampled HPO values applied."""
+    merged = copy.deepcopy(base_config)
+    patch = build_tunable_patch(sampled_config, param_keys)
+    return merge_nested_config(merged, patch)
 
 
 def parse_search_space(config_dict: dict) -> dict:

@@ -17,6 +17,7 @@ from typing import Dict, Any, final, List
 from trading.core.classes import MarketSignal, PriceData
 from collections import defaultdict, deque
 from utils.logger import Logger
+from utils.utils import merge_nested_config
 
 logger = Logger().get_logger(__name__)
 
@@ -99,6 +100,16 @@ class Algorithm(ABC):
     default_cfg = {
         "history_length": 0,
         "full_history": False,
+    }
+    _reconfigure_reserved_attrs = {
+        "cfg",
+        "history_length",
+        "warm_up_ticks",
+        "_ticks_seen",
+        "_required_warmup_bars_override",
+        "price_history",
+        "price_data_history",
+        "full_history",
     }
 
     def __init__(self, cfg: Dict[str, Any]=None, history_length: int=0):
@@ -307,11 +318,30 @@ class Algorithm(ABC):
         """
         return 0.0
 
+    def _iter_reconfigure_leaf_values(self, params: dict) -> list[tuple[str, Any]]:
+        leaf_values: list[tuple[str, Any]] = []
+        for key, value in params.items():
+            if isinstance(value, dict):
+                leaf_values.extend(self._iter_reconfigure_leaf_values(value))
+            else:
+                leaf_values.append((key, value))
+        return leaf_values
+
+    def _sync_attrs_from_reconfigure(self, new_params: dict) -> None:
+        for attr_name, value in self._iter_reconfigure_leaf_values(new_params):
+            if attr_name in self._reconfigure_reserved_attrs:
+                continue
+            if hasattr(self, attr_name):
+                setattr(self, attr_name, value)
+
     def reconfigure(self, new_params: dict) -> None:
         """Update algorithm parameters without losing price history.
 
-        Updates self.cfg and logs the change. Subclasses should override
-        to also update their instance variables (e.g. self.macd_fastperiod).
+        Updates self.cfg, auto-syncs matching existing instance attributes,
+        and logs the change. Subclasses only need to override this when they
+        maintain derived state that cannot be refreshed from plain config
+        leaves alone.
         """
-        self.cfg.update(new_params)
+        merge_nested_config(self.cfg, new_params)
+        self._sync_attrs_from_reconfigure(new_params)
         logger.info(f"{self.__class__.__name__} reconfigured: {new_params}")

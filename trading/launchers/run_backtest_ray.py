@@ -12,11 +12,18 @@ from trading.data_providers.test_data_provider import TestDataProvider
 from trading.engines.backtest_engine import BacktestingEngine
 from trading.analysis.analysis_engine import AnalysisEngine
 from utils.logger import Logger
+from utils.utils import apply_tunable_config
 import ray
+from ray import air
 from ray import tune
 from ray.tune.search.optuna import OptunaSearch
 
 logger = Logger().get_logger(__name__)
+
+
+def _short_trial_dirname_creator(trial) -> str:
+    """Keep Ray trial directory names short enough for Windows path limits."""
+    return f"trial_{trial.trial_id}"
 
 
 def _build_algorithm(algorithm_class: Type[Algorithm], alg_cfg: dict) -> Algorithm:
@@ -101,6 +108,7 @@ def run_backtest_core(
     portfolio_class: Type[Portfolio],
     data_provider_class: Type[DataProvider],
     order_manager_class: Type[OrderManager],
+    log_to_mlflow: bool = True,
 ) -> dict:
     """
     Core backtest execution logic used by both local and Ray remote functions.
@@ -146,7 +154,7 @@ def run_backtest_core(
         description=desc,
         parameters=params,
         tracking_uri=backtest_cfg.get("tracking_uri"),
-        log_to_mlflow=True,
+        log_to_mlflow=log_to_mlflow,
         save_charts_locally=False,
         save_report_locally=False,
         tags=git_tags if git_tags else None,
@@ -251,6 +259,7 @@ def backtest_objective_fn(
     base_backtest_config: dict,
     algorithm_param_keys: list[str],
     portfolio_param_keys: list[str],
+    log_to_mlflow: bool = False,
 ) -> dict:
     """
     Generic objective function for hyperparameter optimization with Ray Tune.
@@ -275,13 +284,8 @@ def backtest_objective_fn(
     Returns:
         Dictionary with optimization metric
     """
-    # Extract algorithm hyperparameters from config and merge with base config
-    alg_params = {k: config[k] for k in algorithm_param_keys if k in config}
-    alg_cfg = {**base_algorithm_config, **alg_params}
-
-    # Extract portfolio hyperparameters from config and merge with base config
-    pf_params = {k: config[k] for k in portfolio_param_keys if k in config}
-    pf_cfg = {**base_portfolio_config, **pf_params}
+    alg_cfg = apply_tunable_config(base_algorithm_config, config, algorithm_param_keys)
+    pf_cfg = apply_tunable_config(base_portfolio_config, config, portfolio_param_keys)
 
     # Use base configs directly (no tuning for these components)
     dp_cfg = base_data_provider_config
@@ -290,7 +294,8 @@ def backtest_objective_fn(
     # Run backtest with merged configurations
     result = run_backtest_local(
         backtest_cfg, alg_cfg, pf_cfg, dp_cfg,
-        algorithm_class, portfolio_class, data_provider_class, order_manager_class
+        algorithm_class, portfolio_class, data_provider_class, order_manager_class,
+        log_to_mlflow=log_to_mlflow,
     )
 
     return {"_metric": result['metrics'].annualized_return}
@@ -305,6 +310,7 @@ def run_backtest_local(
     portfolio_class: Type[Portfolio] = SingleSymbolPortfolio,
     data_provider_class: Type[DataProvider] = TestDataProvider,
     order_manager_class: Type[OrderManager] = BacktestingOrderManager,
+    log_to_mlflow: bool = True,
 ) -> dict:
     """
     Run a backtest locally (not using Ray).
@@ -324,7 +330,8 @@ def run_backtest_local(
     """
     return run_backtest_core(
         backtest_cfg, alg_cfg, pf_cfg, dp_cfg,
-        algorithm_class, portfolio_class, data_provider_class, order_manager_class
+        algorithm_class, portfolio_class, data_provider_class, order_manager_class,
+        log_to_mlflow=log_to_mlflow,
     )
 
 def run_single_backtest(
@@ -442,6 +449,7 @@ def tune_backtest_hyperparameters(
     portfolio_param_keys: list[str],
     num_samples: int = 50,
     max_concurrent_trials: int = 8,
+    log_to_mlflow: bool = False,
 ) -> dict:
     """
     Generic hyperparameter optimization using Ray Tune with Optuna.
@@ -498,6 +506,7 @@ def tune_backtest_hyperparameters(
         base_backtest_config=base_backtest_config,
         algorithm_param_keys=algorithm_param_keys,
         portfolio_param_keys=portfolio_param_keys,
+        log_to_mlflow=log_to_mlflow,
     )
 
     # Configure Bayesian Optimization with Optuna
@@ -509,12 +518,16 @@ def tune_backtest_hyperparameters(
     tuner = tune.Tuner(
         trainable_with_params,
         param_space=search_space,
+        run_config=air.RunConfig(
+            name="hpo",
+        ),
         tune_config=tune.TuneConfig(
             metric="_metric",
             mode="max",
             num_samples=num_samples,
             max_concurrent_trials=max_concurrent_trials,
             search_alg=optuna_search,
+            trial_dirname_creator=_short_trial_dirname_creator,
         )
     )
     results = tuner.fit()

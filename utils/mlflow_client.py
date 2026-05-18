@@ -5,6 +5,7 @@ Provides convenient methods for logging runs, parameters, metrics, and various a
 import json
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional, Any, Union
@@ -24,6 +25,24 @@ from utils.logger import Logger
 from utils.config_manager import ConfigManager
 
 logger = Logger().get_logger(__name__)
+
+
+def _configure_gitpython_environment() -> None:
+    """Help GitPython find git.exe in worker processes on Windows."""
+    if os.environ.get("GIT_PYTHON_GIT_EXECUTABLE"):
+        return
+
+    git_path = shutil.which("git")
+    if git_path:
+        os.environ["GIT_PYTHON_GIT_EXECUTABLE"] = git_path
+        return
+
+    common_windows_git = Path(r"C:\Program Files\Git\cmd\git.exe")
+    if common_windows_git.exists():
+        os.environ["GIT_PYTHON_GIT_EXECUTABLE"] = str(common_windows_git)
+        return
+
+    os.environ.setdefault("GIT_PYTHON_REFRESH", "quiet")
 
 
 class MLflowClient:
@@ -79,6 +98,8 @@ class MLflowClient:
             raise ImportError(
                 "MLflow is not installed. Install with: pip install mlflow"
             )
+
+        _configure_gitpython_environment()
 
         # Load config
         config = ConfigManager().get("mlflow", {})

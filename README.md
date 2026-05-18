@@ -93,13 +93,16 @@ python run.py live --config configs/example_live_spy_trend_macd.yaml
 # Live with background self-optimization
 python run.py live --config configs/example_live_self_optimizing.yaml
 
+# Live with walk-forward optimization
+python run.py live --config configs/example_live_walk_forward.yaml --session-id <id>
+
 # Replay a stored live session against Alpaca historical bars
 python run.py session-replay --config configs/example_session_replay.yaml --session-id <id>
 
 # Run a promoted or live-style config as a normal backtest using bars stored in MongoDB
 python run.py mongo-backtest --config trading/promoted/<bundle>/<bundle>.yaml --session-id <id>
 
-# Walk-forward backtest (rolling HPO + out-of-sample)
+# Walk-forward backtest (rolling optimize + validate + continuous trade simulation)
 python run.py walk-forward --config configs/example_walk_forward.yaml
 
 # Standalone hyperparameter optimization
@@ -119,6 +122,14 @@ Common flags (all modes):
 | `--agg-period N` | Set aggregation bar size in minutes (also enables aggregation) |
 | `--data` | Override data file path (backtest / walk-forward / hpo) |
 | `--session-id` | MongoDB session ID |
+
+Live optimization modes:
+
+| Mode | How to activate |
+|---|---|
+| Plain live | No `optimization.enabled` block |
+| Self-optimizing live | `optimization.enabled: true` without `mode: walk_forward_live` |
+| Live walk-forward | `optimization.enabled: true` and `optimization.mode: walk_forward_live` |
 
 ---
 
@@ -174,6 +185,22 @@ analyzer = PortfolioAnalyzer.from_mongodb_multi(["sid1", "sid2"])
 ```
 
 **Metrics:** total return, Sharpe, Sortino, max drawdown, win rate, profit factor, Calmar, Ulcer index, bracket effectiveness, and 20+ more.
+
+## Walk-Forward Notes
+
+The historical walk-forward mode now works in two phases:
+
+- it computes rolling optimization and validation decisions period by period
+- it then runs one continuous backtest over the full span, applying approved config changes at each trading-window boundary
+
+That means the final MLflow run and final metrics come from the real end-to-end portfolio object, not from stitched or averaged per-period summaries.
+
+Artifacts for walk-forward runs now include:
+
+- one full-run MLflow entry with end-to-end metrics
+- an equity curve chart annotated with optimization/adoption markers
+- optimization event tables and JSON exports
+- MongoDB `optimization_events` records keyed by event id so chart markers can be traced back to the stored decision
 
 ---
 

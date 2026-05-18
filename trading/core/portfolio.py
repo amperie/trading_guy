@@ -42,7 +42,7 @@ from abc import ABC, abstractmethod
 from typing import final
 from datetime import datetime
 
-from utils.utils import find_pricedata_in_list
+from utils.utils import find_pricedata_in_list, merge_nested_config
 
 logger = Logger().get_logger(__name__)
 
@@ -625,5 +625,5 @@ class Portfolio(ABC):
 
     def reconfigure(self, new_params: dict) -> None:
         """Update portfolio config without losing cash/positions/history."""
-        self.cfg.update(new_params)
+        merge_nested_config(self.cfg, new_params)
         logger.info(f"{self.__class__.__name__} reconfigured: {new_params}")

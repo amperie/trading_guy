@@ -76,18 +76,27 @@ def cmd_live(args: argparse.Namespace):
 
     opt_cfg = raw_cfg.get("optimization", {})
     if opt_cfg.get("enabled", False):
-        from trading.engines.self_optimizing_live_engine import SelfOptimizingLiveEngine
-
         hist_dp = opt_cfg.get("historical_data_provider", {})
         if hist_dp:
             hist_dp.setdefault("api_key", alpaca_cfg["api_key"])
             hist_dp.setdefault("secret_key", alpaca_cfg["secret_key"])
+        if opt_cfg.get("mode") == "walk_forward_live":
+            from trading.engines.live_walk_forward_engine import LiveWalkForwardEngine
 
-        logger.info(
-            f"Self-optimization enabled: schedule={opt_cfg.get('schedule', 'daily')}, "
-            f"window={opt_cfg.get('rolling_window_days', 90)}d"
-        )
-        engine = SelfOptimizingLiveEngine(alpaca_engine, opt_cfg)
+            logger.info(
+                f"Live walk-forward enabled: schedule={opt_cfg.get('schedule', 'weekly')}, "
+                f"optimization={opt_cfg.get('optimization_window_days', 90)}d, "
+                f"validation={opt_cfg.get('validation_window_days', 20)}d"
+            )
+            engine = LiveWalkForwardEngine(alpaca_engine, opt_cfg)
+        else:
+            from trading.engines.self_optimizing_live_engine import SelfOptimizingLiveEngine
+
+            logger.info(
+                f"Self-optimization enabled: schedule={opt_cfg.get('schedule', 'daily')}, "
+                f"window={opt_cfg.get('rolling_window_days', 90)}d"
+            )
+            engine = SelfOptimizingLiveEngine(alpaca_engine, opt_cfg)
 
     agg_cfg = raw_cfg.get("aggregation", {})
     if agg_cfg.get("enabled", False):

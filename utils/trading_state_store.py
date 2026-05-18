@@ -249,6 +249,7 @@ class TradingStateStore:
         self._snapshots = self._db["portfolio_snapshots"]
         self._orders = self._db["orders"]
         self._signals = self._db["signals"]
+        self._optimization_events = self._db["optimization_events"]
 
         self._ensure_indexes()
 
@@ -268,6 +269,13 @@ class TradingStateStore:
         )
         self._signals.create_index(
             [("session_id", ASCENDING), ("timestamp", ASCENDING)],
+        )
+        self._optimization_events.create_index(
+            [("session_id", ASCENDING), ("created_at", ASCENDING)],
+        )
+        self._optimization_events.create_index(
+            [("session_id", ASCENDING), ("event_id", ASCENDING)],
+            unique=True,
         )
 
     # ------------------------------------------------------------------ #
@@ -429,6 +437,35 @@ class TradingStateStore:
                 doc,
                 upsert=True,
             )
+
+    def save_optimization_event(self, session_id: str, event: dict) -> str:
+        """Upsert a walk-forward / live optimization event document."""
+        event_id = event.get("event_id") or str(uuid.uuid4())
+        doc = {
+            "session_id": session_id,
+            "event_id": event_id,
+            "created_at": event.get("created_at", datetime.now()),
+            **{k: v for k, v in event.items() if k != "event_id"},
+        }
+        self._optimization_events.replace_one(
+            {"session_id": session_id, "event_id": event_id},
+            doc,
+            upsert=True,
+        )
+        return event_id
+
+    def update_optimization_event(self, session_id: str, event_id: str, update: dict) -> None:
+        """Update fields on a persisted optimization event."""
+        self._optimization_events.update_one(
+            {"session_id": session_id, "event_id": event_id},
+            {"$set": update},
+        )
+
+    def list_optimization_events(self, session_id: str) -> list[dict]:
+        """Return optimization events for a session ordered by creation time."""
+        return list(
+            self._optimization_events.find({"session_id": session_id}).sort("created_at", ASCENDING)
+        )
 
     # ------------------------------------------------------------------ #
     #  Read methods (reconstruct objects for AnalysisEngine)

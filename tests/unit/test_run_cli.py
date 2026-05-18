@@ -98,6 +98,7 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "promote" in help_text
     assert "trading/promoted/my_live_bundle/my_live_bundle.yaml" in help_text
     assert "mongo-backtest" in help_text
+    assert "configs/example_live_walk_forward.yaml" in help_text
 
 
 def test_backtest_help_mentions_remote_component_options(capsys):
@@ -107,6 +108,24 @@ def test_backtest_help_mentions_remote_component_options(capsys):
     help_text = capsys.readouterr().out
     assert "--algorithm-url" in help_text
     assert "--portfolio-url" in help_text
+
+
+def test_live_help_mentions_walk_forward_live_mode(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["live", "-h"])
+    help_text = capsys.readouterr().out
+    assert "walk_forward_live" in help_text
+    assert "configs/example_live_walk_forward.yaml" in help_text
+
+
+def test_walk_forward_help_mentions_validation_window(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["walk-forward", "-h"])
+    help_text = capsys.readouterr().out
+    assert "validation" in help_text.lower()
+    assert "challenger" in help_text.lower()
 
 
 def test_mongo_backtest_help_mentions_session_id(capsys):

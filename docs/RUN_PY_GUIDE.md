@@ -31,7 +31,7 @@ python run.py promote -h
 - `backtest`: run a historical simulation over a configured data source
 - `mongo-backtest`: run a historical simulation over bars already stored in MongoDB for a prior session
 - `live`: start a live Alpaca-driven trading session
-- `walk-forward`: run rolling out-of-sample evaluation
+- `walk-forward`: run rolling optimize/validate decisions plus one continuous out-of-sample simulation
 - `hpo`: run a standalone hyperparameter search
 - `hpo-from-mlflow`: reconstruct an HPO config from a prior MLflow run, edit it, then launch it
 - `session-replay`: replay a stored live session offline
@@ -168,11 +168,49 @@ What `live` does:
 - injects Alpaca credentials from `accounts.yaml`
 - rewires the order manager to use Alpaca-compatible credentials
 - optionally enables tick aggregation
-- optionally enables self-optimization if the config asks for it
+- optionally enables one of two optimization wrappers if the config asks for it:
+- `optimization.enabled: true` with no `optimization.mode` or any non-`walk_forward_live` mode uses the background self-optimizing wrapper
+- `optimization.enabled: true` with `optimization.mode: walk_forward_live` uses the live walk-forward wrapper
 
 Operational note:
 - every live session should get a unique `--session-id`
 - if you reuse a session ID accidentally, you will mix state across runs
+
+### Live Optimization Modes
+
+`live` now supports three operational patterns:
+
+- Plain live:
+
+```bash
+python run.py live --config configs/example_live.yaml --account paper --session-id live-20260517-plain
+```
+
+- Live with background self-optimization:
+
+```bash
+python run.py live --config configs/example_live_self_optimizing.yaml --account paper --session-id live-20260517-selfopt
+```
+
+- Live with walk-forward optimization:
+
+```bash
+python run.py live --config configs/example_live_walk_forward.yaml --account paper --session-id live-20260517-wf
+```
+
+The key config switch for live walk-forward mode is:
+
+```yaml
+optimization:
+  enabled: true
+  mode: walk_forward_live
+```
+
+In `walk_forward_live` mode the system:
+- optimizes a challenger on the optimization window
+- compares challenger vs incumbent on the same validation window
+- records the decision in MongoDB `optimization_events`
+- activates the winner according to `adoption_policy`
 
 ## Walk-Forward
 
@@ -182,7 +220,55 @@ Example:
 python run.py walk-forward --config configs/example_walk_forward.yaml --account paper
 ```
 
-Use this when you want repeated optimize-then-trade windows to estimate out-of-sample robustness instead of a single historical pass.
+Use this when you want repeated optimize-validate-trade windows to estimate out-of-sample robustness instead of a single historical pass.
+
+The backtest walk-forward path now uses three windows:
+- optimization window: tune the challenger
+- validation window: compare incumbent and challenger on the same holdout slice
+- trading window: boundary where approved changes become active in the main simulation
+
+The important behavioral detail is that the historical engine no longer treats each trade window as a separate backtest result. It now:
+
+1. computes each optimization/validation decision in sequence
+2. stores each decision in MongoDB `optimization_events`
+3. runs one continuous backtest across the full data span
+4. applies approved parameter changes at the relevant trade-window boundaries
+5. logs one end-to-end MLflow run from the main portfolio object
+
+This gives you:
+- one authoritative equity curve and transaction history for the full span
+- end-to-end metrics from the actual main portfolio
+- optimization tables and event markers instead of one nested MLflow run per period
+
+Typical invocation:
+
+```bash
+python run.py walk-forward --config configs/example_walk_forward.yaml --account paper --run-name wf_spy_v1
+```
+
+Typical config block:
+
+```yaml
+walk_forward:
+  optimization_window_days: 90
+  validation_window_days: 20
+  trading_window_days: 30
+  improvement_threshold_pct: 5.0
+  min_validation_trades: 10
+  objective_metric: annualized_return
+```
+
+### Walk-Forward Logging
+
+For historical walk-forward runs, MLflow now records:
+
+- one full run for the entire simulation
+- final end-to-end metrics from the continuous main portfolio
+- the standard walk-forward report
+- an equity curve chart with optimization/adoption markers
+- optimization event artifacts such as `optimization_events.json`, `optimization_events.csv`, and `optimization_events.md`
+
+MongoDB records the underlying optimization decisions in `optimization_events`. The event ids from those records are also used in the chart annotations so you can correlate the visualization with the stored audit trail.
 
 ## HPO
 
@@ -336,6 +422,26 @@ python run.py promote --run-url http://localhost:5000/#/experiments/1/runs/<run_
 
 ```bash
 python run.py live --config trading/promoted/winner_v1/winner_v1.yaml --account paper --session-id live-20260513-winner
+```
+
+### Launch the promoted config with live walk-forward optimization
+
+```bash
+python run.py live --config trading/promoted/winner_v1/winner_v1.yaml --account paper --session-id live-20260517-winner
+```
+
+Then enable live walk-forward by adding an optimization block like:
+
+```yaml
+optimization:
+  enabled: true
+  mode: walk_forward_live
+  schedule: weekly
+  optimization_window_days: 90
+  validation_window_days: 20
+  trading_window_days: 7
+  improvement_threshold_pct: 5.0
+  min_validation_trades: 10
 ```
 
 ### Run the promoted config as a Mongo-backed backtest

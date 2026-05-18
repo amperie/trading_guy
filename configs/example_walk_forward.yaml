@@ -1,5 +1,5 @@
 # Walk-forward backtest with the promoted volatility-filtered RSI mean-reversion
-# algorithm and periodic HPO re-optimization
+# algorithm using the new optimize -> validate -> trade flow.
 #
 # Usage:
 #   python run.py walk-forward --config configs/example_walk_forward.yaml
@@ -9,14 +9,15 @@
 # How it works:
 #   The engine splits the historical data into rolling windows:
 #
-#     |--- optimize 90d ---|--- trade 30d ---|
-#                          |--- optimize 90d ---|--- trade 30d ---|
-#                                               |--- optimize 90d ---|--- trade 30d ---|
+#     |--- optimize 90d ---|-- validate 20d --|--- trade 30d ---|
+#                                                |--- optimize 90d ---|-- validate 20d --|--- trade 30d ---|
 #
-#   At each boundary it runs Ray Tune HPO (50 trials) on the optimization
-#   window, compares the best config against the current params, and adopts
-#   the new config only if it improves annualized return by >= 5%.
-#   The out-of-sample trading window is then backtested with the chosen params.
+#   At each boundary it:
+#     1. runs Ray Tune HPO on the optimization window
+#     2. evaluates incumbent vs challenger on the SAME validation window
+#     3. adopts the challenger only if it clears the configured thresholds
+#     4. records that decision as an optimization event
+#     5. applies approved changes inside one continuous end-to-end simulation
 #
 # Requirements:
 #   - ray[tune], optuna (pip install "ray[tune]" optuna)
@@ -24,9 +25,9 @@
 #   - Alpaca API credentials via accounts.yaml / --account or directly below
 #
 # MLflow output:
-#   - Parent run: "VolatilityFilteredRSIMeanReversion_WalkForward_aggregate"
-#     with mean return, Sharpe, total trades
-#   - Nested runs: one per period with per-period metrics, HPO best config, adopted flag
+#   - One full walk-forward run with end-to-end metrics from the main portfolio
+#   - Equity curve artifacts including optimization/adoption markers
+#   - Optimization event tables/JSON for auditability
 
 mode: walk-forward
 
@@ -45,8 +46,7 @@ data_provider:
 
 # ---------------------------------------------------------------------------
 # Algorithm - promoted volatility-filtered RSI mean-reversion strategy
-# The current walk-forward engine only applies tuned values to top-level config
-# keys, so this example keeps algorithm settings fixed and tunes portfolio exits.
+# This example now tunes both nested algorithm settings and portfolio exits.
 # ---------------------------------------------------------------------------
 algorithm:
   algorithm: "VolatilityFilteredRsiMeanReversionAlgorithm"
@@ -70,7 +70,7 @@ algorithm:
 
 # ---------------------------------------------------------------------------
 # Portfolio - single-symbol with bracket orders (stop-loss + profit-taker)
-# stop_pct and profit_pct are tuned by HPO
+# stop_pct and profit_pct are tuned by HPO alongside algorithm parameters
 # ---------------------------------------------------------------------------
 portfolio:
   portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
@@ -88,27 +88,57 @@ order_manager:
 
 # ---------------------------------------------------------------------------
 # Walk-forward configuration
+# These settings drive the new three-window method:
+#   optimization_window_days: in-sample tuning window
+#   validation_window_days:   incumbent-vs-challenger holdout window
+#   trading_window_days:      next out-of-sample window
 # ---------------------------------------------------------------------------
 walk_forward:
   optimization_window_days: 90
+  validation_window_days: 20
   trading_window_days: 30
+
+  # Adoption rule:
+  # challenger must improve the objective metric by at least this percent
+  # on the validation window.
   improvement_threshold_pct: 5.0
+
+  # Guardrail:
+  # reject challengers that produce too few validation trades to be credible.
+  min_validation_trades: 5
+
+  # Metric used for incumbent-vs-challenger comparison on validation.
+  objective_metric: annualized_return
+
   num_trials: 50
   max_concurrent_trials: 8
 
-  # Hyperparameter search space explored by Ray Tune + Optuna
+  # Hyperparameter search space explored by Ray Tune + Optuna.
+  # Dotted keys are applied into nested algorithm config blocks.
   # Supported types: randint, uniform, choice, loguniform
   search_space:
+    regime_detection.ma_short_period:         { type: randint, low: 20, high: 80 }
+    regime_detection.ma_proximity_tolerance:  { type: uniform, low: 0.005, high: 0.05 }
+    regime_detection.atr_percentile_level:    { type: randint, low: 30, high: 70 }
+    rsi_config.rsi_period:                    { type: randint, low: 5, high: 25 }
+    rsi_config.rsi_oversold_threshold:        { type: randint, low: 20, high: 40 }
+    rsi_config.rsi_overbought_threshold:      { type: randint, low: 60, high: 80 }
     stop_pct:           { type: uniform, low: 1.0, high: 20.0 }
     profit_pct:         { type: uniform, low: 1.0, high: 25.0 }
 
-  algorithm_param_keys: []
+  algorithm_param_keys:
+    - regime_detection.ma_short_period
+    - regime_detection.ma_proximity_tolerance
+    - regime_detection.atr_percentile_level
+    - rsi_config.rsi_period
+    - rsi_config.rsi_oversold_threshold
+    - rsi_config.rsi_overbought_threshold
   portfolio_param_keys:
     - stop_pct
     - profit_pct
 
 # ---------------------------------------------------------------------------
-# Analysis / MLflow - results are logged per-period as nested runs
+# Analysis / MLflow - results are logged as one continuous walk-forward run
 # ---------------------------------------------------------------------------
 analysis:
   enabled: true

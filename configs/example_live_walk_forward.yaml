@@ -1,0 +1,95 @@
+# Live trading with SPY MACD trend switching and walk-forward optimization.
+#
+# Usage:
+#   python run.py live --config configs/example_live_walk_forward.yaml --account paper --session-id live-20260517-wf
+#   python run.py live --config configs/example_live_walk_forward.yaml --account paper --session-id live-20260517-wf --cash 50000
+#
+# How it works:
+#   1. Starts the normal live Alpaca stream and trades continuously.
+#   2. On the configured schedule, builds two historical windows:
+#      a. optimization window - tune the challenger
+#      b. validation window   - compare incumbent vs challenger on the same holdout slice
+#   3. If the challenger beats the incumbent by the configured threshold and
+#      satisfies the minimum validation-trades guardrail, it becomes pending.
+#   4. Pending params are activated according to adoption_policy.
+#   5. Every optimization decision is written to MongoDB optimization_events.
+
+mode: live
+
+algorithm:
+  algorithm: "trading.algorithms.spy_trend_macd_algorithm.SpyTrendMACDAlgorithm"
+  spy_symbol: "SPY"
+  upro_symbol: "UPRO"
+  spxu_symbol: "SPXU"
+  macd_fast_period: 12
+  macd_slow_period: 26
+  macd_signal_period: 9
+  strength_scale: 20.0
+
+portfolio:
+  portfolio: "trading.core.pf.dual_symbol_switch_portfolio.DualSymbolSwitchPortfolio"
+  upro_symbol: "UPRO"
+  spxu_symbol: "SPXU"
+  cash: 10000
+  keep_history: true
+  stop_pct: 5.0
+  profit_pct: 10.0
+  holding_period_hours: 2
+  min_signal_strength: 0
+  sync_with_broker: true
+  sync_interval: 60
+
+order_manager:
+  order_manager: "trading.core.om.alpaca_om.AlpacaOrderManager"
+  paper: true
+  time_in_force: "day"
+
+alpaca:
+  api_key: ""
+  secret_key: ""
+  symbols_to_subscribe: ["SPY", "UPRO", "SPXU"]
+  subscribe_to_bars: true
+  subscribe_to_quotes: false
+  subscribe_to_trades: false
+  warmup:
+    provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+    timeframe: "5Min"
+
+optimization:
+  enabled: true
+  mode: walk_forward_live
+  schedule: weekly
+  optimization_window_days: 90
+  validation_window_days: 20
+  trading_window_days: 7
+  adoption_policy: when_flat
+  improvement_threshold_pct: 5.0
+  min_validation_trades: 5
+  objective_metric: annualized_return
+  num_trials: 25
+  max_concurrent_trials: 8
+
+  search_space:
+    macd_fast_period:   { type: randint, low: 5,  high: 25 }
+    macd_slow_period:   { type: randint, low: 20, high: 80 }
+    macd_signal_period: { type: randint, low: 5,  high: 20 }
+    stop_pct:           { type: uniform, low: 1.0, high: 12.0 }
+    profit_pct:         { type: uniform, low: 3.0, high: 20.0 }
+
+  algorithm_param_keys:
+    - macd_fast_period
+    - macd_slow_period
+    - macd_signal_period
+
+  portfolio_param_keys:
+    - stop_pct
+    - profit_pct
+
+  historical_data_provider:
+    provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+    symbols: ["SPY", "UPRO", "SPXU"]
+    timeframe: "5Min"
+
+analysis:
+  enabled: false
+  log_to_mlflow: false

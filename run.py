@@ -42,11 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
             "    Example: python run.py mongo-backtest --config trading/promoted/my_live_bundle/my_live_bundle.yaml --account paper --session-id live-20260513-a\n"
             "  live:\n"
             "    Start a live trading session using the configured broker, strategy, and portfolio wiring.\n"
+            "    Supports plain live execution, background self-optimization, and live walk-forward optimization\n"
+            "    when configured under the optimization block.\n"
             "    --config --account [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
             "    [--alpaca-override-url] [--run-name] [--session-id] [--agg-period]\n"
             "    Example: python run.py live --config configs/example_live.yaml --account paper --run-name morning-open\n"
+            "    Example: python run.py live --config configs/example_live_self_optimizing.yaml --account paper --session-id live-20260517-a\n"
+            "    Example: python run.py live --config configs/example_live_walk_forward.yaml --account paper --session-id live-20260517-b\n"
             "  walk-forward:\n"
-            "    Repeatedly re-fit and evaluate across rolling windows to measure out-of-sample robustness.\n"
+            "    Compute rolling optimize/validate decisions, then run one continuous historical simulation\n"
+            "    that applies approved config changes at each trade-window boundary.\n"
             "    --config --account [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
             "    [--no-mlflow] [--run-name] [--session-id] [--agg-period]\n"
             "    Example: python run.py walk-forward --config configs/example_walk_forward.yaml --account paper\n"
@@ -127,11 +132,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mongo_backtest_p.set_defaults(func=cmd_mongo_backtest, mongo_backtest=True)
 
-    live_p = subparsers.add_parser("live", parents=[shared], help="Run live trading")
+    live_p = subparsers.add_parser(
+        "live",
+        parents=[shared],
+        help="Run live trading",
+        description=(
+            "Start a live Alpaca-driven session. Depending on the optimization config, this can run as plain live, "
+            "background self-optimizing live, or live walk-forward mode (optimization.mode=walk_forward_live)."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  python run.py live --config configs/example_live.yaml --account paper --session-id live-20260517-plain\n"
+            "  python run.py live --config configs/example_live_self_optimizing.yaml --account paper --session-id live-20260517-selfopt\n"
+            "  python run.py live --config configs/example_live_walk_forward.yaml --account paper --session-id live-20260517-wf\n"
+        ),
+    )
     live_p.add_argument("--alpaca-override-url", dest="alpaca_override_url", help="Override Alpaca websocket URL")
     live_p.set_defaults(func=cmd_live)
 
-    wf_p = subparsers.add_parser("walk-forward", parents=[shared], help="Run walk-forward optimization")
+    wf_p = subparsers.add_parser(
+        "walk-forward",
+        parents=[shared],
+        help="Run walk-forward optimization",
+        description=(
+            "Run historical walk-forward optimization with three rolling windows: optimization, validation, and "
+            "trading. The challenger is tuned on the optimization window, compared against the incumbent on the "
+            "same validation window, and approved changes are then applied inside one continuous end-to-end "
+            "simulation over the full data span."
+        ),
+        epilog=(
+            "Example:\n"
+            "  python run.py walk-forward --config configs/example_walk_forward.yaml --account paper --run-name wf_spy_v1\n"
+        ),
+    )
     wf_p.set_defaults(func=cmd_walk_forward)
 
     hpo_p = subparsers.add_parser(
