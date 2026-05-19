@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 
+from trading.commands.analysis import _collect_config_artifact_paths, get_git_info
 from trading.commands.common import (
     apply_cli_overrides,
     apply_session_log_file,
     build_experiment_config,
     fill_alpaca_creds,
+    flatten_config,
     load_account_creds,
     load_raw_config,
     validate_session_id,
@@ -48,6 +50,10 @@ def cmd_walk_forward(args: argparse.Namespace):
         "log_to_mlflow": raw_cfg.get("analysis", {}).get("log_to_mlflow", True),
         "tracking_uri": raw_cfg.get("mlflow", {}).get("tracking_uri"),
         "state_store": raw_cfg.get("state_store", {}),
+        "mlflow_parameters": flatten_config(raw_cfg),
+        "mlflow_artifact_paths": _collect_config_artifact_paths(raw_cfg, config_path=args.config),
+        "mlflow_tags": get_git_info(),
+        "benchmark_paths": raw_cfg.get("analysis", {}).get("benchmarks") or {},
     }
 
     engine = WalkForwardEngine(
@@ -97,6 +103,10 @@ def cmd_walk_forward_hpo(args: argparse.Namespace):
         "log_to_mlflow": analysis_cfg.get("log_to_mlflow", True),
         "tracking_uri": raw_cfg.get("mlflow", {}).get("tracking_uri"),
         "state_store": raw_cfg.get("state_store", {}),
+        "mlflow_parameters": flatten_config(raw_cfg),
+        "mlflow_artifact_paths": _collect_config_artifact_paths(raw_cfg, config_path=args.config),
+        "mlflow_tags": get_git_info(),
+        "benchmark_paths": analysis_cfg.get("benchmarks") or {},
     }
 
     optimizer = WalkForwardWindowHPO(

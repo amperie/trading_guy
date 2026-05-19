@@ -20,11 +20,18 @@ SENSITIVE_KEYS = {"api_key", "secret_key", "password", "token"}
 
 
 def _artifact_staging_root() -> Path:
-    candidates = [
-        Path(os.environ.get("TRADING_GUY_ARTIFACT_TMP", "E:/tmp")) / "trading_guy_codex_artifacts",
-        Path.cwd() / ".tmp" / "codex_artifacts",
-        Path.cwd(),
-    ]
+    configured_tmp = os.environ.get("TRADING_GUY_ARTIFACT_TMP")
+    candidates = []
+    if configured_tmp:
+        candidates.append(Path(configured_tmp) / "trading_guy_codex_artifacts")
+    elif os.name == "nt":
+        candidates.append(Path("E:/tmp") / "trading_guy_codex_artifacts")
+    candidates.extend(
+        [
+            Path.cwd() / ".tmp" / "codex_artifacts",
+            Path.cwd(),
+        ]
+    )
     for root in candidates:
         try:
             root.mkdir(parents=True, exist_ok=True)

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from trading.commands.analysis import _collect_config_artifact_paths
+from trading.commands.analysis import _artifact_staging_root, _collect_config_artifact_paths
 
 
 def test_collect_config_artifact_paths_includes_runtime_and_component_sources():
@@ -37,3 +38,12 @@ def test_collect_config_artifact_paths_includes_runtime_and_component_sources():
     assert "runtime_config.yaml" in names
     assert "test_algorithm.py" in names
     assert "single_symbol_portfolio.py" in names
+
+
+def test_artifact_staging_root_avoids_windows_drive_on_posix(monkeypatch):
+    monkeypatch.delenv("TRADING_GUY_ARTIFACT_TMP", raising=False)
+
+    root = _artifact_staging_root()
+
+    if os.name != "nt":
+        assert not str(root).startswith("E:")

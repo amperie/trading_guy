@@ -33,6 +33,7 @@ class WindowHPOCandidate:
     windows: dict[str, int]
     mlflow_run_id: str | None
     num_periods: int
+    valid: bool = True
 
 
 class WalkForwardWindowHPO:
@@ -54,6 +55,12 @@ class WalkForwardWindowHPO:
     ) -> None:
         self.engine_cfg = copy.deepcopy(engine_cfg)
         self.window_hpo_cfg = copy.deepcopy(engine_cfg.get("walk_forward_window_hpo", {}))
+
+        if dp is None:
+            raise ValueError(
+                "WalkForwardWindowHPO requires a DataProvider. "
+                "Add a data_provider section to your config."
+            )
 
         self._dp_class = type(dp)
         self._al_class = type(al)
@@ -123,7 +130,15 @@ class WalkForwardWindowHPO:
             return float(aggregate.get(self.objective_metric) or 0.0)
 
         metrics = result.get("metrics")
-        return float(getattr(metrics, self.objective_metric, 0.0) or 0.0)
+        if metrics is not None and hasattr(metrics, self.objective_metric):
+            return float(getattr(metrics, self.objective_metric) or 0.0)
+
+        aggregate_keys = ", ".join(sorted(aggregate.keys())) or "none"
+        metric_keys = ", ".join(sorted(vars(metrics).keys())) if hasattr(metrics, "__dict__") else "none"
+        raise ValueError(
+            f"Unknown walk_forward_window_hpo.objective_metric '{self.objective_metric}'. "
+            f"Available aggregate metrics: {aggregate_keys}. Available final metrics: {metric_keys}."
+        )
 
     def _engine_cfg_for_candidate(self, windows: dict[str, int], trial_number: int) -> dict[str, Any]:
         cfg = copy.deepcopy(self.engine_cfg)
@@ -146,7 +161,11 @@ class WalkForwardWindowHPO:
         }
         return cfg
 
-    def _engine_cfg_for_winner(self, windows: dict[str, int]) -> dict[str, Any]:
+    def _engine_cfg_for_winner(
+        self,
+        windows: dict[str, int],
+        summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         cfg = copy.deepcopy(self.engine_cfg)
         cfg["experiment_name"] = self.final_experiment_name
         cfg["run_name"] = (
@@ -165,6 +184,21 @@ class WalkForwardWindowHPO:
             "window_hpo_group_id": self.group_id,
             **{key: str(value) for key, value in windows.items()},
         }
+        if summary:
+            cfg["extra_mlflow_json_artifacts"] = {
+                **cfg.get("extra_mlflow_json_artifacts", {}),
+                "walk_forward_window_hpo_summary.json": summary,
+                "walk_forward_window_hpo_best_windows.json": windows,
+            }
+            cfg["mlflow_parameters"] = {
+                **cfg.get("mlflow_parameters", {}),
+                "walk_forward_window_hpo.group_id": self.group_id,
+                "walk_forward_window_hpo.best_metric": summary["best_metric"],
+                "walk_forward_window_hpo.best_trial_number": summary["best_trial_number"],
+                "walk_forward_window_hpo.objective_metric": self.objective_metric,
+                "walk_forward_window_hpo.num_samples": self.num_samples,
+                **{f"walk_forward_window_hpo.best_{key}": value for key, value in windows.items()},
+            }
         return cfg
 
     def _run_walk_forward(self, cfg: dict[str, Any]) -> dict[str, Any]:
@@ -180,13 +214,16 @@ class WalkForwardWindowHPO:
         )
 
         result = self._run_walk_forward(self._engine_cfg_for_candidate(windows, trial.number))
-        metric = self._metric_from_result(result)
         num_periods = len(result.get("periods", []))
+        valid = True
         if num_periods < self.min_periods:
             logger.warning(
                 f"Candidate has only {num_periods} periods; min_periods={self.min_periods}. Penalizing metric."
             )
             metric = -1e18
+            valid = False
+        else:
+            metric = self._metric_from_result(result)
 
         candidate = WindowHPOCandidate(
             trial_number=trial.number,
@@ -194,6 +231,7 @@ class WalkForwardWindowHPO:
             windows=windows,
             mlflow_run_id=result.get("mlflow_run_id"),
             num_periods=num_periods,
+            valid=valid,
         )
         self.candidates.append(candidate)
         trial.set_user_attr("mlflow_run_id", candidate.mlflow_run_id)
@@ -212,23 +250,51 @@ class WalkForwardWindowHPO:
             logger.warning(
                 "walk-forward-hpo currently runs outer candidates sequentially so nested per-period Ray HPO remains stable. "
                 f"Ignoring max_concurrent_trials={self.max_concurrent_trials}."
-            )
+        )
 
         study = optuna.create_study(direction="maximize")
-        study.optimize(self._objective, n_trials=self.num_samples, n_jobs=1)
+        try:
+            study.optimize(self._objective, n_trials=self.num_samples, n_jobs=1, catch=(Exception,))
 
-        best_windows = {key: int(study.best_trial.params[key]) for key in WINDOW_KEYS}
-        logger.info(f"Best walk-forward windows: {best_windows} metric={study.best_value:.6f}", color="green")
+            completed = [trial for trial in study.trials if trial.state == optuna.trial.TrialState.COMPLETE]
+            if not completed:
+                raise RuntimeError(
+                    f"All {self.num_samples} walk-forward window HPO trials failed. "
+                    "Check logs above for individual trial errors."
+                )
+            valid_candidates = [candidate for candidate in self.candidates if candidate.valid]
+            if not valid_candidates:
+                raise RuntimeError(
+                    f"All {len(self.candidates)} completed walk-forward window HPO candidates were invalid. "
+                    f"Each produced fewer than min_periods={self.min_periods} periods."
+                )
+        except Exception:
+            self._cleanup_staging()
+            raise
 
-        final_result = self._run_walk_forward(self._engine_cfg_for_winner(best_windows))
-        cleanup = self._cleanup_staging()
+        best_candidate = max(valid_candidates, key=lambda candidate: candidate.metric)
+        best_windows = best_candidate.windows
+        logger.info(f"Best walk-forward windows: {best_windows} metric={best_candidate.metric:.6f}", color="green")
+
+        summary = {
+            "group_id": self.group_id,
+            "objective_metric": self.objective_metric,
+            "best_windows": best_windows,
+            "best_metric": best_candidate.metric,
+            "best_trial_number": best_candidate.trial_number,
+            "candidates": [asdict(candidate) for candidate in self.candidates],
+        }
+        try:
+            final_result = self._run_walk_forward(self._engine_cfg_for_winner(best_windows, summary=summary))
+        finally:
+            cleanup = self._cleanup_staging()
 
         return {
             "best_windows": best_windows,
-            "best_metric": study.best_value,
-            "best_trial_number": study.best_trial.number,
+            "best_metric": best_candidate.metric,
+            "best_trial_number": best_candidate.trial_number,
             "final_result": final_result,
-            "candidates": [asdict(candidate) for candidate in self.candidates],
+            "candidates": summary["candidates"],
             "cleanup": cleanup,
         }
 

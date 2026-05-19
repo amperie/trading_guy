@@ -70,6 +70,10 @@ class WalkForwardEngine(BaseEngine):
         self.tracking_uri = cfg.get("tracking_uri")
         self.artifact_location = cfg.get("artifact_location")
         self.mlflow_tags = cfg.get("mlflow_tags", {})
+        self.mlflow_parameters = cfg.get("mlflow_parameters", {})
+        self.mlflow_artifact_paths = cfg.get("mlflow_artifact_paths", [])
+        self.benchmark_paths = cfg.get("benchmark_paths") or {}
+        self.extra_mlflow_json_artifacts = cfg.get("extra_mlflow_json_artifacts", {})
 
         self.original_dp_cfg = copy.deepcopy(dp.cfg) if dp else {}
         self.original_al_cfg = copy.deepcopy(al.cfg) if (al and hasattr(al, "cfg")) else {}
@@ -232,10 +236,14 @@ class WalkForwardEngine(BaseEngine):
             copy.deepcopy(pf_cfg), om, self.starting_cash, {}, self.original_pf_keep_history
         )
 
-    def _run_backtest(self, al_cfg: dict, pf_cfg: dict, dp: DataProvider) -> dict:
+    def _run_backtest(self, al_cfg: dict, pf_cfg: dict, dp: DataProvider, warmup_dp: DataProvider | None = None) -> dict:
         om = self._om_class()
         al = self._build_algorithm(al_cfg)
         pf = self._build_portfolio(pf_cfg, om)
+        if warmup_dp is not None and al.required_warmup_bars > 0:
+            warmup_ticks = list(warmup_dp.iterate())
+            if warmup_ticks:
+                al.warm_up(warmup_ticks)
         engine = BacktestingEngine({}, dp, al, om, pf)
         engine.run()
         analysis = AnalysisEngine(pf, om)
@@ -296,11 +304,13 @@ class WalkForwardEngine(BaseEngine):
                 current_al_cfg,
                 current_pf_cfg,
                 self._create_dp_for_range(period.validation_start, period.validation_end),
+                warmup_dp=self._create_dp_for_range(period.optimization_start, period.validation_start),
             )
             challenger_result = self._run_backtest(
                 challenger_al_cfg,
                 challenger_pf_cfg,
                 self._create_dp_for_range(period.validation_start, period.validation_end),
+                warmup_dp=self._create_dp_for_range(period.optimization_start, period.validation_start),
             )
             incumbent_metrics = incumbent_result["metrics"]
             challenger_metrics = challenger_result["metrics"]
@@ -427,10 +437,28 @@ class WalkForwardEngine(BaseEngine):
         self._persist_tick(tick, effective_signals, tick_results)
         return tick_results
 
+    def _apply_plan_config(self, plan: dict[str, Any]) -> None:
+        if plan["algo_patch"]:
+            self.al.reconfigure(plan["algo_patch"])
+        if plan["pf_patch"]:
+            self.pf.reconfigure(plan["pf_patch"])
+
     def _run_continuous_backtest(self, plans: list[dict[str, Any]]) -> dict[str, Any]:
         trade_idx = 0
         activation_idx = 0
-        activated_event_ids: set[str] = set()
+        config_applied_indexes: set[int] = set()
+
+        if plans and plans[0]["adopted"]:
+            logger.info(
+                (
+                    f"[WF EVENT] Pre-applying first config for warmup | "
+                    f"period={plans[0]['period_idx'] + 1} | "
+                    f"event_id={(plans[0]['event_id'] or 'n/a')}"
+                ),
+                color="magenta",
+            )
+            self._apply_plan_config(plans[0])
+            config_applied_indexes.add(0)
 
         logger.info("Running continuous walk-forward simulation...")
         for tick in self.dp.iterate():
@@ -440,23 +468,21 @@ class WalkForwardEngine(BaseEngine):
 
             while activation_idx < len(plans) and timestamp >= plans[activation_idx]["period"].trading_start:
                 plan = plans[activation_idx]
-                if plan["event_id"] not in activated_event_ids:
-                    logger.info(
-                        (
-                            f"[WF EVENT] Activating config for period {plan['period_idx'] + 1} | "
-                            f"event_id={(plan['event_id'] or 'n/a')} | "
-                            f"timestamp={timestamp}\n"
-                            f"Algorithm patch:\n{pformat(plan['algo_patch'], sort_dicts=True)}\n"
-                            f"Portfolio patch:\n{pformat(plan['pf_patch'], sort_dicts=True)}"
-                        ),
-                        color="magenta",
-                    )
-                    if plan["algo_patch"]:
-                        self.al.reconfigure(plan["algo_patch"])
-                    if plan["pf_patch"]:
-                        self.pf.reconfigure(plan["pf_patch"])
+                logger.info(
+                    (
+                        f"[WF EVENT] Activating config for period {plan['period_idx'] + 1} | "
+                        f"event_id={(plan['event_id'] or 'n/a')} | "
+                        f"timestamp={timestamp}\n"
+                        f"Algorithm patch:\n{pformat(plan['algo_patch'], sort_dicts=True)}\n"
+                        f"Portfolio patch:\n{pformat(plan['pf_patch'], sort_dicts=True)}"
+                    ),
+                    color="magenta",
+                )
+                if plan["adopted"] and activation_idx not in config_applied_indexes:
+                    self._apply_plan_config(plan)
+                    config_applied_indexes.add(activation_idx)
+                if plan["adopted"]:
                     self._update_optimization_event_activation(plan["event_id"], timestamp)
-                    activated_event_ids.add(plan["event_id"])
                 activation_idx += 1
 
             while trade_idx < len(plans) and timestamp >= plans[trade_idx]["period"].trading_end:
@@ -628,30 +654,37 @@ class WalkForwardEngine(BaseEngine):
                 run_id = mlflow_client.run_id
                 if self.mlflow_tags:
                     mlflow_client.set_tags(self.mlflow_tags)
-                mlflow_client.log_params(
-                    {
-                        "optimization_window_days": self.optimization_window_days,
-                        "validation_window_days": self.validation_window_days,
-                        "trading_window_days": self.trading_window_days,
-                        "num_periods": len(plans),
-                        "num_trials": self.num_trials,
-                        "improvement_threshold_pct": self.improvement_threshold_pct,
-                        "min_validation_trades": self.min_validation_trades,
-                        "objective_metric": self.objective_metric,
-                    }
+                parameters = {
+                    **self.mlflow_parameters,
+                    "optimization_window_days": self.optimization_window_days,
+                    "validation_window_days": self.validation_window_days,
+                    "trading_window_days": self.trading_window_days,
+                    "num_periods": len(plans),
+                    "num_trials": self.num_trials,
+                    "improvement_threshold_pct": self.improvement_threshold_pct,
+                    "min_validation_trades": self.min_validation_trades,
+                    "objective_metric": self.objective_metric,
+                }
+                if self.benchmark_paths:
+                    analysis._benchmark_paths = self.benchmark_paths
+                analysis.log_to_mlflow(
+                    run_name=self.run_name,
+                    description=self.description or f"Walk-forward backtest with {len(plans)} periods",
+                    parameters=parameters,
+                    log_charts=True,
+                    log_trades=True,
+                    log_signals=True,
+                    log_report=True,
+                    chart_dpi=150,
+                    artifact_paths=self.mlflow_artifact_paths,
+                    mlflow_client=mlflow_client,
+                    start_new_run=False,
                 )
                 mlflow_client.log_metrics(
                     {
-                        **{
-                            k: v
-                            for k, v in asdict(metrics).items()
-                            if isinstance(v, (int, float)) and v is not None
-                        },
-                        **{
-                            k: v
-                            for k, v in aggregate.items()
-                            if isinstance(v, (int, float)) and v is not None
-                        },
+                        key: value
+                        for key, value in aggregate.items()
+                        if isinstance(value, (int, float)) and value is not None
                     }
                 )
                 mlflow_client.log_text(analysis_results["report"], "walk_forward_report.txt")
@@ -663,6 +696,8 @@ class WalkForwardEngine(BaseEngine):
                     dpi=150,
                 )
                 self._log_optimization_events_artifacts(mlflow_client, event_rows)
+                for filename, payload in self.extra_mlflow_json_artifacts.items():
+                    mlflow_client.log_json(payload, filename)
                 return run_id
         except Exception as exc:
             logger.warning(f"Failed to log walk-forward run to MLflow: {exc}")

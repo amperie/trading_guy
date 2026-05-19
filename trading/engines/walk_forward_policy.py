@@ -52,6 +52,7 @@ def compute_walk_forward_periods(
 ) -> list[WalkForwardPeriod]:
     periods: list[WalkForwardPeriod] = []
     opt_start = data_start
+    data_end_exclusive = data_end + timedelta(microseconds=1)
 
     while True:
         opt_end = opt_start + timedelta(days=optimization_window_days)
@@ -60,10 +61,10 @@ def compute_walk_forward_periods(
         trading_start = validation_end
         trading_end = trading_start + timedelta(days=trading_window_days)
 
-        if trading_start >= data_end:
+        if trading_start >= data_end_exclusive:
             break
-        if trading_end > data_end:
-            trading_end = data_end
+        if trading_end > data_end_exclusive:
+            trading_end = data_end_exclusive
 
         periods.append(
             WalkForwardPeriod(
@@ -81,6 +82,11 @@ def compute_walk_forward_periods(
 
 
 def metric_value(metrics: Any, objective_metric: str) -> float:
+    if not hasattr(metrics, objective_metric):
+        metric_keys = ", ".join(sorted(vars(metrics).keys())) if hasattr(metrics, "__dict__") else "none"
+        raise ValueError(
+            f"Unknown objective_metric '{objective_metric}'. Available metrics: {metric_keys}."
+        )
     value = getattr(metrics, objective_metric, None)
     if value is None:
         return 0.0

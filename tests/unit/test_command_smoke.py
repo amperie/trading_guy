@@ -210,6 +210,9 @@ def test_cmd_walk_forward_passes_mlflow_settings(monkeypatch):
     monkeypatch.setattr(walk_forward_cmd, "apply_session_log_file", lambda cfg, args: None)
     monkeypatch.setattr(walk_forward_cmd, "validate_session_id", lambda cfg: None)
     monkeypatch.setattr(walk_forward_cmd, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
+    monkeypatch.setattr(walk_forward_cmd, "flatten_config", lambda cfg: {"config.mode": cfg["mode"]})
+    monkeypatch.setattr(walk_forward_cmd, "_collect_config_artifact_paths", lambda cfg, config_path=None: [config_path, "runtime.yaml"])
+    monkeypatch.setattr(walk_forward_cmd, "get_git_info", lambda: {"git.commit": "abc123"})
     monkeypatch.setattr(walk_forward_cmd, "build_experiment_config", lambda cfg: "normalized-config")
     monkeypatch.setattr(walk_forward_cmd.ExperimentService, "build", lambda cfg: built)
     monkeypatch.setattr(
@@ -231,6 +234,9 @@ def test_cmd_walk_forward_passes_mlflow_settings(monkeypatch):
 
     assert captured["engine"].kwargs["cfg"]["log_to_mlflow"] is False
     assert captured["engine"].kwargs["cfg"]["tracking_uri"] == "http://mlflow.local"
+    assert captured["engine"].kwargs["cfg"]["mlflow_parameters"] == {"config.mode": "walk-forward"}
+    assert captured["engine"].kwargs["cfg"]["mlflow_artifact_paths"] == ["cfg.yaml", "runtime.yaml"]
+    assert captured["engine"].kwargs["cfg"]["mlflow_tags"] == {"git.commit": "abc123"}
 
 
 def test_cmd_walk_forward_hpo_passes_window_hpo_settings(monkeypatch):
@@ -268,6 +274,9 @@ def test_cmd_walk_forward_hpo_passes_window_hpo_settings(monkeypatch):
     monkeypatch.setattr(walk_forward_cmd, "apply_session_log_file", lambda cfg, args: None)
     monkeypatch.setattr(walk_forward_cmd, "validate_session_id", lambda cfg: None)
     monkeypatch.setattr(walk_forward_cmd, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
+    monkeypatch.setattr(walk_forward_cmd, "flatten_config", lambda cfg: {"config.mode": cfg["mode"]})
+    monkeypatch.setattr(walk_forward_cmd, "_collect_config_artifact_paths", lambda cfg, config_path=None: [config_path, "runtime.yaml"])
+    monkeypatch.setattr(walk_forward_cmd, "get_git_info", lambda: {"git.commit": "abc123"})
     monkeypatch.setattr(walk_forward_cmd, "build_experiment_config", lambda cfg: "normalized-config")
     monkeypatch.setattr(walk_forward_cmd.ExperimentService, "build", lambda cfg: built)
     monkeypatch.setattr(
@@ -300,3 +309,6 @@ def test_cmd_walk_forward_hpo_passes_window_hpo_settings(monkeypatch):
     assert engine_cfg["walk_forward_window_hpo"]["num_samples"] == 2
     assert engine_cfg["tracking_uri"] == "http://mlflow.local"
     assert engine_cfg["experiment_name"] == "WF Experiment"
+    assert engine_cfg["mlflow_parameters"] == {"config.mode": "walk-forward"}
+    assert engine_cfg["mlflow_artifact_paths"] == ["cfg.yaml", "runtime.yaml"]
+    assert engine_cfg["mlflow_tags"] == {"git.commit": "abc123"}

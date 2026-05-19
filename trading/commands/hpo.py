@@ -173,6 +173,7 @@ def _run_backtest_analysis(
     artifact_prefix: str = "",
     parameters: dict[str, Any] | None = None,
     artifact_paths: list[str] | None = None,
+    warmup_dp_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     history_length = alg_cfg.get("history_length", 0)
     al = algorithm_class(
@@ -182,6 +183,12 @@ def _run_backtest_analysis(
     om = order_manager_class()
     dp = data_provider_class(dp_cfg)
     pf = portfolio_class(pf_cfg, om, backtest_cfg["starting_cash"], {}, True)
+
+    if warmup_dp_cfg is not None and al.required_warmup_bars > 0:
+        warmup_dp = data_provider_class(warmup_dp_cfg)
+        warmup_ticks = list(warmup_dp.iterate())
+        if warmup_ticks:
+            al.warm_up(warmup_ticks)
 
     sim = BacktestingEngine({"state_store": {"enabled": False}}, dp, al, om, pf)
     sim.run()
@@ -227,6 +234,7 @@ def _select_best_split_config(
     base_backtest_cfg: dict[str, Any],
     base_al_cfg: dict[str, Any],
     base_pf_cfg: dict[str, Any],
+    train_dp_cfg: dict[str, Any],
     val_dp_cfg: dict[str, Any],
     algorithm_class,
     portfolio_class,
@@ -270,6 +278,7 @@ def _select_best_split_config(
             portfolio_class=portfolio_class,
             data_provider_class=data_provider_class,
             order_manager_class=order_manager_class,
+            warmup_dp_cfg=train_dp_cfg,
             log_to_mlflow=False,
         )
         score = float(metric_value(val_results["metrics"], "annualized_return"))
@@ -375,6 +384,7 @@ def run_hpo_split_from_raw_config(
         base_backtest_cfg=base_backtest_cfg,
         base_al_cfg=base_al_cfg,
         base_pf_cfg=base_pf_cfg,
+        train_dp_cfg=train_dp_cfg,
         val_dp_cfg=val_dp_cfg,
         algorithm_class=al_class,
         portfolio_class=pf_class,
@@ -433,6 +443,7 @@ def run_hpo_split_from_raw_config(
                 metric_prefix="val_",
                 artifact_prefix="val_",
                 artifact_paths=artifact_paths,
+                warmup_dp_cfg=train_dp_cfg,
             )
     else:
         train_results = _run_backtest_analysis(
@@ -454,6 +465,7 @@ def run_hpo_split_from_raw_config(
             portfolio_class=pf_class,
             data_provider_class=dp_class,
             order_manager_class=om_class,
+            warmup_dp_cfg=train_dp_cfg,
         )
 
     logger.info("Split HPO complete. Best config:")

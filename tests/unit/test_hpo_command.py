@@ -162,6 +162,11 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
     assert calls[1].get("artifact_prefix", "") == ""
     assert calls[2]["metric_prefix"] == "val_"
     assert calls[2]["artifact_prefix"] == "val_"
+    assert calls[0]["warmup_dp_cfg"]["start_date"] == "2024-01-01"
+    assert calls[0]["warmup_dp_cfg"]["end_date"] == "2024-03-21"
+    assert "warmup_dp_cfg" not in calls[1]
+    assert calls[2]["warmup_dp_cfg"]["start_date"] == "2024-01-01"
+    assert calls[2]["warmup_dp_cfg"]["end_date"] == "2024-03-21"
     assert calls[1]["parameters"]["hpo.validation_period_days"] == 15
     assert calls[1]["parameters"]["hpo.objective_metric"] == "val_annualized_return"
     assert any(event[0] == "log_json" and event[1] == "hpo_best_config.json" for event in mlflow_events)
