@@ -98,6 +98,50 @@ def test_select_best_split_config_rejects_empty_trial_summaries():
         )
 
 
+def test_select_best_split_config_rejects_non_finite_training_metrics():
+    with pytest.raises(RuntimeError, match="no finite training trial metrics"):
+        hpo_cmd._select_best_split_config(
+            trial_summaries=[{"config": {"alpha": 2}, "metric": float("nan")}],
+            objective_metric="trn_annualized_return",
+            base_backtest_cfg={},
+            base_al_cfg={},
+            base_pf_cfg={},
+            train_dp_cfg={},
+            val_dp_cfg={},
+            algorithm_class=object,
+            portfolio_class=object,
+            data_provider_class=object,
+            order_manager_class=object,
+            algorithm_param_keys=[],
+            portfolio_param_keys=[],
+        )
+
+
+def test_select_best_split_config_rejects_non_finite_validation_metrics(monkeypatch):
+    monkeypatch.setattr(
+        hpo_cmd,
+        "_run_backtest_analysis",
+        lambda **kwargs: {"metrics": SimpleNamespace(annualized_return=float("nan"))},
+    )
+
+    with pytest.raises(RuntimeError, match="no finite validation trial metrics"):
+        hpo_cmd._select_best_split_config(
+            trial_summaries=[{"config": {"alpha": 2}, "metric": 1.0}],
+            objective_metric="val_annualized_return",
+            base_backtest_cfg={},
+            base_al_cfg={},
+            base_pf_cfg={},
+            train_dp_cfg={},
+            val_dp_cfg={},
+            algorithm_class=object,
+            portfolio_class=object,
+            data_provider_class=object,
+            order_manager_class=object,
+            algorithm_param_keys=["alpha"],
+            portfolio_param_keys=[],
+        )
+
+
 def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
     raw_cfg = {
         "mode": "hpo",

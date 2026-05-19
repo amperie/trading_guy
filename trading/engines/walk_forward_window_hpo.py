@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import os
 import shutil
 import subprocess
@@ -127,11 +128,23 @@ class WalkForwardWindowHPO:
     def _metric_from_result(self, result: dict[str, Any]) -> float:
         aggregate = result.get("aggregate", {})
         if self.objective_metric in aggregate:
-            return float(aggregate.get(self.objective_metric) or 0.0)
+            value = float(aggregate.get(self.objective_metric) or 0.0)
+            if not math.isfinite(value):
+                raise ValueError(
+                    f"walk_forward_window_hpo.objective_metric '{self.objective_metric}' "
+                    f"produced a non-finite value: {value}"
+                )
+            return value
 
         metrics = result.get("metrics")
         if metrics is not None and hasattr(metrics, self.objective_metric):
-            return float(getattr(metrics, self.objective_metric) or 0.0)
+            value = float(getattr(metrics, self.objective_metric) or 0.0)
+            if not math.isfinite(value):
+                raise ValueError(
+                    f"walk_forward_window_hpo.objective_metric '{self.objective_metric}' "
+                    f"produced a non-finite value: {value}"
+                )
+            return value
 
         aggregate_keys = ", ".join(sorted(aggregate.keys())) or "none"
         metric_keys = ", ".join(sorted(vars(metrics).keys())) if hasattr(metrics, "__dict__") else "none"
@@ -311,21 +324,19 @@ class WalkForwardWindowHPO:
             "ran_mlflow_gc": False,
             "deleted_s3_prefix": False,
         }
-        if not self.cleanup_staging_experiment:
-            return result
+        if self.cleanup_staging_experiment:
+            try:
+                from mlflow.tracking import MlflowClient
 
-        try:
-            from mlflow.tracking import MlflowClient
-
-            client = MlflowClient(tracking_uri=self.engine_cfg.get("tracking_uri"))
-            experiment = client.get_experiment_by_name(self.staging_experiment_name)
-            if experiment is not None:
-                client.delete_experiment(experiment.experiment_id)
-                result["deleted_experiment"] = True
-                if self.run_mlflow_gc:
-                    result["ran_mlflow_gc"] = self._run_mlflow_gc(experiment.experiment_id)
-        except Exception as exc:
-            logger.warning(f"Failed to delete staging MLflow experiment: {exc}")
+                client = MlflowClient(tracking_uri=self.engine_cfg.get("tracking_uri"))
+                experiment = client.get_experiment_by_name(self.staging_experiment_name)
+                if experiment is not None:
+                    client.delete_experiment(experiment.experiment_id)
+                    result["deleted_experiment"] = True
+                    if self.run_mlflow_gc:
+                        result["ran_mlflow_gc"] = self._run_mlflow_gc(experiment.experiment_id)
+            except Exception as exc:
+                logger.warning(f"Failed to delete staging MLflow experiment: {exc}")
 
         if self.cleanup_s3_prefix and self.staging_artifact_location:
             result["deleted_s3_prefix"] = self._delete_s3_prefix(self.staging_artifact_location)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import math
 from pathlib import Path
 from typing import Any
 
@@ -266,7 +267,14 @@ def _select_best_split_config(
         )
 
     if objective_metric == "trn_annualized_return":
-        best_trial = max(trial_summaries, key=lambda trial: trial["metric"])
+        finite_training_trials = [
+            trial for trial in trial_summaries if math.isfinite(float(trial["metric"]))
+        ]
+        if not finite_training_trials:
+            raise RuntimeError(
+                "Split HPO produced no finite training trial metrics. Check Ray Tune logs for failed trials."
+            )
+        best_trial = max(finite_training_trials, key=lambda trial: float(trial["metric"]))
         best_al_cfg, best_pf_cfg = _build_trial_configs(
             best_trial["config"],
             base_al_cfg=base_al_cfg,
@@ -304,7 +312,18 @@ def _select_best_split_config(
             log_to_mlflow=False,
         )
         score = float(metric_value(val_results["metrics"], "annualized_return"))
+        if not math.isfinite(score):
+            logger.warning(
+                "Skipping split-HPO trial with non-finite validation annualized_return: %s",
+                score,
+            )
+            continue
         scored_trials.append((score, trial["config"], al_cfg, pf_cfg))
+
+    if not scored_trials:
+        raise RuntimeError(
+            "Split HPO produced no finite validation trial metrics. Check validation backtest logs."
+        )
 
     best_score, best_config, best_al_cfg, best_pf_cfg = max(scored_trials, key=lambda item: item[0])
     return best_config, best_al_cfg, best_pf_cfg, best_score

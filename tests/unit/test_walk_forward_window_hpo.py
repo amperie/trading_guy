@@ -143,6 +143,33 @@ def test_metric_raises_for_unknown_objective_metric():
         )
 
 
+def test_metric_raises_for_non_finite_objective_metric():
+    optimizer = _build_optimizer()
+
+    with pytest.raises(ValueError, match="non-finite"):
+        optimizer._metric_from_result(
+            {
+                "aggregate": {"wf_annualized_return": float("nan")},
+                "metrics": SimpleNamespace(annualized_return=1.0),
+            }
+        )
+
+
+def test_cleanup_s3_prefix_runs_without_deleting_experiment(monkeypatch):
+    optimizer = _build_optimizer()
+    optimizer.cleanup_staging_experiment = False
+    optimizer.cleanup_s3_prefix = True
+    deleted = []
+
+    monkeypatch.setattr(optimizer, "_delete_s3_prefix", lambda prefix: deleted.append(prefix) or True)
+
+    result = optimizer._cleanup_staging()
+
+    assert result["deleted_experiment"] is False
+    assert result["deleted_s3_prefix"] is True
+    assert deleted == ["s3://bucket/tmp/group"]
+
+
 def test_run_raises_clear_error_and_cleans_up_when_all_trials_fail(monkeypatch):
     optimizer = _build_optimizer()
     optimizer.num_samples = 2
