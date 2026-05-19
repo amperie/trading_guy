@@ -18,6 +18,7 @@ from trading.commands import (
     cmd_promote,
     cmd_session_replay,
     cmd_walk_forward,
+    cmd_walk_forward_hpo,
 )
 from trading.commands.hpo_from_mlflow import cmd_hpo_from_mlflow
 
@@ -56,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
             "    --config --account [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
             "    [--no-mlflow] [--run-name] [--session-id] [--agg-period]\n"
             "    Example: python run.py walk-forward --config configs/example_walk_forward.yaml --account paper\n"
+            "  walk-forward-hpo:\n"
+            "    Search over walk-forward optimization, validation, and trading window sizes. Candidate runs are\n"
+            "    logged to a temporary MLflow experiment, then the winning window schedule is rerun into the\n"
+            "    permanent experiment. Optional cleanup can mark the temp experiment deleted, run MLflow GC,\n"
+            "    and remove a dedicated staging S3 prefix.\n"
+            "    --config --account [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
+            "    [--no-mlflow] [--run-name] [--session-id] [--agg-period]\n"
+            "    Example: python run.py walk-forward-hpo --config configs/example_walk_forward_hpo.yaml --account paper\n"
             "  hpo:\n"
             "    Launch a Ray Tune hyperparameter search for one config profile over a single date range.\n"
             "    --config --account [--num-samples] [--max-concurrent-trials] [--symbol] [--cash] [--algorithm]\n"
@@ -171,6 +180,39 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     wf_p.set_defaults(func=cmd_walk_forward)
+
+    wf_hpo_p = subparsers.add_parser(
+        "walk-forward-hpo",
+        parents=[shared],
+        help="Optimize walk-forward window sizes",
+        formatter_class=argparse.RawTextHelpFormatter,
+        description=(
+            "Run an outer Optuna search over optimization_window_days, validation_window_days, and "
+            "trading_window_days. Each candidate runs the normal walk-forward process, including the "
+            "inner strategy HPO configured under walk_forward.search_space. Candidate runs are logged "
+            "to a staging MLflow experiment; the winning windows are rerun into the final experiment. "
+            "Configure staging/final experiment names, optional artifact locations, MLflow GC, and direct "
+            "S3-prefix cleanup under walk_forward_window_hpo."
+        ),
+        epilog=(
+            "Example:\n"
+            "  python run.py walk-forward-hpo --config configs/example_walk_forward_hpo.yaml --account paper\n"
+            "\n"
+            "Config keys:\n"
+            "  walk_forward_window_hpo.num_samples              Outer window trials\n"
+            "  walk_forward_window_hpo.objective_metric         Metric to maximize, e.g. wf_annualized_return\n"
+            "  walk_forward_window_hpo.min_periods              Reject schedules with too few walk-forward periods\n"
+            "  walk_forward_window_hpo.search_space             Must include optimization_window_days,\n"
+            "                                                    validation_window_days, trading_window_days\n"
+            "  walk_forward_window_hpo.final_experiment_name    Permanent MLflow experiment for the rerun winner\n"
+            "  walk_forward_window_hpo.staging_experiment_name  Optional temp experiment name; omitted means unique\n"
+            "  walk_forward_window_hpo.staging_artifact_location Optional staging artifact root, such as an S3 prefix\n"
+            "  walk_forward_window_hpo.cleanup_staging_experiment Mark temp experiment deleted after winner rerun\n"
+            "  walk_forward_window_hpo.run_mlflow_gc            Run `mlflow gc` after deleting the temp experiment\n"
+            "  walk_forward_window_hpo.cleanup_s3_prefix        Run `aws s3 rm <staging_artifact_location> --recursive`\n"
+        ),
+    )
+    wf_hpo_p.set_defaults(func=cmd_walk_forward_hpo)
 
     hpo_p = subparsers.add_parser(
         "hpo",

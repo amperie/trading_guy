@@ -105,6 +105,9 @@ python run.py mongo-backtest --config trading/promoted/<bundle>/<bundle>.yaml --
 # Walk-forward backtest (rolling optimize + validate + continuous trade simulation)
 python run.py walk-forward --config configs/example_walk_forward.yaml
 
+# Walk-forward window HPO (search optimization/validation/trading window sizes)
+python run.py walk-forward-hpo --config configs/example_walk_forward_hpo.yaml
+
 # Standalone hyperparameter optimization
 python run.py hpo --config configs/example_hpo.yaml
 ```
@@ -199,6 +202,58 @@ Artifacts for walk-forward runs now include:
 
 - one full-run MLflow entry with end-to-end metrics
 - an equity curve chart annotated with optimization/adoption markers
+- optimization event artifacts (`optimization_events.json`, `.csv`, `.md`)
+
+### Walk-Forward Window HPO
+
+Use `walk-forward-hpo` when you want to tune the walk-forward schedule itself,
+not just the algorithm and portfolio parameters inside each optimization
+window.
+
+```bash
+python run.py walk-forward-hpo --config configs/example_walk_forward_hpo.yaml --account paper
+```
+
+This runs an outer Optuna search over:
+
+- `optimization_window_days`
+- `validation_window_days`
+- `trading_window_days`
+
+Each sampled schedule runs the normal historical walk-forward flow. That means
+each candidate still performs the configured inner Ray Tune HPO over
+`walk_forward.search_space`, validates incumbent vs challenger, and scores the
+final continuous walk-forward result.
+
+The candidate runs are logged to a temporary MLflow experiment. After the best
+window schedule is selected, the winner is rerun into the permanent experiment
+from `walk_forward_window_hpo.final_experiment_name`.
+
+Typical config block:
+
+```yaml
+walk_forward_window_hpo:
+  num_samples: 8
+  objective_metric: wf_annualized_return
+  min_periods: 3
+  final_experiment_name: "walk_forward_runs"
+
+  cleanup_staging_experiment: true
+  run_mlflow_gc: true
+  cleanup_s3_prefix: false
+
+  search_space:
+    optimization_window_days: { type: choice, values: [90, 120, 180, 252] }
+    validation_window_days:   { type: choice, values: [20, 30, 45, 60] }
+    trading_window_days:      { type: choice, values: [10, 20, 30] }
+```
+
+Cleanup notes:
+
+- `cleanup_staging_experiment` marks the temporary MLflow experiment deleted.
+- `run_mlflow_gc` attempts permanent MLflow cleanup after that deletion.
+- `cleanup_s3_prefix` directly removes `staging_artifact_location` with the AWS
+  CLI, so only use it with a dedicated staging prefix.
 - optimization event tables and JSON exports
 - MongoDB `optimization_events` records keyed by event id so chart markers can be traced back to the stored decision
 

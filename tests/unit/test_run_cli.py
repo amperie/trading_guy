@@ -144,6 +144,28 @@ def test_walk_forward_help_mentions_validation_window(capsys):
     assert "challenger" in help_text.lower()
 
 
+def test_build_parser_walk_forward_hpo_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "walk-forward-hpo",
+        "--config", "configs/example_walk_forward_hpo.yaml",
+        "--account", "paper",
+    ])
+
+    assert args.command == "walk-forward-hpo"
+    assert args.func is not None
+
+
+def test_walk_forward_hpo_help_mentions_staging_experiment(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["walk-forward-hpo", "-h"])
+    help_text = capsys.readouterr().out
+    assert "staging" in help_text
+    assert "MLflow" in help_text
+    assert "winning windows" in help_text
+
+
 def test_mongo_backtest_help_mentions_session_id(capsys):
     parser = build_parser()
     with pytest.raises(SystemExit):

@@ -231,3 +231,72 @@ def test_cmd_walk_forward_passes_mlflow_settings(monkeypatch):
 
     assert captured["engine"].kwargs["cfg"]["log_to_mlflow"] is False
     assert captured["engine"].kwargs["cfg"]["tracking_uri"] == "http://mlflow.local"
+
+
+def test_cmd_walk_forward_hpo_passes_window_hpo_settings(monkeypatch):
+    raw_cfg = {
+        "mode": "walk-forward",
+        "analysis": {
+            "experiment_name": "WF Experiment",
+            "run_name": "WF Window HPO",
+            "description": "WF HPO Desc",
+            "log_to_mlflow": True,
+        },
+        "mlflow": {"tracking_uri": "http://mlflow.local"},
+        "walk_forward": {"optimization_window_days": 30},
+        "walk_forward_window_hpo": {
+            "num_samples": 2,
+            "search_space": {
+                "optimization_window_days": {"type": "choice", "values": [30]},
+                "validation_window_days": {"type": "choice", "values": [5]},
+                "trading_window_days": {"type": "choice", "values": [10]},
+            },
+        },
+        "state_store": {"enabled": False},
+        "data_provider": {"provider": "dummy.Provider"},
+    }
+    built = SimpleNamespace(
+        data_provider=object(),
+        algorithm=object(),
+        order_manager=object(),
+        portfolio=SimpleNamespace(total_value=1000.0, cash=500.0, positions={}),
+    )
+    captured = {}
+
+    monkeypatch.setattr(walk_forward_cmd, "load_raw_config", lambda path: dict(raw_cfg))
+    monkeypatch.setattr(walk_forward_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(walk_forward_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(walk_forward_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(walk_forward_cmd, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
+    monkeypatch.setattr(walk_forward_cmd, "build_experiment_config", lambda cfg: "normalized-config")
+    monkeypatch.setattr(walk_forward_cmd.ExperimentService, "build", lambda cfg: built)
+    monkeypatch.setattr(
+        walk_forward_cmd.ExperimentService,
+        "describe",
+        lambda cfg: SimpleNamespace(config_hash="hash9012"),
+    )
+
+    class FakeWindowHPO:
+        def __init__(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def run(self):
+            return {
+                "best_windows": {
+                    "optimization_window_days": 30,
+                    "validation_window_days": 5,
+                    "trading_window_days": 10,
+                },
+                "best_metric": 1.23,
+                "final_result": {"aggregate": {}},
+            }
+
+    monkeypatch.setattr(walk_forward_cmd, "WalkForwardWindowHPO", FakeWindowHPO)
+
+    args = SimpleNamespace(config="cfg.yaml", account="paper", session_id=None)
+    walk_forward_cmd.cmd_walk_forward_hpo(args)
+
+    engine_cfg = captured["kwargs"]["engine_cfg"]
+    assert engine_cfg["walk_forward_window_hpo"]["num_samples"] == 2
+    assert engine_cfg["tracking_uri"] == "http://mlflow.local"
+    assert engine_cfg["experiment_name"] == "WF Experiment"

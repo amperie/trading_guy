@@ -1,0 +1,115 @@
+# Walk-forward window HPO.
+#
+# Usage:
+#   python run.py walk-forward-hpo --config configs/example_walk_forward_hpo.yaml --account paper
+#
+# Candidate window schedules are logged to a temporary MLflow experiment. The
+# winner is rerun into the permanent experiment configured below. If cleanup is
+# enabled, the temporary experiment is marked deleted, optional MLflow GC is
+# attempted, and the staging S3 prefix can be removed directly.
+
+mode: walk-forward
+
+data_provider:
+  provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+  symbols: ["UPRO"]
+  timeframe: "Minute"
+  start_date: "2020-01-01"
+  end_date: "2026-05-17"
+  adjustment: "split"
+  market_hours_only: true
+
+algorithm:
+  algorithm: "VolatilityFilteredRsiMeanReversionAlgorithm"
+  source_path: "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py"
+  class_name: "VolatilityFilteredRsiMeanReversionAlgorithm"
+  symbol: "UPRO"
+  history_length: 260
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+  price_confirmation:
+    reversal_bar_lookback: 2
+
+portfolio:
+  portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
+  symbol: "UPRO"
+  cash: 10000
+  keep_history: true
+  stop_pct: 5.0
+  profit_pct: 10.0
+
+order_manager:
+  order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
+
+walk_forward:
+  optimization_window_days: 180
+  validation_window_days: 30
+  trading_window_days: 30
+  improvement_threshold_pct: 5.0
+  min_validation_trades: 5
+  objective_metric: annualized_return
+
+  num_trials: 30
+  max_concurrent_trials: 8
+  log_ray_worker_output: true
+
+  search_space:
+    regime_detection.ma_short_period:         { type: randint, low: 20, high: 80 }
+    regime_detection.ma_proximity_tolerance:  { type: uniform, low: 0.005, high: 0.05 }
+    regime_detection.atr_percentile_level:    { type: randint, low: 30, high: 70 }
+    rsi_config.rsi_period:                    { type: randint, low: 5, high: 25 }
+    rsi_config.rsi_oversold_threshold:        { type: randint, low: 20, high: 40 }
+    rsi_config.rsi_overbought_threshold:      { type: randint, low: 60, high: 80 }
+    stop_pct:                                 { type: uniform, low: 1.0, high: 20.0 }
+    profit_pct:                               { type: uniform, low: 1.0, high: 15.0 }
+
+  algorithm_param_keys:
+    - regime_detection.ma_short_period
+    - regime_detection.ma_proximity_tolerance
+    - regime_detection.atr_percentile_level
+    - rsi_config.rsi_period
+    - rsi_config.rsi_oversold_threshold
+    - rsi_config.rsi_overbought_threshold
+  portfolio_param_keys:
+    - stop_pct
+    - profit_pct
+
+walk_forward_window_hpo:
+  num_samples: 8
+  max_concurrent_trials: 1
+  objective_metric: wf_annualized_return
+  min_periods: 3
+
+  # Omit staging_experiment_name to get a unique temp experiment per run.
+  # staging_experiment_name: "wf_window_hpo_tmp_20260519"
+  final_experiment_name: "walk_forward_runs"
+
+  # Optional artifact locations. Use a unique staging prefix so direct S3
+  # cleanup cannot touch permanent artifacts.
+  # staging_artifact_location: "s3://your-mlflow-bucket/tmp/wf-window-hpo/unique-run-id"
+  # final_artifact_location: "s3://your-mlflow-bucket/permanent/walk-forward"
+
+  cleanup_staging_experiment: true
+  run_mlflow_gc: true
+  cleanup_s3_prefix: false
+
+  search_space:
+    optimization_window_days: { type: choice, values: [90, 120, 180, 252] }
+    validation_window_days:   { type: choice, values: [20, 30, 45, 60] }
+    trading_window_days:      { type: choice, values: [10, 20, 30] }
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: "walk_forward_runs"
+  run_name: "VolatilityFilteredRSIMeanReversion_WindowHPO"
+  description: "Outer HPO over walk-forward optimization, validation, and trading window sizes"

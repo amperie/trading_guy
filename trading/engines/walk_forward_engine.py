@@ -68,6 +68,8 @@ class WalkForwardEngine(BaseEngine):
         self.description = cfg.get("description", "")
         self.log_to_mlflow = cfg.get("log_to_mlflow", True)
         self.tracking_uri = cfg.get("tracking_uri")
+        self.artifact_location = cfg.get("artifact_location")
+        self.mlflow_tags = cfg.get("mlflow_tags", {})
 
         self.original_dp_cfg = copy.deepcopy(dp.cfg) if dp else {}
         self.original_al_cfg = copy.deepcopy(al.cfg) if (al and hasattr(al, "cfg")) else {}
@@ -611,10 +613,10 @@ class WalkForwardEngine(BaseEngine):
         analysis_results: dict[str, Any],
         plans: list[dict[str, Any]],
         aggregate: dict[str, Any],
-    ) -> None:
+    ) -> str | None:
         mlflow_client = self._create_mlflow_client()
         if mlflow_client is None:
-            return
+            return None
 
         metrics = analysis_results["metrics"]
         event_rows = self._build_optimization_events_rows(plans)
@@ -623,6 +625,9 @@ class WalkForwardEngine(BaseEngine):
                 run_name=self.run_name,
                 description=self.description or f"Walk-forward backtest with {len(plans)} periods",
             ):
+                run_id = mlflow_client.run_id
+                if self.mlflow_tags:
+                    mlflow_client.set_tags(self.mlflow_tags)
                 mlflow_client.log_params(
                     {
                         "optimization_window_days": self.optimization_window_days,
@@ -658,8 +663,10 @@ class WalkForwardEngine(BaseEngine):
                     dpi=150,
                 )
                 self._log_optimization_events_artifacts(mlflow_client, event_rows)
+                return run_id
         except Exception as exc:
             logger.warning(f"Failed to log walk-forward run to MLflow: {exc}")
+            return None
 
     def run(self):
         periods = self._compute_periods()
@@ -704,13 +711,14 @@ class WalkForwardEngine(BaseEngine):
         analysis = continuous["analysis"]
         analysis_results = continuous["results"]
         aggregate = self._build_aggregate_summary(plans, analysis_results["metrics"])
-        self._log_full_run_to_mlflow(analysis, analysis_results, plans, aggregate)
+        mlflow_run_id = self._log_full_run_to_mlflow(analysis, analysis_results, plans, aggregate)
 
         return {
             "periods": plans,
             "aggregate": aggregate,
             "metrics": analysis_results["metrics"],
             "optimization_events": self._build_optimization_events_rows(plans),
+            "mlflow_run_id": mlflow_run_id,
         }
 
     def _create_mlflow_client(self):
@@ -719,11 +727,14 @@ class WalkForwardEngine(BaseEngine):
 
             if not self.log_to_mlflow:
                 return None
-            return MLflowClient(
-                experiment_name=self.experiment_name,
-                tracking_uri=self.tracking_uri,
-                enabled=True,
-            )
+            kwargs = {
+                "experiment_name": self.experiment_name,
+                "tracking_uri": self.tracking_uri,
+                "enabled": True,
+            }
+            if self.artifact_location:
+                kwargs["artifact_location"] = self.artifact_location
+            return MLflowClient(**kwargs)
         except Exception:
             logger.warning("MLflow client not available - results will not be logged")
             return None

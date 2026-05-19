@@ -21,6 +21,7 @@ Inspect a specific command:
 python run.py backtest -h
 python run.py mongo-backtest -h
 python run.py live -h
+python run.py walk-forward-hpo -h
 python run.py promote -h
 ```
 
@@ -32,6 +33,7 @@ python run.py promote -h
 - `mongo-backtest`: run a historical simulation over bars already stored in MongoDB for a prior session
 - `live`: start a live Alpaca-driven trading session
 - `walk-forward`: run rolling optimize/validate decisions plus one continuous out-of-sample simulation
+- `walk-forward-hpo`: search over walk-forward optimization, validation, and trading window sizes
 - `hpo`: run a standalone hyperparameter search
 - `hpo-split`: run HPO on a training span, then log train/validation backtests for the winner
 - `hpo-from-mlflow`: reconstruct an HPO config from a prior MLflow run, edit it, then launch it
@@ -271,6 +273,116 @@ For historical walk-forward runs, MLflow now records:
 - optimization event artifacts such as `optimization_events.json`, `optimization_events.csv`, and `optimization_events.md`
 
 MongoDB records the underlying optimization decisions in `optimization_events`. The event ids from those records are also used in the chart annotations so you can correlate the visualization with the stored audit trail.
+
+## Walk-Forward Window HPO
+
+Example:
+
+```bash
+python run.py walk-forward-hpo --config configs/example_walk_forward_hpo.yaml --account paper
+```
+
+Use this when you want to optimize the walk-forward schedule itself. The normal
+`walk-forward` command treats these values as fixed:
+
+```yaml
+walk_forward:
+  optimization_window_days: 180
+  validation_window_days: 30
+  trading_window_days: 30
+```
+
+`walk-forward-hpo` adds an outer Optuna search over those three values:
+
+```yaml
+walk_forward_window_hpo:
+  num_samples: 8
+  objective_metric: wf_annualized_return
+  min_periods: 3
+  search_space:
+    optimization_window_days: { type: choice, values: [90, 120, 180, 252] }
+    validation_window_days:   { type: choice, values: [20, 30, 45, 60] }
+    trading_window_days:      { type: choice, values: [10, 20, 30] }
+```
+
+For each sampled window schedule, the command:
+
+1. creates a candidate walk-forward config with the sampled window sizes
+2. runs the normal historical walk-forward engine
+3. lets each walk-forward period run the existing inner Ray Tune HPO over `walk_forward.search_space`
+4. scores the candidate using `walk_forward_window_hpo.objective_metric`
+5. records the candidate MLflow run id and window settings
+6. reruns the winning window schedule into the permanent MLflow experiment
+
+The objective metric can come from the aggregate walk-forward summary, such as:
+
+- `wf_annualized_return`
+- `wf_total_return_pct`
+- `wf_sharpe_ratio`
+- `wf_final_equity`
+
+It can also refer to a metric attribute from the final performance metrics
+object, such as `annualized_return`, if that is more convenient.
+
+### Staging and Final MLflow Experiments
+
+Candidate runs are intentionally logged to a staging experiment so the
+permanent experiment only receives the rerun winner.
+
+Key config:
+
+```yaml
+walk_forward_window_hpo:
+  # Omit this for a unique temp experiment name per run.
+  # staging_experiment_name: "wf_window_hpo_tmp_20260519"
+
+  final_experiment_name: "walk_forward_runs"
+
+  # Optional. Use a dedicated staging prefix if you enable direct S3 cleanup.
+  # staging_artifact_location: "s3://your-mlflow-bucket/tmp/wf-window-hpo/unique-run-id"
+  # final_artifact_location: "s3://your-mlflow-bucket/permanent/walk-forward"
+```
+
+If `staging_experiment_name` is omitted, the command creates a unique name like
+`wf_window_hpo_tmp_<timestamp>_<group_id>`. This avoids collisions between
+concurrent or repeated searches.
+
+### Cleanup Behavior
+
+Cleanup is controlled by these keys:
+
+```yaml
+walk_forward_window_hpo:
+  cleanup_staging_experiment: true
+  run_mlflow_gc: true
+  cleanup_s3_prefix: false
+```
+
+Behavior:
+
+- `cleanup_staging_experiment` marks the staging MLflow experiment deleted after the winner is rerun.
+- `run_mlflow_gc` runs `mlflow gc --experiment-ids <id>` after the staging experiment is marked deleted.
+- `cleanup_s3_prefix` runs `aws s3 rm <staging_artifact_location> --recursive`.
+
+Important S3 note: MLflow experiment deletion by itself should be treated as a
+metadata/lifecycle operation. If candidate artifacts are stored in S3 and you
+need hard cleanup, use `run_mlflow_gc` when your MLflow setup can resolve
+artifact URIs, or configure `cleanup_s3_prefix` with a dedicated staging prefix.
+Never point `staging_artifact_location` at a shared or permanent artifact root
+when direct S3 cleanup is enabled.
+
+### Cost Model
+
+This command is intentionally expensive. Total work is roughly:
+
+```text
+outer_window_trials * walk_forward_periods_per_candidate * inner_hpo_trials
+```
+
+For example, `8` outer trials, `10` walk-forward periods, and `30` inner
+strategy HPO trials can mean around `2,400` strategy backtests before validation
+and final continuous reruns. Start with small discrete `choice` lists and scale
+up after the staging/final MLflow flow looks right.
 
 ## HPO
 
