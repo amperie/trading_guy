@@ -83,6 +83,21 @@ def test_build_parser_promote_args():
     assert args.name == "spy-live"
 
 
+def test_build_parser_hpo_split_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hpo-split",
+        "--config", "configs/example_hpo_split.yaml",
+        "--account", "paper",
+        "--validation-period-days", "30",
+        "--num-samples", "5",
+    ])
+
+    assert args.command == "hpo-split"
+    assert args.validation_period_days == 30
+    assert args.num_samples == 5
+
+
 def test_root_help_mentions_hpo_from_mlflow(capsys):
     parser = build_parser()
     with pytest.raises(SystemExit):
@@ -99,6 +114,7 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "trading/promoted/my_live_bundle/my_live_bundle.yaml" in help_text
     assert "mongo-backtest" in help_text
     assert "configs/example_live_walk_forward.yaml" in help_text
+    assert "hpo-split" in help_text
 
 
 def test_backtest_help_mentions_remote_component_options(capsys):
@@ -148,6 +164,15 @@ def test_hpo_from_mlflow_help_mentions_editor(capsys):
     assert "--editor" in help_text
     assert "notepad.exe" in help_text
     assert "vim" in help_text
+
+
+def test_hpo_split_help_mentions_validation_period_days(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["hpo-split", "-h"])
+    help_text = capsys.readouterr().out
+    assert "--validation-period-days" in help_text
+    assert "hpo.validation_period_days" in help_text
 
 
 def test_promote_help_mentions_name(capsys):

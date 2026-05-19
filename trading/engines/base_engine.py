@@ -23,7 +23,6 @@ Two base classes are provided:
 
 Implementations:
     - BacktestingEngine:         Iterates over DataProvider ticks synchronously
-    - SplitPeriodBacktestEngine: Runs training + validation backtests
     - AlpacaRealTimeEngine:      Streams live data from Alpaca WebSocket
     - TickAggregationPassthroughEngine: Aggregates ticks before processing
 """

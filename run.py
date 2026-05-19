@@ -12,6 +12,7 @@ import argparse
 from trading.commands import (
     cmd_backtest,
     cmd_hpo,
+    cmd_hpo_split,
     cmd_live,
     cmd_mongo_backtest,
     cmd_promote,
@@ -60,6 +61,10 @@ def build_parser() -> argparse.ArgumentParser:
             "    --config --account [--num-samples] [--max-concurrent-trials] [--symbol] [--cash] [--algorithm]\n"
             "    [--algorithm-url] [--portfolio] [--portfolio-url] [--run-name] [--agg-period]\n"
             "    Example: python run.py hpo --config configs/example_hpo.yaml --account paper --num-samples 50\n"
+            "  hpo-split:\n"
+            "    Tune on the training span, then log best-config training and validation backtests.\n"
+            "    Accepts --validation-period-days to override hpo.validation_period_days.\n"
+            "    Example: python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --validation-period-days 30\n"
             "  hpo-from-mlflow:\n"
             "    Rebuild an HPO config from a prior MLflow run, open it for edits, then execute the search.\n"
             "    --account --run-url [--tracking-uri] [--editor]\n"
@@ -180,6 +185,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override hpo.max_concurrent_trials",
     )
     hpo_p.set_defaults(func=cmd_hpo)
+
+    hpo_split_p = subparsers.add_parser(
+        "hpo-split",
+        parents=[shared],
+        help="Run split HPO with best-config training and validation analysis",
+        description=(
+            "Reserve the final validation_period_days as an out-of-sample holdout, run HPO on the "
+            "earlier training span, then log the best config on both spans inside one MLflow run."
+        ),
+        epilog=(
+            "Example:\n"
+            "  python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --validation-period-days 30\n"
+        ),
+    )
+    hpo_split_p.add_argument("--num-samples", dest="num_samples", type=int, help="Override hpo.num_samples")
+    hpo_split_p.add_argument(
+        "--max-concurrent-trials",
+        dest="max_concurrent_trials",
+        type=int,
+        help="Override hpo.max_concurrent_trials",
+    )
+    hpo_split_p.add_argument(
+        "--validation-period-days",
+        dest="validation_period_days",
+        type=int,
+        help="Override hpo.validation_period_days",
+    )
+    hpo_split_p.set_defaults(func=cmd_hpo_split)
 
     hpo_mlflow_p = subparsers.add_parser(
         "hpo-from-mlflow",

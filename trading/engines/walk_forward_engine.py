@@ -218,8 +218,8 @@ class WalkForwardEngine(BaseEngine):
 
     def _create_dp_for_range(self, start: datetime, end: datetime) -> DataProvider:
         dp_cfg = copy.deepcopy(self.original_dp_cfg)
-        dp_cfg["start_date"] = start.strftime("%Y-%m-%d")
-        dp_cfg["end_date"] = end.strftime("%Y-%m-%d")
+        dp_cfg["start_date"] = start.isoformat(sep=" ")
+        dp_cfg["end_date"] = (end - pd.Timedelta(microseconds=1)).isoformat(sep=" ")
         return self._dp_class(dp_cfg)
 
     def _build_algorithm(self, al_cfg: dict) -> Algorithm:
@@ -457,12 +457,12 @@ class WalkForwardEngine(BaseEngine):
                     activated_event_ids.add(plan["event_id"])
                 activation_idx += 1
 
-            while trade_idx < len(plans) and timestamp > plans[trade_idx]["period"].trading_end:
+            while trade_idx < len(plans) and timestamp >= plans[trade_idx]["period"].trading_end:
                 trade_idx += 1
 
             allow_trading = (
                 trade_idx < len(plans)
-                and plans[trade_idx]["period"].trading_start <= timestamp <= plans[trade_idx]["period"].trading_end
+                and plans[trade_idx]["period"].trading_start <= timestamp < plans[trade_idx]["period"].trading_end
             )
             self._process_tick(tick, allow_trading)
             self._check_debug()

@@ -107,10 +107,24 @@ def test_compute_periods_do_not_overlap():
 
     assert periods
     for period in periods:
-        assert period.validation_start > period.optimization_end
-        assert period.trading_start > period.validation_end
+        assert period.validation_start == period.optimization_end
+        assert period.trading_start == period.validation_end
     for previous, current in zip(periods, periods[1:]):
-        assert current.optimization_start == previous.trading_start
+        assert current.optimization_start > previous.optimization_start
+        assert current.optimization_start == previous.optimization_start + pd.Timedelta(days=engine.trading_window_days)
+        assert current.trading_start == previous.trading_end
+
+
+def test_create_dp_for_range_preserves_intraday_end_boundaries():
+    engine = _build_engine()
+
+    dp = engine._create_dp_for_range(
+        datetime(2024, 1, 1, 9, 30),
+        datetime(2024, 1, 2, 9, 30),
+    )
+
+    assert dp.cfg["start_date"] == "2024-01-01 09:30:00"
+    assert dp.cfg["end_date"] == "2024-01-02 09:29:59.999999"
 
 
 def test_evaluate_period_compares_with_portfolio_params(monkeypatch):

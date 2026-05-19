@@ -2,6 +2,7 @@
 Comprehensive analysis engine for backtesting results
 Provides trade extraction, performance metrics, visualizations, and reports
 """
+from contextlib import nullcontext
 from dataclasses import dataclass
 import os
 import tempfile
@@ -2301,7 +2302,32 @@ Trading Days:           {self._metrics.trading_days}
             if artifact_dir and os.path.isdir(artifact_dir):
                 shutil.rmtree(artifact_dir, ignore_errors=True)
 
-    def _log_portfolio_analyzer_artifacts(self, mlflow, chart_dpi: int = 150) -> None:
+    @staticmethod
+    def _prefixed_artifact_name(filename: str, artifact_prefix: str = "") -> str:
+        basename = os.path.basename(filename)
+        return f"{artifact_prefix}{basename}" if artifact_prefix else basename
+
+    def _log_prefixed_chart_artifact(
+        self,
+        mlflow,
+        filename: str,
+        builder,
+        chart_dpi: int = 150,
+        artifact_prefix: str = "",
+    ) -> bool:
+        return self._log_chart_artifact(
+            mlflow,
+            self._prefixed_artifact_name(filename, artifact_prefix),
+            builder,
+            chart_dpi=chart_dpi,
+        )
+
+    def _log_portfolio_analyzer_artifacts(
+        self,
+        mlflow,
+        chart_dpi: int = 150,
+        artifact_prefix: str = "",
+    ) -> None:
         """
         Log the legacy PortfolioAnalyzer artifact set from the AnalysisEngine path.
 
@@ -2323,9 +2349,20 @@ Trading Days:           {self._metrics.trading_days}
             "trades.csv": analyzer.save_trades_csv,
         }
         for filename, builder in artifact_builders.items():
-            self._log_chart_artifact(mlflow, filename, builder, chart_dpi=chart_dpi)
+            self._log_prefixed_chart_artifact(
+                mlflow,
+                filename,
+                builder,
+                chart_dpi=chart_dpi,
+                artifact_prefix=artifact_prefix,
+            )
 
-    def _log_analysis_engine_artifacts(self, mlflow, chart_dpi: int = 150) -> None:
+    def _log_analysis_engine_artifacts(
+        self,
+        mlflow,
+        chart_dpi: int = 150,
+        artifact_prefix: str = "",
+    ) -> None:
         """Log AnalysisEngine-native supplemental charts independently."""
         chart_builders = {
             "portfolio_with_trades.png": lambda path: self.plot_portfolio_with_trades(show=False, save_path=path),
@@ -2339,7 +2376,99 @@ Trading Days:           {self._metrics.trading_days}
         for filename, builder in chart_builders.items():
             if builder is None:
                 continue
-            self._log_chart_artifact(mlflow, filename, builder, chart_dpi=chart_dpi)
+            self._log_prefixed_chart_artifact(
+                mlflow,
+                filename,
+                builder,
+                chart_dpi=chart_dpi,
+                artifact_prefix=artifact_prefix,
+            )
+
+    def _metric_dict(self, metric_prefix: str = "") -> Dict[str, float]:
+        return {
+            f"{metric_prefix}total_return": self._metrics.total_return,
+            f"{metric_prefix}total_return_pct": self._metrics.total_return_pct,
+            f"{metric_prefix}annualized_return": self._metrics.annualized_return,
+            f"{metric_prefix}sharpe_ratio": self._metrics.sharpe_ratio,
+            f"{metric_prefix}sortino_ratio": self._metrics.sortino_ratio,
+            f"{metric_prefix}max_drawdown": self._metrics.max_drawdown,
+            f"{metric_prefix}max_drawdown_pct": self._metrics.max_drawdown_pct,
+            f"{metric_prefix}max_drawdown_duration": self._metrics.max_drawdown_duration,
+            f"{metric_prefix}calmar_ratio": self._metrics.calmar_ratio,
+            f"{metric_prefix}ulcer_index": self._metrics.ulcer_index,
+            f"{metric_prefix}volatility": self._metrics.volatility,
+            f"{metric_prefix}total_trades": float(self._metrics.total_trades),
+            f"{metric_prefix}winning_trades": float(self._metrics.winning_trades),
+            f"{metric_prefix}losing_trades": float(self._metrics.losing_trades),
+            f"{metric_prefix}win_rate": self._metrics.win_rate,
+            f"{metric_prefix}avg_win": self._metrics.avg_win,
+            f"{metric_prefix}avg_loss": self._metrics.avg_loss,
+            f"{metric_prefix}largest_win": self._metrics.largest_win,
+            f"{metric_prefix}largest_loss": self._metrics.largest_loss,
+            f"{metric_prefix}profit_factor": self._metrics.profit_factor,
+            f"{metric_prefix}avg_trade_pnl": self._metrics.avg_trade_pnl,
+            f"{metric_prefix}avg_trade_duration_hours": self._metrics.avg_trade_duration,
+            f"{metric_prefix}avg_bars_in_trade": self._metrics.avg_bars_in_trade,
+            f"{metric_prefix}bracket_trades": float(self._metrics.bracket_trades),
+            f"{metric_prefix}bracket_stop_triggers": float(self._metrics.bracket_stop_triggers),
+            f"{metric_prefix}bracket_profit_triggers": float(self._metrics.bracket_profit_triggers),
+            f"{metric_prefix}bracket_manual_exits": float(self._metrics.bracket_manual_exits),
+            f"{metric_prefix}bracket_stop_rate": self._metrics.bracket_stop_rate,
+            f"{metric_prefix}bracket_profit_rate": self._metrics.bracket_profit_rate,
+            f"{metric_prefix}best_day": self._metrics.best_day,
+            f"{metric_prefix}worst_day": self._metrics.worst_day,
+            f"{metric_prefix}avg_daily_return": self._metrics.avg_daily_return,
+            f"{metric_prefix}skewness": self._metrics.skewness,
+            f"{metric_prefix}kurtosis": self._metrics.kurtosis,
+            f"{metric_prefix}final_equity": self._metrics.final_equity,
+            f"{metric_prefix}initial_equity": self._metrics.initial_equity,
+            f"{metric_prefix}peak_equity": self._metrics.peak_equity,
+            f"{metric_prefix}total_days": self._metrics.total_days,
+            f"{metric_prefix}trading_days": float(self._metrics.trading_days),
+        }
+
+    def _log_prefixed_file_artifact(
+        self,
+        mlflow,
+        filename: str,
+        *,
+        artifact_prefix: str,
+        writer,
+    ) -> None:
+        target_name = self._prefixed_artifact_name(filename, artifact_prefix)
+        scratch_tmp = os.path.join(os.getcwd(), "scratch", "tmp_analysis_engine")
+        os.makedirs(scratch_tmp, exist_ok=True)
+        artifact_dir = os.path.join(scratch_tmp, uuid.uuid4().hex)
+        os.makedirs(artifact_dir, exist_ok=True)
+        try:
+            artifact_path = os.path.join(artifact_dir, target_name)
+            writer(artifact_path)
+            mlflow.log_artifact(artifact_path)
+        finally:
+            shutil.rmtree(artifact_dir, ignore_errors=True)
+
+    def _log_prefixed_extra_artifact(
+        self,
+        mlflow,
+        path: str,
+        *,
+        artifact_prefix: str,
+        artifact_path: str = "config",
+    ) -> None:
+        if not artifact_prefix:
+            mlflow.log_artifact(path, artifact_path=artifact_path)
+            return
+        prefixed_name = self._prefixed_artifact_name(path, artifact_prefix)
+        scratch_tmp = os.path.join(os.getcwd(), "scratch", "tmp_analysis_engine")
+        os.makedirs(scratch_tmp, exist_ok=True)
+        artifact_dir = os.path.join(scratch_tmp, uuid.uuid4().hex)
+        os.makedirs(artifact_dir, exist_ok=True)
+        try:
+            artifact_copy = os.path.join(artifact_dir, prefixed_name)
+            shutil.copy2(path, artifact_copy)
+            mlflow.log_artifact(artifact_copy, artifact_path=artifact_path)
+        finally:
+            shutil.rmtree(artifact_dir, ignore_errors=True)
 
     def _log_to_mlflow_unified(
         self,
@@ -2355,10 +2484,17 @@ Trading Days:           {self._metrics.trading_days}
         log_report: bool = True,
         chart_dpi: int = 150,
         artifact_paths: Optional[list] = None,
+        metric_prefix: str = "",
+        artifact_prefix: str = "",
+        mlflow_client=None,
+        start_new_run: bool = True,
+        log_parameters: bool = True,
     ):
         from utils.mlflow_client import MLflowClient
 
-        if tracking_uri is None:
+        if mlflow_client is not None:
+            mlflow = mlflow_client
+        elif tracking_uri is None:
             mlflow = MLflowClient.from_config(experiment_name=experiment_name)
         else:
             mlflow = MLflowClient(experiment_name=experiment_name, tracking_uri=tracking_uri)
@@ -2367,7 +2503,12 @@ Trading Days:           {self._metrics.trading_days}
             logger.info("MLflow tracking is disabled in config")
             return
 
-        with mlflow.start_run(run_name=run_name, description=description, tags=tags):
+        run_ctx = (
+            mlflow.start_run(run_name=run_name, description=description, tags=tags)
+            if start_new_run
+            else nullcontext()
+        )
+        with run_ctx:
             logger.info("Logging analysis results to MLflow...")
 
             if self._metrics is None:
@@ -2375,58 +2516,18 @@ Trading Days:           {self._metrics.trading_days}
             if self._trades is None:
                 self.extract_trades()
 
-            if parameters:
+            if log_parameters and parameters:
                 mlflow.log_params(parameters)
                 logger.debug(f"Logged {len(parameters)} parameters")
 
-            mlflow.log_metrics({
-                "total_return": self._metrics.total_return,
-                "total_return_pct": self._metrics.total_return_pct,
-                "annualized_return": self._metrics.annualized_return,
-                "sharpe_ratio": self._metrics.sharpe_ratio,
-                "sortino_ratio": self._metrics.sortino_ratio,
-                "max_drawdown": self._metrics.max_drawdown,
-                "max_drawdown_pct": self._metrics.max_drawdown_pct,
-                "max_drawdown_duration": self._metrics.max_drawdown_duration,
-                "calmar_ratio": self._metrics.calmar_ratio,
-                "ulcer_index": self._metrics.ulcer_index,
-                "volatility": self._metrics.volatility,
-                "total_trades": float(self._metrics.total_trades),
-                "winning_trades": float(self._metrics.winning_trades),
-                "losing_trades": float(self._metrics.losing_trades),
-                "win_rate": self._metrics.win_rate,
-                "avg_win": self._metrics.avg_win,
-                "avg_loss": self._metrics.avg_loss,
-                "largest_win": self._metrics.largest_win,
-                "largest_loss": self._metrics.largest_loss,
-                "profit_factor": self._metrics.profit_factor,
-                "avg_trade_pnl": self._metrics.avg_trade_pnl,
-                "avg_trade_duration_hours": self._metrics.avg_trade_duration,
-                "avg_bars_in_trade": self._metrics.avg_bars_in_trade,
-                "bracket_trades": float(self._metrics.bracket_trades),
-                "bracket_stop_triggers": float(self._metrics.bracket_stop_triggers),
-                "bracket_profit_triggers": float(self._metrics.bracket_profit_triggers),
-                "bracket_manual_exits": float(self._metrics.bracket_manual_exits),
-                "bracket_stop_rate": self._metrics.bracket_stop_rate,
-                "bracket_profit_rate": self._metrics.bracket_profit_rate,
-                "best_day": self._metrics.best_day,
-                "worst_day": self._metrics.worst_day,
-                "avg_daily_return": self._metrics.avg_daily_return,
-                "skewness": self._metrics.skewness,
-                "kurtosis": self._metrics.kurtosis,
-                "final_equity": self._metrics.final_equity,
-                "initial_equity": self._metrics.initial_equity,
-                "peak_equity": self._metrics.peak_equity,
-                "total_days": self._metrics.total_days,
-                "trading_days": float(self._metrics.trading_days),
-            })
+            mlflow.log_metrics(self._metric_dict(metric_prefix=metric_prefix))
 
             try:
                 ext_benchmarks = self.calculate_external_benchmarks()
                 if ext_benchmarks:
                     bm_metrics = {}
                     for bm_symbol, bm in ext_benchmarks.items():
-                        prefix = f"bm_{bm_symbol.lower()}"
+                        prefix = f"{metric_prefix}bm_{bm_symbol.lower()}"
                         bm_metrics[f"{prefix}_return_pct"] = bm["total_return_pct"]
                         bm_metrics[f"{prefix}_sharpe"] = bm["sharpe_ratio"]
                         bm_metrics[f"{prefix}_volatility"] = bm["volatility"]
@@ -2438,8 +2539,16 @@ Trading Days:           {self._metrics.trading_days}
                 logger.warning(f"Could not log external benchmark metrics: {e}")
 
             if log_charts:
-                self._log_portfolio_analyzer_artifacts(mlflow, chart_dpi=chart_dpi)
-                self._log_analysis_engine_artifacts(mlflow, chart_dpi=chart_dpi)
+                self._log_portfolio_analyzer_artifacts(
+                    mlflow,
+                    chart_dpi=chart_dpi,
+                    artifact_prefix=artifact_prefix,
+                )
+                self._log_analysis_engine_artifacts(
+                    mlflow,
+                    chart_dpi=chart_dpi,
+                    artifact_prefix=artifact_prefix,
+                )
 
             if log_trades and self._trades:
                 trades_data = [
@@ -2459,57 +2568,74 @@ Trading Days:           {self._metrics.trading_days}
                     }
                     for t in self._trades
                 ]
-                mlflow.log_json(trades_data, "trades.json")
+                mlflow.log_json(trades_data, self._prefixed_artifact_name("trades.json", artifact_prefix))
 
             if self._metrics.bracket_trades > 0:
-                mlflow.log_json(self.analyze_bracket_effectiveness(), "bracket_analysis.json")
+                mlflow.log_json(
+                    self.analyze_bracket_effectiveness(),
+                    self._prefixed_artifact_name("bracket_analysis.json", artifact_prefix),
+                )
 
             if log_signals and hasattr(self.portfolio, "signals_history") and self.portfolio.signals_history:
                 from utils.utils import serialize_signals_history, serialize_signals_history_flat
 
                 sorted_timestamps = sorted(self.portfolio.signals_history.keys())
                 signals_list = [self.portfolio.signals_history[ts] for ts in sorted_timestamps]
-                mlflow.log_json(serialize_signals_history(signals_list), "signals_history.json")
-                mlflow.log_json(serialize_signals_history_flat(signals_list), "signals_history_flat.json")
+                mlflow.log_json(
+                    serialize_signals_history(signals_list),
+                    self._prefixed_artifact_name("signals_history.json", artifact_prefix),
+                )
+                mlflow.log_json(
+                    serialize_signals_history_flat(signals_list),
+                    self._prefixed_artifact_name("signals_history_flat.json", artifact_prefix),
+                )
 
                 try:
                     signals_orders_report = self.generate_signals_orders_report()
                     if signals_orders_report and "No signals history" not in signals_orders_report:
-                        mlflow.log_text(signals_orders_report, "signals_to_orders_report.txt")
+                        mlflow.log_text(
+                            signals_orders_report,
+                            self._prefixed_artifact_name("signals_to_orders_report.txt", artifact_prefix),
+                        )
                 except Exception as e:
                     logger.warning(f"Failed to generate signals-to-orders report: {e}")
 
                 try:
                     signals_df = self.generate_signals_orders_dataframe()
                     if not signals_df.empty:
-                        scratch_tmp = os.path.join(os.getcwd(), "scratch", "tmp_analysis_engine")
-                        os.makedirs(scratch_tmp, exist_ok=True)
-                        temp_dir = os.path.join(scratch_tmp, uuid.uuid4().hex)
-                        os.makedirs(temp_dir, exist_ok=True)
+                        self._log_prefixed_file_artifact(
+                            mlflow,
+                            "signals_orders_dataframe.csv",
+                            artifact_prefix=artifact_prefix,
+                            writer=lambda target: signals_df.to_csv(target, index=False),
+                        )
                         try:
-                            csv_path = os.path.join(temp_dir, "signals_orders_dataframe.csv")
-                            signals_df.to_csv(csv_path, index=False)
-                            mlflow.log_artifact(csv_path)
-                            try:
-                                parquet_path = os.path.join(temp_dir, "signals_orders_dataframe.parquet")
-                                signals_df.to_parquet(parquet_path, index=False)
-                                mlflow.log_artifact(parquet_path)
-                            except ImportError:
-                                pass
-                            except Exception as e:
-                                logger.debug(f"Parquet export failed: {e}")
-                        finally:
-                            shutil.rmtree(temp_dir, ignore_errors=True)
+                            self._log_prefixed_file_artifact(
+                                mlflow,
+                                "signals_orders_dataframe.parquet",
+                                artifact_prefix=artifact_prefix,
+                                writer=lambda target: signals_df.to_parquet(target, index=False),
+                            )
+                        except ImportError:
+                            pass
+                        except Exception as e:
+                            logger.debug(f"Parquet export failed: {e}")
                 except Exception as e:
                     logger.warning(f"Failed to generate signals-to-orders DataFrame: {e}")
 
             if log_report:
-                mlflow.log_text(self.generate_report(), "analysis_engine_performance_report.txt")
+                mlflow.log_text(
+                    self.generate_report(),
+                    self._prefixed_artifact_name("analysis_engine_performance_report.txt", artifact_prefix),
+                )
 
             try:
                 all_orders_report = self.generate_all_orders_report()
                 if all_orders_report:
-                    mlflow.log_text(all_orders_report, "all_orders_report.txt")
+                    mlflow.log_text(
+                        all_orders_report,
+                        self._prefixed_artifact_name("all_orders_report.txt", artifact_prefix),
+                    )
             except Exception as e:
                 logger.warning(f"Failed to generate comprehensive orders report: {e}")
 
@@ -2529,12 +2655,20 @@ Trading Days:           {self._metrics.trading_days}
 - **Volatility (Ann.):** {self._metrics.volatility:.2f}%
 - **Calmar Ratio:** {self._metrics.calmar_ratio:.2f}
 """
-            mlflow.log_markdown(markdown_summary, "summary.md")
+            mlflow.log_markdown(
+                markdown_summary,
+                self._prefixed_artifact_name("summary.md", artifact_prefix),
+            )
 
             if artifact_paths:
                 for path in artifact_paths:
                     if os.path.isfile(path):
-                        mlflow.log_artifact(path, artifact_path="config")
+                        self._log_prefixed_extra_artifact(
+                            mlflow,
+                            path,
+                            artifact_prefix=artifact_prefix,
+                            artifact_path="config",
+                        )
 
             run_url = mlflow.get_run_url()
             logger.info("Analysis logged to MLflow successfully!")
@@ -2554,7 +2688,12 @@ Trading Days:           {self._metrics.trading_days}
         log_signals: bool = True,
         log_report: bool = True,
         chart_dpi: int = 150,
-        artifact_paths: Optional[list] = None
+        artifact_paths: Optional[list] = None,
+        metric_prefix: str = "",
+        artifact_prefix: str = "",
+        mlflow_client=None,
+        start_new_run: bool = True,
+        log_parameters: bool = True,
     ):
         """
         Log all analysis results to MLflow
@@ -2592,6 +2731,11 @@ Trading Days:           {self._metrics.trading_days}
             log_report=log_report,
             chart_dpi=chart_dpi,
             artifact_paths=artifact_paths,
+            metric_prefix=metric_prefix,
+            artifact_prefix=artifact_prefix,
+            mlflow_client=mlflow_client,
+            start_new_run=start_new_run,
+            log_parameters=log_parameters,
         )
 
         try:

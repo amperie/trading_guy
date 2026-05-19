@@ -451,7 +451,8 @@ def tune_backtest_hyperparameters(
     max_concurrent_trials: int = 8,
     log_to_mlflow: bool = False,
     log_ray_worker_output: bool = True,
-) -> dict:
+    return_trial_summaries: bool = False,
+) -> dict | tuple[dict, list[dict]]:
     """
     Generic hyperparameter optimization using Ray Tune with Optuna.
 
@@ -475,7 +476,9 @@ def tune_backtest_hyperparameters(
         max_concurrent_trials: Maximum number of concurrent trials
 
     Returns:
-        Best hyperparameter configuration found
+        Best hyperparameter configuration found.
+        When return_trial_summaries=True, also returns a list of
+        {"config": ..., "metric": ...} dictionaries for all completed trials.
 
     Example:
         search_space = {
@@ -533,6 +536,16 @@ def tune_backtest_hyperparameters(
         )
     )
     results = tuner.fit()
-    best_config = results.get_best_result(metric="_metric", mode="max").config
+    best_result = results.get_best_result(metric="_metric", mode="max")
+    best_config = best_result.config
+    if return_trial_summaries:
+        trial_summaries = []
+        for result in results:
+            metric = result.metrics.get("_metric")
+            if metric is None:
+                continue
+            trial_summaries.append({"config": result.config, "metric": metric})
+        print(best_config)
+        return best_config, trial_summaries
     print(best_config)
     return best_config

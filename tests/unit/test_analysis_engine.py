@@ -5,6 +5,7 @@ Tests trade extraction, metrics calculation, and returns analysis
 import pytest
 from datetime import datetime
 import pandas as pd
+from types import SimpleNamespace
 
 from trading.analysis.analysis_engine import AnalysisEngine, Trade, PerformanceMetrics
 from trading.core.pf.single_symbol_portfolio import SingleSymbolPortfolio
@@ -254,3 +255,95 @@ class TestAnalysisEngine:
         assert trade.pnl == 98.0
         assert trade.pnl_pct == 10.0
         assert trade.is_bracket == False
+
+
+def test_log_to_mlflow_unified_applies_metric_and_artifact_prefixes(monkeypatch):
+    engine = AnalysisEngine.__new__(AnalysisEngine)
+    engine.portfolio = SimpleNamespace(signals_history={})
+    engine.order_manager = object()
+    engine._trades = []
+    engine._metrics = PerformanceMetrics(
+        total_return=1.0,
+        total_return_pct=2.0,
+        annualized_return=3.0,
+        sharpe_ratio=4.0,
+        sortino_ratio=5.0,
+        max_drawdown=-1.0,
+        max_drawdown_pct=-2.0,
+        max_drawdown_duration=1.0,
+        total_trades=0,
+        winning_trades=0,
+        losing_trades=0,
+        win_rate=0.0,
+        avg_win=0.0,
+        avg_loss=0.0,
+        largest_win=0.0,
+        largest_loss=0.0,
+        profit_factor=0.0,
+        avg_trade_pnl=0.0,
+        avg_trade_duration=0.0,
+        avg_bars_in_trade=0.0,
+        bracket_trades=0,
+        bracket_stop_triggers=0,
+        bracket_profit_triggers=0,
+        bracket_manual_exits=0,
+        bracket_stop_rate=0.0,
+        bracket_profit_rate=0.0,
+        calmar_ratio=0.0,
+        ulcer_index=0.0,
+        volatility=0.0,
+        skewness=0.0,
+        kurtosis=0.0,
+        best_day=0.0,
+        worst_day=0.0,
+        avg_daily_return=0.0,
+        final_equity=101.0,
+        initial_equity=100.0,
+        peak_equity=101.0,
+        total_days=10.0,
+        trading_days=10,
+    )
+    engine.calculate_metrics = lambda: engine._metrics
+    engine.extract_trades = lambda: []
+    engine.calculate_external_benchmarks = lambda: {}
+    engine.generate_report = lambda: "report"
+    engine.generate_all_orders_report = lambda: "orders"
+    captured = {"metrics": None, "artifacts": []}
+
+    monkeypatch.setattr(
+        engine,
+        "_log_portfolio_analyzer_artifacts",
+        lambda mlflow, chart_dpi=150, artifact_prefix="": captured["artifacts"].append(("portfolio", artifact_prefix)),
+    )
+    monkeypatch.setattr(
+        engine,
+        "_log_analysis_engine_artifacts",
+        lambda mlflow, chart_dpi=150, artifact_prefix="": captured["artifacts"].append(("analysis", artifact_prefix)),
+    )
+
+    class FakeMLflowClient:
+        enabled = True
+
+        def log_metrics(self, metrics):
+            captured["metrics"] = metrics
+
+        def log_markdown(self, markdown, filename):
+            captured["artifacts"].append(("markdown", filename))
+
+        def log_text(self, text, filename):
+            captured["artifacts"].append(("text", filename))
+
+        def get_run_url(self):
+            return ""
+
+    engine._log_to_mlflow_unified(
+        mlflow_client=FakeMLflowClient(),
+        start_new_run=False,
+        metric_prefix="val_",
+        artifact_prefix="val_",
+    )
+
+    assert captured["metrics"]["val_annualized_return"] == 3.0
+    assert ("portfolio", "val_") in captured["artifacts"]
+    assert ("analysis", "val_") in captured["artifacts"]
+    assert ("markdown", "val_summary.md") in captured["artifacts"]

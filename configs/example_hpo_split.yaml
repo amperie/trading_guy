@@ -1,0 +1,117 @@
+# Split HPO with a promoted volatility-filtered RSI mean-reversion strategy.
+#
+# Usage:
+#   python run.py hpo-split --config configs/example_hpo_split.yaml --account paper
+#   python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --validation-period-days 30
+#   python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --num-samples 25
+#
+# How it works:
+#   1. The command reserves the last hpo.validation_period_days of the configured
+#      data range as out-of-sample validation.
+#   2. Ray Tune runs HPO only on the earlier training span.
+#   3. After HPO completes, the best config is backtested once on training and
+#      once on validation.
+#   4. MLflow logs one run with:
+#      - training metrics prefixed trn_
+#      - validation metrics prefixed val_
+#      - validation artifacts prefixed val_
+
+mode: hpo
+
+# ---------------------------------------------------------------------------
+# Data provider - Alpaca historical bars
+# ---------------------------------------------------------------------------
+data_provider:
+  provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+  symbols: ["UPRO"]
+  timeframe: "Minute"
+  start_date: "2025-01-01"
+  end_date: "2026-05-17"
+  adjustment: "split"
+  market_hours_only: true
+  # api_key / secret_key are filled from the selected account when using --account
+
+# ---------------------------------------------------------------------------
+# Algorithm - promoted volatility-filtered RSI mean-reversion strategy
+# ---------------------------------------------------------------------------
+algorithm:
+  algorithm: "VolatilityFilteredRsiMeanReversionAlgorithm"
+  source_path: "trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py"
+  class_name: "VolatilityFilteredRsiMeanReversionAlgorithm"
+  symbol: "UPRO"
+  history_length: 260
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+  price_confirmation:
+    reversal_bar_lookback: 2
+
+# ---------------------------------------------------------------------------
+# Portfolio - single-symbol with bracket orders
+# ---------------------------------------------------------------------------
+portfolio:
+  portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
+  symbol: "UPRO"
+  cash: 10000
+  keep_history: true
+  stop_pct: 5.0
+  profit_pct: 10.0
+
+# ---------------------------------------------------------------------------
+# Order manager - backtesting (instant fills)
+# ---------------------------------------------------------------------------
+order_manager:
+  order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
+
+# ---------------------------------------------------------------------------
+# HPO configuration
+# validation_period_days is the holdout span taken from the END of the range.
+# objective_metric controls which span selects the winning config after trials:
+#   - val_annualized_return: default, choose the config with best validation return
+#   - trn_annualized_return: choose the config with best training return
+# ---------------------------------------------------------------------------
+hpo:
+  validation_period_days: 30
+  objective_metric: val_annualized_return
+  num_samples: 50
+  max_concurrent_trials: 16
+  log_trials_to_mlflow: false
+  log_ray_worker_output: true
+
+  search_space:
+    regime_detection.ma_short_period:         { type: randint, low: 20, high: 80 }
+    regime_detection.ma_proximity_tolerance:  { type: uniform, low: 0.005, high: 0.05 }
+    regime_detection.atr_percentile_level:    { type: randint, low: 30, high: 70 }
+    rsi_config.rsi_period:                    { type: randint, low: 5, high: 25 }
+    rsi_config.rsi_oversold_threshold:        { type: randint, low: 20, high: 40 }
+    rsi_config.rsi_overbought_threshold:      { type: randint, low: 60, high: 80 }
+    stop_pct:                                 { type: uniform, low: 1.0, high: 20.0 }
+    profit_pct:                               { type: uniform, low: 1.0, high: 15.0 }
+
+  algorithm_param_keys:
+    - regime_detection.ma_short_period
+    - regime_detection.ma_proximity_tolerance
+    - regime_detection.atr_percentile_level
+    - rsi_config.rsi_period
+    - rsi_config.rsi_oversold_threshold
+    - rsi_config.rsi_overbought_threshold
+  portfolio_param_keys:
+    - stop_pct
+    - profit_pct
+
+# ---------------------------------------------------------------------------
+# Analysis / MLflow
+# ---------------------------------------------------------------------------
+analysis:
+  log_to_mlflow: true
+  experiment_name: "hpo_split_runs"
+  run_name: "VolatilityFilteredRSIMeanReversion_HpoSplit"
+  description: "Split HPO for the promoted volatility-filtered RSI mean-reversion strategy on UPRO Alpaca minute bars"

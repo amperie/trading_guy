@@ -55,12 +55,12 @@ def compute_walk_forward_periods(
 
     while True:
         opt_end = opt_start + timedelta(days=optimization_window_days)
-        validation_start = opt_end + timedelta(days=1)
+        validation_start = opt_end
         validation_end = validation_start + timedelta(days=validation_window_days)
-        trading_start = validation_end + timedelta(days=1)
+        trading_start = validation_end
         trading_end = trading_start + timedelta(days=trading_window_days)
 
-        if trading_start > data_end:
+        if trading_start >= data_end:
             break
         if trading_end > data_end:
             trading_end = data_end
@@ -75,7 +75,7 @@ def compute_walk_forward_periods(
                 trading_end=trading_end,
             )
         )
-        opt_start = trading_start
+        opt_start = opt_start + timedelta(days=trading_window_days)
 
     return periods
 

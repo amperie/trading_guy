@@ -13,10 +13,7 @@ Test Files:
 - test_bracket_holding_period.py: Full backtest with bracket orders (3 tests)
 - test_ray_imports.py: Ray library import smoke tests (3 tests)
 - test_signals_debug.py: Signal generation end-to-end (1 test)
-- test_split_period_engine.py: Split-period backtest engine (9 tests)
-- test_split_period_simple.py: Simple split-period backtest (3 tests)
-
-Total: 29 integration tests
+Total: 17 integration tests
 
 Run with: pytest tests/integration/ -v
 """

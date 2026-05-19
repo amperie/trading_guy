@@ -16,15 +16,12 @@ Test Organization:
   - test_technical_analyzer.py: Technical analyzer API (16 tests)
   - test_tick_aggregation_passthrough_engine.py: Tick aggregation engine (4 tests)
 
-- integration/: Integration tests with external services (29 tests)
+- integration/: Integration tests with external services (17 tests)
   - test_alpaca_om_integration.py: Alpaca API integration (10 tests)
   - test_bracket_holding_period.py: Bracket orders with holding period (3 tests)
   - test_ray_imports.py: Ray library import smoke tests (3 tests)
   - test_signals_debug.py: Signal generation end-to-end (1 test)
-  - test_split_period_engine.py: Split-period backtest engine (9 tests)
-  - test_split_period_simple.py: Simple split-period backtest (3 tests)
-
-Total: 187 tests (158 unit + 29 integration)
+Total: 175 tests (158 unit + 17 integration)
 
 Running Tests:
     pytest tests/                    # Run all tests

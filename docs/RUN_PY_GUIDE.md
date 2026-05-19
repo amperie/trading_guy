@@ -33,6 +33,7 @@ python run.py promote -h
 - `live`: start a live Alpaca-driven trading session
 - `walk-forward`: run rolling optimize/validate decisions plus one continuous out-of-sample simulation
 - `hpo`: run a standalone hyperparameter search
+- `hpo-split`: run HPO on a training span, then log train/validation backtests for the winner
 - `hpo-from-mlflow`: reconstruct an HPO config from a prior MLflow run, edit it, then launch it
 - `session-replay`: replay a stored live session offline
 - `promote`: turn a prior MLflow run into a portable live bundle
@@ -59,6 +60,7 @@ Important details:
 - `backtest` also supports `--data`
 - `mongo-backtest` requires `--session-id` and forces MongoDB bars plus the backtesting order manager
 - `hpo` also supports `--num-samples` and `--max-concurrent-trials`
+- `hpo-split` also supports `--num-samples`, `--max-concurrent-trials`, and `--validation-period-days`
 - `hpo-from-mlflow` and `promote` operate from MLflow run URLs instead of local config paths
 
 ## Config Loading Rules
@@ -282,6 +284,39 @@ Use this when:
 - you already know the local config you want to optimize
 - you want to search parameter space directly
 - you do not need to reconstruct the config from a previous MLflow run
+
+## Split HPO
+
+Example:
+
+```bash
+python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --validation-period-days 30
+```
+
+What it does:
+
+1. Uses all but the last `validation_period_days` of the configured date range as the HPO training window
+2. Reserves the final `validation_period_days` as an out-of-sample validation window
+3. Runs Ray Tune only on the training window
+4. Selects the winning config using `hpo.objective_metric`
+5. Re-runs the chosen config once on training and once on validation
+6. Logs one MLflow run with:
+   - training metrics prefixed `trn_`
+   - validation metrics prefixed `val_`
+   - validation artifacts prefixed `val_`
+
+Supported `hpo.objective_metric` values:
+- `val_annualized_return`: default, choose the winner by validation annualized return
+- `trn_annualized_return`: choose the winner by training annualized return
+
+Useful flags:
+
+```bash
+python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --num-samples 25 --max-concurrent-trials 4
+python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --validation-period-days 45
+```
+
+Use this when you want one HPO pass plus a clean out-of-sample holdout without the rolling complexity of full walk-forward.
 
 ## HPO From MLflow
 
