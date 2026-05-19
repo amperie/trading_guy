@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from types import SimpleNamespace
 
+import pytest
+
 from trading.commands import hpo as hpo_cmd
 
 
@@ -62,9 +64,38 @@ def test_resolve_hpo_split_dates_uses_config_range():
     )
 
     assert start == "2024-01-01"
-    assert train_end == "2024-01-26"
+    assert train_end == "2024-01-26 23:59:59.999999"
     assert val_start == "2024-01-27"
-    assert end == "2024-01-31"
+    assert end == "2024-01-31 23:59:59.999999"
+
+
+def test_resolve_data_path_prefers_existing_cwd_relative_path(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    csv_path = data_dir / "prices.csv"
+    csv_path.write_text("timestamp\n2024-01-01\n")
+    monkeypatch.chdir(tmp_path)
+
+    assert hpo_cmd._resolve_data_path("data/prices.csv") == csv_path.resolve()
+
+
+def test_select_best_split_config_rejects_empty_trial_summaries():
+    with pytest.raises(RuntimeError, match="no completed trial metrics"):
+        hpo_cmd._select_best_split_config(
+            trial_summaries=[],
+            objective_metric="val_annualized_return",
+            base_backtest_cfg={},
+            base_al_cfg={},
+            base_pf_cfg={},
+            train_dp_cfg={},
+            val_dp_cfg={},
+            algorithm_class=object,
+            portfolio_class=object,
+            data_provider_class=object,
+            order_manager_class=object,
+            algorithm_param_keys=[],
+            portfolio_param_keys=[],
+        )
 
 
 def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):

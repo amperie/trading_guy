@@ -152,6 +152,13 @@ class WalkForwardWindowHPO:
         cfg["log_to_mlflow"] = bool(self.engine_cfg.get("log_to_mlflow", True))
         if self.staging_artifact_location:
             cfg["artifact_location"] = self.staging_artifact_location
+        # Disable state persistence for candidate runs. Each candidate is a
+        # throwaway evaluation — if state_store.enabled is True with a fixed
+        # session_id, all N candidates would resume and overwrite the same
+        # MongoDB session, corrupting the data. Only the winner run should
+        # persist a session.
+        if cfg.get("state_store"):
+            cfg["state_store"] = {**cfg["state_store"], "enabled": False}
         cfg.setdefault("walk_forward", {}).update(windows)
         cfg["mlflow_tags"] = {
             **cfg.get("mlflow_tags", {}),

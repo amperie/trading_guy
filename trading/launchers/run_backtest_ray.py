@@ -536,15 +536,26 @@ def tune_backtest_hyperparameters(
         )
     )
     results = tuner.fit()
-    best_result = results.get_best_result(metric="_metric", mode="max")
+    trial_summaries = []
+    for result in results:
+        metric = result.metrics.get("_metric")
+        if metric is None:
+            continue
+        trial_summaries.append({"config": result.config, "metric": metric})
+    if not trial_summaries:
+        raise RuntimeError(
+            f"All {num_samples} HPO trials failed or produced no optimization metric. "
+            "Check Ray Tune logs for individual trial errors."
+        )
+
+    try:
+        best_result = results.get_best_result(metric="_metric", mode="max")
+    except Exception as exc:
+        raise RuntimeError(
+            "Ray Tune could not select a best HPO trial. Check Ray Tune logs for failed trials."
+        ) from exc
     best_config = best_result.config
     if return_trial_summaries:
-        trial_summaries = []
-        for result in results:
-            metric = result.metrics.get("_metric")
-            if metric is None:
-                continue
-            trial_summaries.append({"config": result.config, "metric": metric})
         print(best_config)
         return best_config, trial_summaries
     print(best_config)

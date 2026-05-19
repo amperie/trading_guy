@@ -112,8 +112,17 @@ def _resolve_data_path(path_value: str) -> Path:
     path = Path(path_value).expanduser()
     if path.is_absolute():
         return path
-    provider_root = Path(__file__).resolve().parent.parent / "data_providers"
-    return (provider_root / path).resolve()
+    repo_root = Path(__file__).resolve().parents[2]
+    trading_root = Path(__file__).resolve().parents[1]
+    candidates = [
+        Path.cwd() / path,
+        repo_root / path,
+        trading_root / path,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
 
 
 def _resolve_hpo_split_dates(base_dp_cfg: dict[str, Any], validation_period_days: int) -> tuple[str, str, str, str]:
@@ -149,11 +158,19 @@ def _resolve_hpo_split_dates(base_dp_cfg: dict[str, Any], validation_period_days
             f"Range={start_ts.date()}..{end_ts.date()} validation_period_days={validation_period_days}"
         )
 
+    def _start_of_day(value: pd.Timestamp) -> str:
+        return value.strftime("%Y-%m-%d")
+
+    def _end_of_day(value: pd.Timestamp) -> str:
+        return (value + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)).strftime(
+            "%Y-%m-%d %H:%M:%S.%f"
+        )
+
     return (
-        start_ts.strftime("%Y-%m-%d"),
-        training_end.strftime("%Y-%m-%d"),
-        validation_start.strftime("%Y-%m-%d"),
-        end_ts.strftime("%Y-%m-%d"),
+        _start_of_day(start_ts),
+        _end_of_day(training_end),
+        _start_of_day(validation_start),
+        _end_of_day(end_ts),
     )
 
 
@@ -243,6 +260,11 @@ def _select_best_split_config(
     algorithm_param_keys: list[str],
     portfolio_param_keys: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], float]:
+    if not trial_summaries:
+        raise RuntimeError(
+            "Split HPO produced no completed trial metrics. Check Ray Tune logs for failed trials."
+        )
+
     if objective_metric == "trn_annualized_return":
         best_trial = max(trial_summaries, key=lambda trial: trial["metric"])
         best_al_cfg, best_pf_cfg = _build_trial_configs(
