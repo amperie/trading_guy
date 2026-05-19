@@ -3131,6 +3131,11 @@ Trading Days:           {self._metrics.trading_days}
         show_summary: bool = True,
         artifact_paths: Optional[list] = None,
         benchmark_paths: Optional[Dict[str, str]] = None,
+        metric_prefix: str = "",
+        artifact_prefix: str = "",
+        mlflow_client=None,
+        start_new_run: bool = True,
+        log_parameters: bool = True,
     ) -> Dict[str, Any]:
         """
         Run complete analysis and optionally log to MLflow
@@ -3273,7 +3278,12 @@ Trading Days:           {self._metrics.trading_days}
                     tags=tags,
                     parameters=parameters,
                     tracking_uri=tracking_uri,
-                    artifact_paths=artifact_paths
+                    artifact_paths=artifact_paths,
+                    metric_prefix=metric_prefix,
+                    artifact_prefix=artifact_prefix,
+                    mlflow_client=mlflow_client,
+                    start_new_run=start_new_run,
+                    log_parameters=log_parameters,
                 )
             else:
                 self.log_to_mlflow(
@@ -3283,7 +3293,12 @@ Trading Days:           {self._metrics.trading_days}
                     description=description,
                     tags=tags,
                     parameters=parameters,
-                    artifact_paths=artifact_paths
+                    artifact_paths=artifact_paths,
+                    metric_prefix=metric_prefix,
+                    artifact_prefix=artifact_prefix,
+                    mlflow_client=mlflow_client,
+                    start_new_run=start_new_run,
+                    log_parameters=log_parameters,
                 )
 
         # Return all results

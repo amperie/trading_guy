@@ -38,7 +38,7 @@ data_provider:
   provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
   symbols: ["UPRO"]
   timeframe: "Minute"
-  start_date: "2025-01-01"
+  start_date: "2020-01-01"
   end_date: "2026-05-17"
   adjustment: "split"
   market_hours_only: true
