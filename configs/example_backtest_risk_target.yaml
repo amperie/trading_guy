@@ -1,0 +1,78 @@
+# Risk-targeted backtest example.
+#
+# Usage:
+#   python run.py backtest --config configs/example_backtest_risk_target.yaml --account paper
+#   python run.py backtest --config configs/example_backtest_risk_target.yaml --account paper --cash 50000
+#
+# RiskTargetPortfolio is long-only and single-symbol. The algorithm decides
+# direction with BUY/SELL signals; the portfolio decides position size from
+# realized volatility, signal strength, and drawdown controls.
+
+mode: backtest
+
+data_provider:
+  provider: "trading.data_providers.test_data_provider.TestDataProvider"
+  path: "../data/SPY_5min.csv"
+  truncate: 0
+
+algorithm:
+  algorithm: "trading.core.algorithms.test_algorithm.TestAlgorithm"
+  history_length: 10
+
+portfolio:
+  portfolio: "trading.core.pf.risk_target_portfolio.RiskTargetPortfolio"
+  symbol: "SPY"
+  cash: 100000
+  keep_history: true
+
+  # Sizing parameters:
+  # target_volatility is annualized and expressed as a decimal.
+  # 0.15 means the portfolio targets about 15% annualized volatility.
+  target_volatility: 0.15
+
+  # Number of close-to-close returns used for realized volatility.
+  # The portfolio stores volatility_lookback + 1 closes internally.
+  volatility_lookback: 78
+
+  # Bars-per-year used to annualize volatility.
+  # Approximate regular-session values:
+  #   daily bars: 252
+  #   hourly bars: 1638
+  #   5-minute bars: 19656
+  #   1-minute bars: 98280
+  annualization_factor: 19656
+
+  # Maximum long exposure as a multiple of equity.
+  # 1.0 means fully invested at most; 0.5 means at most half invested.
+  max_exposure: 1.0
+
+  # Startup exposure before enough volatility history exists.
+  # Set to 0.0 to wait until volatility is measurable.
+  default_exposure: 0.5
+
+  # Skip rebalances smaller than this notional value to reduce churn.
+  min_trade_value: 100
+
+  # Ignore signals below this strength. Strength also scales exposure:
+  # strength 50 targets half the exposure of strength 100.
+  min_signal_strength: 0
+
+  # Per-order transaction cost.
+  tx_cost: 0.0
+
+  # Drawdown guard. 0.10 means liquidate after a 10% drawdown from peak equity.
+  # Set drawdown_limit_pct to 0.0 to disable this behavior.
+  drawdown_limit_pct: 0.10
+  halt_on_drawdown: true
+
+order_manager:
+  order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
+
+analysis:
+  enabled: true
+  log_to_mlflow: false
+  experiment_name: "Example Backtest"
+  run_name: "SPY risk target backtest"
+  description: "Example backtest using RiskTargetPortfolio on SPY 5-minute data"
+  benchmarks:
+    SPY: "data/SPY_5min.csv"
