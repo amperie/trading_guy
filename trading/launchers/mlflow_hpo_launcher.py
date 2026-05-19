@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 
-from trading.commands.hpo import _fill_hpo_data_provider_creds, run_hpo_from_raw_config
+from trading.commands.hpo import _fill_hpo_data_provider_creds, run_hpo_from_raw_config, run_hpo_split_from_raw_config
 from trading.commands.common import load_account_creds, load_raw_config
 from utils.logger import Logger
 from utils.mlflow_client import MLFLOW_AVAILABLE, MLflowClient
@@ -411,6 +411,8 @@ def _prompt(prompt: str, default: str | None = None) -> str:
 def prepare_hpo_config_from_source(
     source_context: SourceRunContext,
     experiment_name: str,
+    *,
+    split_validation: bool = False,
 ) -> dict[str, Any]:
     raw_cfg = copy.deepcopy(source_context.raw_config)
     raw_cfg["mode"] = "hpo"
@@ -418,9 +420,10 @@ def prepare_hpo_config_from_source(
     analysis_cfg = raw_cfg.setdefault("analysis", {})
     analysis_cfg["log_to_mlflow"] = True
     analysis_cfg["experiment_name"] = experiment_name
-    analysis_cfg.setdefault("run_name", f"{source_context.run_name}_hpo")
+    suffix = "hpo_split" if split_validation else "hpo"
+    analysis_cfg.setdefault("run_name", f"{source_context.run_name}_{suffix}")
     analysis_cfg["description"] = (
-        f"Recreated HPO from source MLflow run {source_context.run_id} "
+        f"Recreated {'split ' if split_validation else ''}HPO from source MLflow run {source_context.run_id} "
         f"({source_context.source_url})"
     )
 
@@ -478,18 +481,25 @@ def log_hpo_launcher_summary(
     prepared_cfg: dict[str, Any],
     best_config: dict[str, Any],
     edited_config_path: str | None = None,
+    *,
+    split_validation: bool = False,
 ) -> None:
     analysis_cfg = prepared_cfg.get("analysis", {})
     mlflow_cfg = prepared_cfg.get("mlflow", {})
     experiment_name = analysis_cfg.get("experiment_name", "HPO")
     tracking_uri = mlflow_cfg.get("tracking_uri")
     run_name = f"{analysis_cfg.get('run_name', source_context.run_name)}_launcher_summary"
+    launcher_kind = "split_hpo" if split_validation else "hpo"
 
     client = MLflowClient(experiment_name=experiment_name, tracking_uri=tracking_uri)
     with client.start_run(
         run_name=run_name,
-        description=f"HPO launcher summary for source run {source_context.run_id}",
-        tags={"source_run_id": source_context.run_id, "source_run_url": source_context.source_url},
+        description=f"{launcher_kind} launcher summary for source run {source_context.run_id}",
+        tags={
+            "source_run_id": source_context.run_id,
+            "source_run_url": source_context.source_url,
+            "launcher_kind": launcher_kind,
+        },
     ):
         client.log_params({
             "source_run_id": source_context.run_id,
@@ -497,6 +507,7 @@ def log_hpo_launcher_summary(
             "config_source": source_context.config_source,
             "num_samples": prepared_cfg.get("hpo", {}).get("num_samples"),
             "max_concurrent_trials": prepared_cfg.get("hpo", {}).get("max_concurrent_trials"),
+            "validation_period_days": prepared_cfg.get("hpo", {}).get("validation_period_days"),
         })
         client.log_json(prepared_cfg.get("hpo", {}), "hpo_launcher_config.json")
         client.log_json(best_config, "best_config.json")
@@ -509,8 +520,8 @@ def log_hpo_launcher_summary(
                 client.log_artifact(str(config_path), artifact_path="config")
 
 
-def prompt_for_hpo_launch(source_context: SourceRunContext) -> str:
-    default_experiment_name = "hpo_from_mlflow"
+def prompt_for_hpo_launch(source_context: SourceRunContext, *, split_validation: bool = False) -> str:
+    default_experiment_name = "hpo_split_from_mlflow" if split_validation else "hpo_from_mlflow"
     return _prompt("MLflow experiment name for the recreated HPO", default_experiment_name)
 
 
@@ -519,13 +530,16 @@ def run_launcher(
     account: str,
     tracking_uri: str | None = None,
     editor: str | None = None,
+    *,
+    split_validation: bool = False,
 ) -> dict[str, Any]:
     source_context = load_source_run_context(run_url, tracking_uri=tracking_uri)
-    experiment_name = prompt_for_hpo_launch(source_context)
+    experiment_name = prompt_for_hpo_launch(source_context, split_validation=split_validation)
 
     prepared_cfg = prepare_hpo_config_from_source(
         source_context=source_context,
         experiment_name=experiment_name,
+        split_validation=split_validation,
     )
 
     edited_cfg = edit_hpo_config(prepared_cfg, editor=editor)
@@ -540,13 +554,28 @@ def run_launcher(
             "The saved HPO config has an empty hpo.search_space. "
             "Add at least one tunable parameter in the editor before running."
         )
-    best_config = run_hpo_from_raw_config(
+    if split_validation:
+        best_config = run_hpo_split_from_raw_config(
+            edited_cfg,
+            config_artifact_path=edited_config_path,
+            num_samples_override=final_hpo_cfg.get("num_samples"),
+            max_concurrent_override=final_hpo_cfg.get("max_concurrent_trials"),
+            validation_period_days_override=final_hpo_cfg.get("validation_period_days"),
+        )
+    else:
+        best_config = run_hpo_from_raw_config(
+            edited_cfg,
+            config_artifact_path=edited_config_path,
+            num_samples_override=final_hpo_cfg.get("num_samples"),
+            max_concurrent_override=final_hpo_cfg.get("max_concurrent_trials"),
+        )
+    log_hpo_launcher_summary(
+        source_context,
         edited_cfg,
-        config_artifact_path=edited_config_path,
-        num_samples_override=final_hpo_cfg.get("num_samples"),
-        max_concurrent_override=final_hpo_cfg.get("max_concurrent_trials"),
+        best_config,
+        edited_config_path=edited_config_path,
+        split_validation=split_validation,
     )
-    log_hpo_launcher_summary(source_context, edited_cfg, best_config, edited_config_path=edited_config_path)
     return best_config
 
 

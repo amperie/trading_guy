@@ -12,3 +12,13 @@ def cmd_hpo_from_mlflow(args: argparse.Namespace):
         tracking_uri=getattr(args, "tracking_uri", None),
         editor=getattr(args, "editor", None),
     )
+
+
+def cmd_hpo_split_from_mlflow(args: argparse.Namespace):
+    run_launcher(
+        args.run_url,
+        args.account,
+        tracking_uri=getattr(args, "tracking_uri", None),
+        editor=getattr(args, "editor", None),
+        split_validation=True,
+    )

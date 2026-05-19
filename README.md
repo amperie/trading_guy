@@ -110,6 +110,12 @@ python run.py walk-forward-hpo --config configs/example_walk_forward_hpo.yaml
 
 # Standalone hyperparameter optimization
 python run.py hpo --config configs/example_hpo.yaml
+
+# Split HPO with an out-of-sample validation holdout
+python run.py hpo-split --config configs/example_hpo_split.yaml --validation-period-days 30
+
+# Recreate HPO settings from a prior MLflow run
+python run.py hpo-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id>
 ```
 
 Common flags (all modes):
@@ -117,13 +123,17 @@ Common flags (all modes):
 | Flag | Description |
 |---|---|
 | `--config` | YAML config profile (required) |
+| `--account` | Account name from `accounts.yaml` |
 | `--cash` | Override starting cash |
 | `--symbol` | Override trading symbol |
 | `--algorithm` | Override algorithm class (dotted path) |
+| `--algorithm-url` | Load algorithm code from an HTTP(S) URL |
+| `--portfolio` | Override portfolio class (dotted path) |
+| `--portfolio-url` | Load portfolio code from an HTTP(S) URL |
 | `--no-mlflow` | Disable MLflow logging |
 | `--run-name` | Override MLflow run name |
 | `--agg-period N` | Set aggregation bar size in minutes (also enables aggregation) |
-| `--data` | Override data file path (backtest / walk-forward / hpo) |
+| `--data` | Override data file path for commands that expose it |
 | `--session-id` | MongoDB session ID |
 
 Live optimization modes:
@@ -170,6 +180,65 @@ class MyPortfolio(Portfolio):
 ```
 
 Order types: **Market** (instant fill) and **Bracket** (entry + stop-loss + profit-taker; when one child triggers the other is canceled).
+
+### RiskTargetPortfolio
+
+`RiskTargetPortfolio` is a built-in long-only, single-symbol portfolio for
+volatility-based position sizing. It treats the algorithm as the directional
+decision maker and handles the sizing decision itself:
+
+- `BUY` signal: rebalance toward a risk-sized long position
+- `SELL` signal: liquidate the current position
+- no signal: hold unless the drawdown guard is triggered
+
+Target exposure is:
+
+```text
+min(max_exposure, target_volatility / realized_volatility) * (signal.strength / 100)
+```
+
+Before enough price history exists to estimate volatility, it uses
+`default_exposure`.
+
+Example:
+
+```yaml
+portfolio:
+  portfolio: "trading.core.pf.risk_target_portfolio.RiskTargetPortfolio"
+  symbol: "SPY"
+  cash: 100000
+  keep_history: true
+
+  # Sizing
+  target_volatility: 0.15     # 15% annualized target volatility
+  volatility_lookback: 20     # close-to-close returns used for realized vol
+  annualization_factor: 252   # daily bars; use ~19656 for 5-min regular-session bars
+  max_exposure: 1.0           # cap at 100% long exposure
+  default_exposure: 0.5       # startup exposure before vol history is ready
+
+  # Trading filters
+  min_trade_value: 100        # skip tiny rebalance orders
+  min_signal_strength: 50     # ignore weak signals; strength also scales size
+  tx_cost: 0.0
+
+  # Risk guard
+  drawdown_limit_pct: 0.10    # liquidate after 10% drawdown from peak equity
+  halt_on_drawdown: true      # ignore later BUY signals after that breach
+```
+
+Parameter notes:
+
+- `target_volatility` and `drawdown_limit_pct` use decimal form, so `0.15`
+  means 15%.
+- `annualization_factor` must match the bar size. Common values are `252` for
+  daily bars, about `1638` for hourly regular-session bars, about `19656` for
+  5-minute regular-session bars, and about `98280` for 1-minute regular-session
+  bars.
+- `max_exposure` is an equity multiple. `1.0` means fully invested at most;
+  values above `1.0` request leverage, subject to available cash or buying power.
+- `min_signal_strength` filters signals and signal strength also scales the
+  final target exposure.
+- The portfolio emits market orders and integer share quantities only.
 
 ---
 

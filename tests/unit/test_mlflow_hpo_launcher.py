@@ -357,7 +357,7 @@ def test_run_launcher_wires_summary(monkeypatch):
     monkeypatch.setattr(
         launcher,
         "prompt_for_hpo_launch",
-        lambda source_context: "Recreated HPO",
+        lambda source_context, split_validation=False: "Recreated HPO",
     )
     monkeypatch.setattr(launcher, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
     monkeypatch.setattr(launcher, "_fill_hpo_data_provider_creds", lambda cfg, creds: captured.setdefault("creds", creds))
@@ -385,7 +385,7 @@ def test_run_launcher_wires_summary(monkeypatch):
     monkeypatch.setattr(
         launcher,
         "log_hpo_launcher_summary",
-        lambda source_context, prepared_cfg, best_config, edited_config_path=None: captured.update(
+        lambda source_context, prepared_cfg, best_config, edited_config_path=None, split_validation=False: captured.update(
             {"prepared_cfg": prepared_cfg, "best_config": best_config, "edited_config_path": edited_config_path}
         ),
     )
@@ -418,13 +418,14 @@ def test_run_launcher_requires_search_space_after_edit(monkeypatch):
     monkeypatch.setattr(
         launcher,
         "prompt_for_hpo_launch",
-        lambda source_context: "Recreated HPO",
+        lambda source_context, split_validation=False: "Recreated HPO",
     )
     monkeypatch.setattr(
         launcher,
         "edit_hpo_config",
         lambda prepared_cfg, editor=None: prepared_cfg,
     )
+    monkeypatch.setattr(launcher, "persist_edited_hpo_config", lambda source_context, edited_cfg: "scratch/generated_hpo_configs/empty.yaml")
     monkeypatch.setattr(launcher, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
     monkeypatch.setattr(launcher, "_fill_hpo_data_provider_creds", lambda cfg, creds: None)
 
@@ -433,3 +434,87 @@ def test_run_launcher_requires_search_space_after_edit(monkeypatch):
         assert False, "Expected ValueError"
     except ValueError as exc:
         assert "empty hpo.search_space" in str(exc)
+
+
+def test_run_launcher_split_uses_split_hpo_runner(monkeypatch):
+    context = launcher.SourceRunContext(
+        run_id="abc123",
+        run_name="source-run",
+        tracking_uri="http://localhost:5000",
+        source_url="http://localhost:5000/#/experiments/1/runs/abc123",
+        raw_config={
+            "mode": "backtest",
+            "algorithm": {"algorithm": "pkg.Algo", "lookback": 10},
+            "portfolio": {"portfolio": "pkg.Portfolio", "stop_pct": 5.0},
+            "order_manager": {"order_manager": "pkg.OM"},
+            "data_provider": {"provider": "pkg.Provider", "path": "data.csv"},
+        },
+        config_source="params",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(launcher, "load_source_run_context", lambda run_url, tracking_uri=None: context)
+
+    def fake_prompt(source_context, split_validation=False):
+        captured["prompt_split_validation"] = split_validation
+        return "Recreated Split HPO"
+
+    monkeypatch.setattr(launcher, "prompt_for_hpo_launch", fake_prompt)
+    monkeypatch.setattr(
+        launcher,
+        "edit_hpo_config",
+        lambda prepared_cfg, editor=None: {
+            **prepared_cfg,
+            "hpo": {
+                "search_space": {"lookback": {"type": "randint", "low": 5, "high": 21}},
+                "algorithm_param_keys": ["lookback"],
+                "portfolio_param_keys": [],
+                "num_samples": 30,
+                "max_concurrent_trials": 4,
+                "validation_period_days": 20,
+            },
+        },
+    )
+    monkeypatch.setattr(launcher, "persist_edited_hpo_config", lambda source_context, edited_cfg: "scratch/generated_hpo_configs/split.yaml")
+    monkeypatch.setattr(launcher, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
+    monkeypatch.setattr(launcher, "_fill_hpo_data_provider_creds", lambda cfg, creds: None)
+    monkeypatch.setattr(
+        launcher,
+        "run_hpo_split_from_raw_config",
+        lambda cfg, num_samples_override=None, max_concurrent_override=None, validation_period_days_override=None, config_artifact_path=None: captured.update(
+            {
+                "cfg": cfg,
+                "num_samples_override": num_samples_override,
+                "max_concurrent_override": max_concurrent_override,
+                "validation_period_days_override": validation_period_days_override,
+                "config_artifact_path": config_artifact_path,
+            }
+        ) or {"lookback": 13},
+    )
+    monkeypatch.setattr(
+        launcher,
+        "run_hpo_from_raw_config",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("plain HPO runner should not be called")),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "log_hpo_launcher_summary",
+        lambda source_context, prepared_cfg, best_config, edited_config_path=None, split_validation=False: captured.update(
+            {"summary_split_validation": split_validation, "best_config": best_config}
+        ),
+    )
+
+    best = launcher.run_launcher(
+        "http://localhost:5000/#/experiments/1/runs/abc123",
+        "paper",
+        split_validation=True,
+    )
+
+    assert best == {"lookback": 13}
+    assert captured["prompt_split_validation"] is True
+    assert captured["cfg"]["analysis"]["experiment_name"] == "Recreated Split HPO"
+    assert captured["num_samples_override"] == 30
+    assert captured["max_concurrent_override"] == 4
+    assert captured["validation_period_days_override"] == 20
+    assert captured["config_artifact_path"] == "scratch/generated_hpo_configs/split.yaml"
+    assert captured["summary_split_validation"] is True

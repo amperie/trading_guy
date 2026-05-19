@@ -279,20 +279,20 @@ def _select_best_split_config(
     return best_config, best_al_cfg, best_pf_cfg, best_score
 
 
-def cmd_hpo_split(args: argparse.Namespace):
-    raw_cfg = load_raw_config(args.config)
-    raw_cfg = apply_cli_overrides(raw_cfg, args)
-    apply_session_log_file(raw_cfg, args)
-    creds = load_account_creds(args.account)
-    _fill_hpo_data_provider_creds(raw_cfg, creds)
-
+def run_hpo_split_from_raw_config(
+    raw_cfg: dict[str, Any],
+    config_artifact_path: str | None = None,
+    num_samples_override: int | None = None,
+    max_concurrent_override: int | None = None,
+    validation_period_days_override: int | None = None,
+) -> dict[str, Any]:
     hpo_cfg = raw_cfg.setdefault("hpo", {})
-    if getattr(args, "num_samples", None) is not None:
-        hpo_cfg["num_samples"] = args.num_samples
-    if getattr(args, "max_concurrent_trials", None) is not None:
-        hpo_cfg["max_concurrent_trials"] = args.max_concurrent_trials
-    if getattr(args, "validation_period_days", None) is not None:
-        hpo_cfg["validation_period_days"] = args.validation_period_days
+    if num_samples_override is not None:
+        hpo_cfg["num_samples"] = num_samples_override
+    if max_concurrent_override is not None:
+        hpo_cfg["max_concurrent_trials"] = max_concurrent_override
+    if validation_period_days_override is not None:
+        hpo_cfg["validation_period_days"] = validation_period_days_override
 
     validation_period_days = int(hpo_cfg.get("validation_period_days", 0))
     if validation_period_days <= 0:
@@ -391,7 +391,7 @@ def cmd_hpo_split(args: argparse.Namespace):
         "hpo.val_start_date": val_start,
         "hpo.val_end_date": val_end,
     }
-    artifact_paths = _collect_config_artifact_paths(raw_cfg, config_path=args.config)
+    artifact_paths = _collect_config_artifact_paths(raw_cfg, config_path=config_artifact_path)
 
     if analysis_cfg.get("log_to_mlflow", True):
         mlflow_client = MLflowClient(
@@ -464,6 +464,23 @@ def cmd_hpo_split(args: argparse.Namespace):
         "Final metrics: trn_annualized_return=%.4f val_annualized_return=%.4f",
         train_results["metrics"].annualized_return,
         val_results["metrics"].annualized_return,
+    )
+    return best_config
+
+
+def cmd_hpo_split(args: argparse.Namespace):
+    raw_cfg = load_raw_config(args.config)
+    raw_cfg = apply_cli_overrides(raw_cfg, args)
+    apply_session_log_file(raw_cfg, args)
+    creds = load_account_creds(args.account)
+    _fill_hpo_data_provider_creds(raw_cfg, creds)
+
+    run_hpo_split_from_raw_config(
+        raw_cfg,
+        config_artifact_path=args.config,
+        num_samples_override=getattr(args, "num_samples", None),
+        max_concurrent_override=getattr(args, "max_concurrent_trials", None),
+        validation_period_days_override=getattr(args, "validation_period_days", None),
     )
 
 

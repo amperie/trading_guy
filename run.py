@@ -20,7 +20,7 @@ from trading.commands import (
     cmd_walk_forward,
     cmd_walk_forward_hpo,
 )
-from trading.commands.hpo_from_mlflow import cmd_hpo_from_mlflow
+from trading.commands.hpo_from_mlflow import cmd_hpo_from_mlflow, cmd_hpo_split_from_mlflow
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
             "    Rebuild an HPO config from a prior MLflow run, open it for edits, then execute the search.\n"
             "    --account --run-url [--tracking-uri] [--editor]\n"
             "    Example: python run.py hpo-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --editor vim\n"
+            "  hpo-split-from-mlflow:\n"
+            "    Rebuild an HPO config from a prior MLflow run, edit it, then run split HPO with validation holdout.\n"
+            "    --account --run-url [--tracking-uri] [--editor]\n"
+            "    Example: python run.py hpo-split-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --editor vim\n"
             "  session-replay:\n"
             "    Re-run a saved live session offline with historical Alpaca bars and MongoDB-backed state.\n"
             "    --config --account --session-id [--timeframe] [--start-date] [--run-name] [--agg-period]\n"
@@ -276,6 +280,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Editor executable or command. Defaults to notepad.exe on Windows and vim on Linux when EDITOR/VISUAL is unset",
     )
     hpo_mlflow_p.set_defaults(func=cmd_hpo_from_mlflow)
+
+    hpo_split_mlflow_p = subparsers.add_parser(
+        "hpo-split-from-mlflow",
+        parents=[shared_account],
+        help="Recreate a split HPO search from an MLflow run, edit the generated YAML, then execute it",
+        description=(
+            "Load a prior MLflow run, reconstruct its runtime config, prefill HPO settings from MLflow artifacts "
+            "when available, open the generated HPO YAML in a local editor, then run split HPO with the final "
+            "hpo.validation_period_days reserved as an out-of-sample validation window."
+        ),
+    )
+    hpo_split_mlflow_p.add_argument("--run-url", required=True, help="MLflow run URL to recreate")
+    hpo_split_mlflow_p.add_argument(
+        "--tracking-uri",
+        dest="tracking_uri",
+        help="Optional MLflow tracking URI override if the URL does not point to the desired tracking server",
+    )
+    hpo_split_mlflow_p.add_argument(
+        "--editor",
+        help="Editor executable or command. Defaults to notepad.exe on Windows and vim on Linux when EDITOR/VISUAL is unset",
+    )
+    hpo_split_mlflow_p.set_defaults(func=cmd_hpo_split_from_mlflow)
 
     sr_p = subparsers.add_parser(
         "session-replay",

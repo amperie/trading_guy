@@ -37,6 +37,7 @@ python run.py promote -h
 - `hpo`: run a standalone hyperparameter search
 - `hpo-split`: run HPO on a training span, then log train/validation backtests for the winner
 - `hpo-from-mlflow`: reconstruct an HPO config from a prior MLflow run, edit it, then launch it
+- `hpo-split-from-mlflow`: reconstruct an HPO config from a prior MLflow run, edit it, then launch split HPO with a validation holdout
 - `session-replay`: replay a stored live session offline
 - `promote`: turn a prior MLflow run into a portable live bundle
 
@@ -63,7 +64,8 @@ Important details:
 - `mongo-backtest` requires `--session-id` and forces MongoDB bars plus the backtesting order manager
 - `hpo` also supports `--num-samples` and `--max-concurrent-trials`
 - `hpo-split` also supports `--num-samples`, `--max-concurrent-trials`, and `--validation-period-days`
-- `hpo-from-mlflow` and `promote` operate from MLflow run URLs instead of local config paths
+- `walk-forward-hpo` uses `walk_forward_window_hpo` config keys rather than command-specific trial flags
+- `hpo-from-mlflow`, `hpo-split-from-mlflow`, and `promote` operate from MLflow run URLs instead of local config paths
 
 ## Config Loading Rules
 
@@ -455,6 +457,16 @@ What happens:
 7. After you save and close the editor, it executes the HPO run
 
 This is useful when the best starting point is an already-executed research run instead of a hand-authored HPO profile.
+
+## Split HPO From MLflow
+
+Example:
+
+```bash
+python run.py hpo-split-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id>
+```
+
+This follows the same reconstruction and edit flow as `hpo-from-mlflow`, then runs the `hpo-split` workflow. The edited YAML must include `hpo.validation_period_days`; the final slice of that many days is reserved for validation.
 
 ## Promote
 
