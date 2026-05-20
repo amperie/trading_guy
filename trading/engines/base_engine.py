@@ -82,6 +82,12 @@ class BaseEngine(ABC):
         writes tick data, portfolio snapshots, signals, and orders to
         MongoDB after each tick via ``_persist_tick()``.
 
+    SIGINT handling:
+        By default engines now preserve normal ``Ctrl-C`` behavior so
+        long-running backtests and HPO jobs can be interrupted cleanly.
+        Set ``debug_on_sigint: true`` in the engine config only when you
+        explicitly want ``Ctrl-C`` to open the debug REPL instead.
+
         Subclasses call ``_persist_tick(tick, signals, tick_results)`` at
         the end of their ``on_tick()`` implementation. ``_init_state_store()``
         is called during ``__init__`` and creates or resumes a session.
@@ -156,7 +162,10 @@ class BaseEngine(ABC):
         logger.debug(f"Engine initialized: {self.__class__.__name__} al={type(al).__name__ if al else None} pf={type(pf).__name__ if pf else None} om={type(om).__name__ if om else None}")
 
     def _install_debug_handler(self):
-        """Replace SIGINT with a handler that sets a flag instead of raising."""
+        """Optionally replace SIGINT with a handler that enters the debug REPL."""
+        if not self.cfg.get("debug_on_sigint", False):
+            return
+
         def _handler(signum, frame):
             self._debug_requested = True
         try:
