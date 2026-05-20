@@ -96,6 +96,48 @@ def test_normalize_new_style_config():
     assert config.order_manager.params["market_hours_only"] is True
 
 
+def test_walk_forward_window_hpo_section_is_allowed():
+    config = ExperimentService.from_dict({
+        "mode": "walk-forward",
+        "algorithm": {
+            "implementation": "trading.algorithms.spy_trend_macd_algorithm.SpyTrendMACDAlgorithm",
+            "params": {"macd_fast_period": 8, "macd_slow_period": 21, "macd_signal_period": 5},
+        },
+        "portfolio": {
+            "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+            "params": {"symbol": "SPY", "cash": 5000},
+        },
+        "order_manager": {
+            "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+            "params": {"market_hours_only": True},
+        },
+        "data_provider": {
+            "implementation": "trading.data_providers.test_data_provider.TestDataProvider",
+            "params": {"path": "../data/SPY_5min.csv"},
+        },
+        "walk_forward": {
+            "optimization_window_days": 180,
+            "validation_window_days": 30,
+            "trading_window_days": 30,
+        },
+        "walk_forward_window_hpo": {
+            "num_samples": 8,
+            "objective_metric": "wf_annualized_return",
+            "search_space": {
+                "optimization_window_days": {"type": "choice", "values": [90, 180]},
+                "validation_window_days": {"type": "choice", "values": [20, 30]},
+                "trading_window_days": {"type": "choice", "values": [10, 30]},
+            },
+        },
+        "analysis": {"enabled": False, "log_to_mlflow": False},
+        "state_store": {"enabled": False},
+        "mlflow": {"enabled": False},
+        "logging": {},
+    })
+
+    assert config.walk_forward_window_hpo.objective_metric == "wf_annualized_return"
+
+
 def test_known_component_validation_rejects_bad_param_type():
     cfg = _legacy_backtest_config()
     cfg["algorithm"]["macd_fast_period"] = "not-an-int"

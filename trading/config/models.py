@@ -83,6 +83,10 @@ class WalkForwardConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class WalkForwardWindowHPOConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
 class HPOConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -100,6 +104,7 @@ class ExperimentConfig(BaseModel):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     walk_forward: WalkForwardConfig = Field(default_factory=WalkForwardConfig)
+    walk_forward_window_hpo: WalkForwardWindowHPOConfig = Field(default_factory=WalkForwardWindowHPOConfig)
     hpo: HPOConfig = Field(default_factory=HPOConfig)
     state_store: StateStoreConfig = Field(default_factory=StateStoreConfig)
     mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
