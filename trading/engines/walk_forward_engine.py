@@ -11,6 +11,7 @@ import copy
 import os
 from pprint import pformat
 import tempfile
+import time
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any
@@ -32,6 +33,7 @@ from trading.engines.walk_forward_policy import (
     decide_walk_forward_adoption,
 )
 from utils.logger import Logger
+from utils.status_line import StatusLine
 from utils.utils import apply_tunable_config, build_tunable_patch
 
 logger = Logger().get_logger(__name__)
@@ -97,6 +99,15 @@ class WalkForwardEngine(BaseEngine):
         }
 
         self._planned_events: list[dict[str, Any]] = []
+        self._progress_total_periods = 0
+        self._progress_completed_periods = 0
+        self._progress_phase = "idle"
+        self._progress_started_at: float | None = None
+        self._progress_current_period = 0
+        self._progress_simulation_started_at: float | None = None
+        self._progress_simulation_total_ticks = 0
+        self._progress_simulation_processed_ticks = 0
+        self._status_line = StatusLine(enabled=cfg.get("status_line_enabled"))
 
     def _log_period_decision_event(
         self,
@@ -447,6 +458,13 @@ class WalkForwardEngine(BaseEngine):
         trade_idx = 0
         activation_idx = 0
         config_applied_indexes: set[int] = set()
+        self._progress_simulation_started_at = time.monotonic()
+        self._progress_simulation_processed_ticks = 0
+        try:
+            self.dp.load_data()
+            self._progress_simulation_total_ticks = len(self.dp.data) if getattr(self.dp, "data", None) is not None else 0
+        except Exception:
+            self._progress_simulation_total_ticks = 0
 
         if plans and plans[0]["adopted"]:
             logger.info(
@@ -462,6 +480,9 @@ class WalkForwardEngine(BaseEngine):
 
         logger.info("Running continuous walk-forward simulation...")
         for tick in self.dp.iterate():
+            self._progress_simulation_processed_ticks += 1
+            if self._progress_simulation_processed_ticks == 1 or self._progress_simulation_processed_ticks % 500 == 0:
+                self._refresh_status_line()
             timestamp = pd.to_datetime(tick[0].timestamp).to_pydatetime() if tick else None
             if timestamp is None:
                 continue
@@ -709,6 +730,12 @@ class WalkForwardEngine(BaseEngine):
             logger.error("No valid periods could be computed from data range")
             return {"periods": [], "aggregate": {}}
 
+        self._progress_total_periods = len(periods)
+        self._progress_completed_periods = 0
+        self._progress_current_period = 0
+        self._progress_phase = "planning"
+        self._progress_started_at = time.monotonic()
+
         logger.info("=" * 80)
         logger.info("WALK-FORWARD BACKTEST")
         logger.info("=" * 80)
@@ -725,6 +752,9 @@ class WalkForwardEngine(BaseEngine):
         current_pf_cfg = copy.deepcopy(self.original_pf_cfg)
 
         for i, period in enumerate(periods):
+            self._progress_phase = "period_hpo"
+            self._progress_current_period = i + 1
+            self._refresh_status_line()
             logger.info("")
             logger.info(f"--- Period {i + 1}/{len(periods)} ---")
             logger.info(
@@ -737,16 +767,25 @@ class WalkForwardEngine(BaseEngine):
 
             plan = self._evaluate_period(i, period, current_al_cfg, current_pf_cfg)
             plans.append(plan)
+            self._progress_completed_periods = i + 1
+            self._refresh_status_line()
             if plan["adopted"]:
                 current_al_cfg = plan["al_cfg"]
                 current_pf_cfg = plan["pf_cfg"]
 
         self._planned_events = plans
+        self._progress_phase = "continuous_backtest"
+        self._refresh_status_line()
         continuous = self._run_continuous_backtest(plans)
+        self._progress_phase = "analysis"
+        self._refresh_status_line()
         analysis = continuous["analysis"]
         analysis_results = continuous["results"]
         aggregate = self._build_aggregate_summary(plans, analysis_results["metrics"])
         mlflow_run_id = self._log_full_run_to_mlflow(analysis, analysis_results, plans, aggregate)
+        self._progress_phase = "completed"
+        self._refresh_status_line(final=True)
+        self._status_line.close()
 
         return {
             "periods": plans,
@@ -779,3 +818,60 @@ class WalkForwardEngine(BaseEngine):
 
     def finalize(self):
         pass
+
+    def get_progress_snapshot(self):
+        elapsed_seconds = None
+        eta_seconds = None
+        if self._progress_started_at is not None:
+            elapsed_seconds = max(0.0, time.monotonic() - self._progress_started_at)
+        if self._progress_completed_periods > 0 and self._progress_total_periods > self._progress_completed_periods and elapsed_seconds is not None:
+            avg_period_seconds = elapsed_seconds / self._progress_completed_periods
+            eta_seconds = avg_period_seconds * (self._progress_total_periods - self._progress_completed_periods)
+
+        snapshot = {
+            "engine": self.__class__.__name__,
+            "phase": self._progress_phase,
+            "periods_completed": self._progress_completed_periods,
+            "periods_total": self._progress_total_periods,
+            "current_period": self._progress_current_period,
+            "elapsed_seconds": elapsed_seconds,
+            "eta_seconds": eta_seconds,
+        }
+        if self._progress_phase == "continuous_backtest":
+            snapshot["simulation_ticks_processed"] = self._progress_simulation_processed_ticks
+            snapshot["simulation_ticks_total"] = self._progress_simulation_total_ticks
+        return snapshot
+
+    def _refresh_status_line(self, final: bool = False):
+        snapshot = self.get_progress_snapshot()
+        if not snapshot:
+            return
+        elapsed = self._format_duration(snapshot.get("elapsed_seconds"))
+        eta = self._format_duration(snapshot.get("eta_seconds"))
+        text = (
+            f"[WF] phase={snapshot.get('phase')} "
+            f"period={snapshot.get('current_period', 0)}/{snapshot.get('periods_total', 0)} "
+            f"done={snapshot.get('periods_completed', 0)}/{snapshot.get('periods_total', 0)} "
+            f"elapsed={elapsed} eta={eta}"
+        )
+        if snapshot.get("phase") == "continuous_backtest" and snapshot.get("simulation_ticks_total"):
+            text += (
+                f" ticks={snapshot.get('simulation_ticks_processed', 0)}/"
+                f"{snapshot.get('simulation_ticks_total', 0)}"
+            )
+        if final:
+            text += " completed"
+        self._status_line.update(text)
+
+    @staticmethod
+    def _format_duration(seconds):
+        if seconds is None:
+            return "n/a"
+        total = int(max(0, round(seconds)))
+        hours, rem = divmod(total, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours:
+            return f"{hours}h{minutes:02d}m{secs:02d}s"
+        if minutes:
+            return f"{minutes}m{secs:02d}s"
+        return f"{secs}s"

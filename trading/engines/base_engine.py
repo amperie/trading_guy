@@ -83,10 +83,11 @@ class BaseEngine(ABC):
         MongoDB after each tick via ``_persist_tick()``.
 
     SIGINT handling:
-        By default engines now preserve normal ``Ctrl-C`` behavior so
+        By default engines preserve normal ``Ctrl-C`` behavior so
         long-running backtests and HPO jobs can be interrupted cleanly.
-        Set ``debug_on_sigint: true`` in the engine config only when you
-        explicitly want ``Ctrl-C`` to open the debug REPL instead.
+        Set the global ``debug_on_sigint: true`` flag in ``config.yaml``
+        only when you explicitly want ``Ctrl-C`` to open the debug REPL
+        instead.
 
         Subclasses call ``_persist_tick(tick, signals, tick_results)`` at
         the end of their ``on_tick()`` implementation. ``_init_state_store()``
@@ -163,7 +164,9 @@ class BaseEngine(ABC):
 
     def _install_debug_handler(self):
         """Optionally replace SIGINT with a handler that enters the debug REPL."""
-        if not self.cfg.get("debug_on_sigint", False):
+        from utils.config_manager import ConfigManager
+
+        if not ConfigManager().get("debug_on_sigint", False):
             return
 
         def _handler(signum, frame):
@@ -181,10 +184,14 @@ class BaseEngine(ABC):
         if self._debug_repl is None:
             from utils.debug_repl import DebugREPL
             self._debug_repl = DebugREPL()
-            self._debug_repl.attach(al=self.al, pf=self.pf, om=self.om)
+            self._debug_repl.attach(al=self.al, pf=self.pf, om=self.om, engine=self)
         self._debug_repl.enter()
         if self._debug_repl._quit:
             raise SystemExit(0)
+
+    def get_progress_snapshot(self):
+        """Return a JSON-serializable progress snapshot for the debug REPL."""
+        return None
 
     def _init_state_store(self):
         """Initialize TradingStateStore from config if enabled."""

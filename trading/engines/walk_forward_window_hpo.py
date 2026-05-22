@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -16,6 +17,7 @@ from trading.core.portfolio import Portfolio
 from trading.data_providers.data_provider import DataProvider
 from trading.engines.walk_forward_engine import WalkForwardEngine
 from utils.logger import Logger
+from utils.status_line import StatusLine
 
 logger = Logger().get_logger(__name__)
 
@@ -97,6 +99,8 @@ class WalkForwardWindowHPO:
         self.final_artifact_location = self.window_hpo_cfg.get("final_artifact_location")
 
         self.candidates: list[WindowHPOCandidate] = []
+        self._status_line = StatusLine(enabled=self.engine_cfg.get("status_line_enabled"))
+        self._started_at: float | None = None
 
     def _build_components(self):
         dp = self._dp_class(copy.deepcopy(self._base_dp_cfg))
@@ -258,6 +262,7 @@ class WalkForwardWindowHPO:
         trial.set_user_attr("num_periods", num_periods)
         for key, value in windows.items():
             trial.set_user_attr(key, value)
+        self._refresh_status_line()
         return metric
 
     def run(self) -> dict[str, Any]:
@@ -273,6 +278,7 @@ class WalkForwardWindowHPO:
         )
 
         study = optuna.create_study(direction="maximize")
+        self._started_at = time.monotonic()
         try:
             study.optimize(self._objective, n_trials=self.num_samples, n_jobs=1, catch=(Exception,))
 
@@ -294,6 +300,8 @@ class WalkForwardWindowHPO:
 
         best_candidate = max(valid_candidates, key=lambda candidate: candidate.metric)
         best_windows = best_candidate.windows
+        self._refresh_status_line(final=True)
+        self._status_line.close()
         logger.info(f"Best walk-forward windows: {best_windows} metric={best_candidate.metric:.6f}", color="green")
 
         summary = {
@@ -317,6 +325,26 @@ class WalkForwardWindowHPO:
             "candidates": summary["candidates"],
             "cleanup": cleanup,
         }
+
+    def _refresh_status_line(self, final: bool = False) -> None:
+        if self._started_at is None:
+            return
+        completed = len(self.candidates)
+        elapsed = max(0.0, time.monotonic() - self._started_at)
+        eta = None
+        if completed > 0 and completed < self.num_samples:
+            eta = (elapsed / completed) * (self.num_samples - completed)
+        best_metric = max((candidate.metric for candidate in self.candidates if candidate.valid), default=None)
+        text = (
+            f"[WF-HPO] candidates={completed}/{self.num_samples} "
+            f"elapsed={WalkForwardEngine._format_duration(elapsed)} "
+            f"eta={WalkForwardEngine._format_duration(eta)}"
+        )
+        if best_metric is not None:
+            text += f" best={best_metric:.4f}"
+        if final:
+            text += " completed"
+        self._status_line.update(text)
 
     def _cleanup_staging(self) -> dict[str, Any]:
         result = {

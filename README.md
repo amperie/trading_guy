@@ -136,6 +136,26 @@ Common flags (all modes):
 | `--data` | Override data file path for commands that expose it |
 | `--session-id` | MongoDB session ID |
 
+## Debug REPL And Runtime Logging
+
+Set the global root config flag in [config.yaml](/E:/Programming/trading_guy/config.yaml) to enable the Ctrl-C debug REPL:
+
+```yaml
+debug_on_sigint: true
+```
+
+When enabled, pressing `Ctrl-C` during an engine-driven run opens the REPL instead of terminating immediately. Useful commands:
+
+- `progress`: print the engine progress snapshot with elapsed time and estimated remaining work
+- `loglevel`: show current root, console, and file logger levels
+- `loglevel DEBUG`: raise both console and file handlers to `DEBUG`
+- `loglevel console INFO`: change only console verbosity
+- `loglevel file DEBUG`: change only file logging verbosity
+- `c`: resume execution
+- `q`: stop the engine
+
+Interactive terminals also show a single-line live status bar for walk-forward modes. It updates progress in place and automatically falls back to normal logging when stdout is not a TTY.
+
 Live optimization modes:
 
 | Mode | How to activate |

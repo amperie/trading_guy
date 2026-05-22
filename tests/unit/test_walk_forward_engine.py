@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -816,3 +817,50 @@ def test_backtest_objective_fn_supports_nested_algorithm_keys(monkeypatch):
     assert captured["alg_cfg"] == {"regime": {"alpha": 8, "beta": 2}}
     assert captured["pf_cfg"] == {"stop_pct": 3.5, "profit_pct": 4.0}
     assert captured["log_to_mlflow"] is False
+
+
+def test_tune_backtest_hyperparameters_disables_ray_sigint_handler_and_shuts_down(monkeypatch):
+    env_before = "0"
+    monkeypatch.setenv("TUNE_DISABLE_SIGINT_HANDLER", env_before)
+
+    shutdown_calls = []
+
+    monkeypatch.setattr(run_backtest_ray.ray, "init", lambda **kwargs: None)
+    monkeypatch.setattr(run_backtest_ray.ray, "is_initialized", lambda: True)
+    monkeypatch.setattr(run_backtest_ray.ray, "shutdown", lambda: shutdown_calls.append(True))
+    monkeypatch.setattr(run_backtest_ray.tune, "with_parameters", lambda fn, **kwargs: fn)
+    monkeypatch.setattr(run_backtest_ray, "OptunaSearch", lambda **kwargs: object())
+
+    captured_env = {}
+
+    class FakeTuner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def fit(self):
+            captured_env["during_fit"] = os.environ.get("TUNE_DISABLE_SIGINT_HANDLER")
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(run_backtest_ray.tune, "Tuner", FakeTuner)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_backtest_ray.tune_backtest_hyperparameters(
+            symbol="SPY",
+            algorithm_class=DummyAlgorithm,
+            portfolio_class=DummyPortfolio,
+            data_provider_class=DummyDataProvider,
+            order_manager_class=DummyOrderManager,
+            base_algorithm_config={},
+            base_portfolio_config={},
+            base_data_provider_config={},
+            base_backtest_config={},
+            search_space={},
+            algorithm_param_keys=[],
+            portfolio_param_keys=[],
+            num_samples=1,
+            max_concurrent_trials=1,
+        )
+
+    assert captured_env["during_fit"] == "1"
+    assert os.environ["TUNE_DISABLE_SIGINT_HANDLER"] == env_before
+    assert shutdown_calls == [True]

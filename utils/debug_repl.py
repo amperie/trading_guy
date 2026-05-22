@@ -4,6 +4,8 @@ Press Ctrl-C during any backtest or live session to enter the REPL.
 Type 'help' at the prompt for the full command list.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import signal
@@ -11,6 +13,8 @@ import sys
 import threading
 from collections import deque
 from datetime import datetime
+
+from utils.logger import Logger
 
 
 class DebugREPL:
@@ -28,6 +32,8 @@ class DebugREPL:
         "al", "algorithm",
         "pf", "portfolio",
         "om", "ordermanager",
+        "progress",
+        "loglevel", "log",
         "dump", "eval", "help",
         "continue", "c",
         "quit", "q",
@@ -45,18 +51,16 @@ class DebugREPL:
         self.al = None
         self.pf = None
         self.om = None
+        self.engine = None
         self._quit = False
         self._readline_ready = False
 
-    def attach(self, al=None, pf=None, om=None):
+    def attach(self, al=None, pf=None, om=None, engine=None):
         """Attach engine components for inspection."""
         self.al = al
         self.pf = pf
         self.om = om
-
-    # ------------------------------------------------------------------
-    # Entry point
-    # ------------------------------------------------------------------
+        self.engine = engine
 
     def enter(self):
         """Block until the user types 'c' (resume) or 'q' (quit engine)."""
@@ -64,8 +68,6 @@ class DebugREPL:
         self._setup_readline()
         print("\n\n=== DEBUG MODE === type 'help' for commands, 'c' to resume ===\n")
 
-        # While the REPL is active, temporarily restore the default SIGINT
-        # handler so Ctrl-C can be used to exit the prompt (main thread only).
         in_main = threading.current_thread() is threading.main_thread()
         saved_handler = None
         if in_main:
@@ -102,10 +104,10 @@ class DebugREPL:
             if cmd in ("c", "continue"):
                 print("Resuming...")
                 return
-            elif cmd in ("q", "quit"):
+            if cmd in ("q", "quit"):
                 self._quit = True
                 return
-            elif cmd == "help":
+            if cmd == "help":
                 self._cmd_help()
             elif cmd in ("al", "algorithm"):
                 self._cmd_print(self.al, "Algorithm")
@@ -113,6 +115,10 @@ class DebugREPL:
                 self._cmd_print(self.pf, "Portfolio")
             elif cmd in ("om", "ordermanager"):
                 self._cmd_print(self.om, "OrderManager")
+            elif cmd == "progress":
+                self._cmd_progress()
+            elif cmd in ("loglevel", "log"):
+                self._cmd_loglevel(args)
             elif cmd == "dump":
                 self._cmd_dump(args)
             elif cmd == "eval":
@@ -120,31 +126,34 @@ class DebugREPL:
             else:
                 print(f"Unknown command '{cmd}'. Type 'help'.")
 
-    # ------------------------------------------------------------------
-    # Commands
-    # ------------------------------------------------------------------
-
     def _cmd_help(self):
-        print("""
+        print(
+            """
   al / algorithm            Print algorithm state (JSON)
   pf / portfolio            Print portfolio state (JSON)
   om / ordermanager         Print order manager state (JSON)
+  progress                  Print engine progress and estimated remaining work
+  loglevel                  Print current root/console/file log levels
+  loglevel <LEVEL>          Set console and file handler levels together
+  loglevel console <LEVEL>  Set console handler level only
+  loglevel file <LEVEL>     Set file handler level only
 
-  dump al [file]            JSON: full algorithm state          → debug_al.json
-  dump pf [file]            JSON: full portfolio state          → debug_pf.json
-  dump om [file]            JSON: full order manager state      → debug_om.json
-  dump pf.signals [file]    CSV: signals history                → debug_pf_signals.csv
-  dump pf.ticks [file]      CSV: tick price history             → debug_pf_ticks.csv
-  dump pf.values [file]     CSV: equity curve (value + cash)   → debug_pf_values.csv
-  dump om.orders [file]     CSV: all orders                     → debug_om_orders.csv
-  dump om.pending [file]    CSV: pending orders only            → debug_om_pending.csv
-  dump al.history [file]    CSV: price_data_history deques      → debug_al_history.csv
-  dump al.indicators [file] CSV: algo indicators (if impl.)     → debug_al_indicators.csv
+  dump al [file]            JSON: full algorithm state          -> debug_al.json
+  dump pf [file]            JSON: full portfolio state          -> debug_pf.json
+  dump om [file]            JSON: full order manager state      -> debug_om.json
+  dump pf.signals [file]    CSV: signals history                -> debug_pf_signals.csv
+  dump pf.ticks [file]      CSV: tick price history             -> debug_pf_ticks.csv
+  dump pf.values [file]     CSV: equity curve (value + cash)    -> debug_pf_values.csv
+  dump om.orders [file]     CSV: all orders                     -> debug_om_orders.csv
+  dump om.pending [file]    CSV: pending orders only            -> debug_om_pending.csv
+  dump al.history [file]    CSV: price_data_history deques      -> debug_al_history.csv
+  dump al.indicators [file] CSV: algo indicators (if impl.)     -> debug_al_indicators.csv
 
   eval <expr>               Evaluate Python (al/pf/om in scope, tab-complete)
   c / continue              Resume execution
   q / quit                  Stop the engine
-""")
+"""
+        )
 
     def _cmd_print(self, obj, label):
         if obj is None:
@@ -153,6 +162,51 @@ class DebugREPL:
         print(f"\n=== {label} ({type(obj).__name__}) ===")
         print(json.dumps(self._serialize(vars(obj)), indent=2, default=str))
         print()
+
+    def _cmd_progress(self):
+        if self.engine is None:
+            print("Engine not attached.")
+            return
+        if not hasattr(self.engine, "get_progress_snapshot"):
+            print("Attached engine does not provide progress snapshots.")
+            return
+        snapshot = self.engine.get_progress_snapshot()
+        if not snapshot:
+            print("No progress information is available yet.")
+            return
+        print(json.dumps(snapshot, indent=2, default=str))
+
+    def _cmd_loglevel(self, args):
+        logger_manager = Logger()
+        if not args:
+            print(json.dumps(logger_manager.describe_levels(), indent=2))
+            return
+
+        parts = args.split()
+        try:
+            if len(parts) == 1:
+                level = logger_manager.set_all_handler_levels(parts[0])
+                print(f"Set console and file log levels to {level}")
+                return
+            if len(parts) == 2:
+                target, level = parts[0].lower(), parts[1]
+                if target == "console":
+                    level_name = logger_manager.set_console_level(level)
+                    print(f"Set console log level to {level_name}")
+                    return
+                if target == "file":
+                    level_name = logger_manager.set_file_level(level)
+                    print(f"Set file log level to {level_name}")
+                    return
+        except ValueError as exc:
+            print(str(exc))
+            return
+
+        print(
+            "Usage: loglevel | loglevel <LEVEL> | "
+            "loglevel console <LEVEL> | loglevel file <LEVEL>\n"
+            "Valid levels: DEBUG, INFO, WARNING, ERROR, CRITICAL"
+        )
 
     def _cmd_dump(self, args):
         parts = args.split(None, 1)
@@ -192,23 +246,20 @@ class DebugREPL:
         try:
             result = eval(expr, {"al": self.al, "pf": self.pf, "om": self.om})
             print(repr(result))
-        except Exception as e:
-            print(f"Error: {e}")
-
-    # ------------------------------------------------------------------
-    # Dump handlers
-    # ------------------------------------------------------------------
+        except Exception as exc:
+            print(f"Error: {exc}")
 
     def _dump_json(self, obj, path):
         if obj is None:
             print("Object not attached.")
             return
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(self._serialize(vars(obj)), f, indent=2, default=str)
-        print(f"Saved → {os.path.abspath(path)}")
+        print(f"Saved -> {os.path.abspath(path)}")
 
     def _dump_pf_signals(self, _, path):
         import pandas as pd
+
         if self.pf is None:
             print("Portfolio not attached.")
             return
@@ -225,14 +276,15 @@ class DebugREPL:
                     "type": sig.type.name,
                     "strength": sig.strength,
                 }
-                for k, v in (sig.metadata or {}).items():
-                    row[f"metadata.{k}"] = v
+                for key, value in (sig.metadata or {}).items():
+                    row[f"metadata.{key}"] = value
                 rows.append(row)
         pd.DataFrame(rows).to_csv(path, index=False)
-        print(f"Saved {len(rows)} rows → {os.path.abspath(path)}")
+        print(f"Saved {len(rows)} rows -> {os.path.abspath(path)}")
 
     def _dump_pf_ticks(self, _, path):
         import pandas as pd
+
         if self.pf is None:
             print("Portfolio not attached.")
             return
@@ -243,18 +295,24 @@ class DebugREPL:
         rows = []
         for ts, tick in history.items():
             for bar in tick:
-                rows.append({
-                    "timestamp": ts,
-                    "symbol": bar.symbol,
-                    "open": bar.open, "high": bar.high,
-                    "low": bar.low, "close": bar.close,
-                    "volume": bar.volume, "vwap": bar.vwap,
-                })
+                rows.append(
+                    {
+                        "timestamp": ts,
+                        "symbol": bar.symbol,
+                        "open": bar.open,
+                        "high": bar.high,
+                        "low": bar.low,
+                        "close": bar.close,
+                        "volume": bar.volume,
+                        "vwap": bar.vwap,
+                    }
+                )
         pd.DataFrame(rows).to_csv(path, index=False)
-        print(f"Saved {len(rows)} rows → {os.path.abspath(path)}")
+        print(f"Saved {len(rows)} rows -> {os.path.abspath(path)}")
 
     def _dump_pf_values(self, _, path):
         import pandas as pd
+
         if self.pf is None:
             print("Portfolio not attached.")
             return
@@ -264,43 +322,47 @@ class DebugREPL:
             print("No value_history (keep_history may be disabled).")
             return
         rows = [
-            {"timestamp": ts, "total_value": v, "cash": cash_history.get(ts)}
-            for ts, v in value_history.items()
+            {"timestamp": ts, "total_value": value, "cash": cash_history.get(ts)}
+            for ts, value in value_history.items()
         ]
         pd.DataFrame(rows).to_csv(path, index=False)
-        print(f"Saved {len(rows)} rows → {os.path.abspath(path)}")
+        print(f"Saved {len(rows)} rows -> {os.path.abspath(path)}")
 
     def _dump_om_orders(self, pending_only, path):
         import pandas as pd
+
         if self.om is None:
             print("OrderManager not attached.")
             return
         source = self.om.pending_orders_by_id if pending_only else self.om.all_orders
         rows = []
-        for o in source.values():
-            rows.append({
-                "order_id": o.order_id,
-                "type": o.type.name,
-                "action": o.action.name,
-                "symbol": o.symbol,
-                "price": o.price,
-                "quantity": o.quantity,
-                "status": o.status.name,
-                "placed_datetime": o.placed_datetime,
-                "executed_datetime": o.executed_datetime,
-                "cash": o.cash,
-                "tx_cost": o.tx_cost,
-                "parent_id": o.parent_id,
-                "platform_id": getattr(o, "platform_id", None),
-            })
+        for order in source.values():
+            rows.append(
+                {
+                    "order_id": order.order_id,
+                    "type": order.type.name,
+                    "action": order.action.name,
+                    "symbol": order.symbol,
+                    "price": order.price,
+                    "quantity": order.quantity,
+                    "status": order.status.name,
+                    "placed_datetime": order.placed_datetime,
+                    "executed_datetime": order.executed_datetime,
+                    "cash": order.cash,
+                    "tx_cost": order.tx_cost,
+                    "parent_id": order.parent_id,
+                    "platform_id": getattr(order, "platform_id", None),
+                }
+            )
         if not rows:
             print("No orders.")
             return
         pd.DataFrame(rows).to_csv(path, index=False)
-        print(f"Saved {len(rows)} rows → {os.path.abspath(path)}")
+        print(f"Saved {len(rows)} rows -> {os.path.abspath(path)}")
 
     def _dump_al_history(self, _, path):
         import pandas as pd
+
         if self.al is None:
             print("Algorithm not attached.")
             return
@@ -309,36 +371,51 @@ class DebugREPL:
             print("No price_data_history (history_length may be 0).")
             return
         rows = []
-        for symbol, pdq in history.items():
-            for bar in pdq:
-                rows.append({
-                    "symbol": symbol,
-                    "timestamp": bar.timestamp,
-                    "open": bar.open, "high": bar.high,
-                    "low": bar.low, "close": bar.close,
-                    "volume": bar.volume, "vwap": bar.vwap,
-                })
+        for symbol, price_deque in history.items():
+            for bar in price_deque:
+                rows.append(
+                    {
+                        "symbol": symbol,
+                        "timestamp": bar.timestamp,
+                        "open": bar.open,
+                        "high": bar.high,
+                        "low": bar.low,
+                        "close": bar.close,
+                        "volume": bar.volume,
+                        "vwap": bar.vwap,
+                    }
+                )
         pd.DataFrame(rows).to_csv(path, index=False)
-        print(f"Saved {len(rows)} rows → {os.path.abspath(path)}")
+        print(f"Saved {len(rows)} rows -> {os.path.abspath(path)}")
 
     def _dump_al_indicators(self, _, path):
         import pandas as pd
+
         if self.al is None:
             print("Algorithm not attached.")
             return
         if not hasattr(self.al, "get_indicator_dataframe"):
-            print("Algorithm does not implement get_indicator_dataframe() — no indicators to dump.")
+            print("Algorithm does not implement get_indicator_dataframe(); no indicators to dump.")
             return
         df = self.al.get_indicator_dataframe()
         if df is None or (hasattr(df, "empty") and df.empty):
             print("Algorithm returned no indicator data.")
             return
-        df.to_csv(path, index=False)
-        print(f"Saved {len(df)} rows → {os.path.abspath(path)}")
+        pd.DataFrame(df).to_csv(path, index=False)
+        print(f"Saved {len(df)} rows -> {os.path.abspath(path)}")
 
-    # ------------------------------------------------------------------
-    # readline setup
-    # ------------------------------------------------------------------
+    def _serialize(self, obj):
+        if isinstance(obj, (str, int, float, bool)) or obj is None:
+            return obj
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {str(key): self._serialize(value) for key, value in obj.items()}
+        if isinstance(obj, (list, tuple, set, deque)):
+            return [self._serialize(value) for value in obj]
+        if hasattr(obj, "__dict__"):
+            return self._serialize(vars(obj))
+        return str(obj)
 
     def _setup_readline(self):
         if self._readline_ready:
@@ -351,9 +428,8 @@ class DebugREPL:
 
             class _Completer:
                 def __init__(self):
-                    # Attribute completer for eval expressions (al.x, pf.y, etc.)
                     self._attr = rlcompleter.Completer(
-                        {"al": repl.al, "pf": repl.pf, "om": repl.om}
+                        {"al": repl.al, "pf": repl.pf, "om": repl.om, "engine": repl.engine}
                     )
                     self._matches = []
 
@@ -364,31 +440,24 @@ class DebugREPL:
                         first = parts[0].lower() if parts else ""
 
                         if first == "dump" and (len(parts) > 1 or buf.endswith(" ")):
-                            # Complete dump target names
                             prefix = parts[1] if len(parts) > 1 else ""
-                            self._matches = [t for t in DebugREPL.DUMP_TARGETS
-                                             if t.startswith(prefix)]
+                            self._matches = [target for target in DebugREPL.DUMP_TARGETS if target.startswith(prefix)]
                         elif first == "eval":
-                            # Python attribute completion for al/pf/om
                             self._matches = []
-                            for i in range(200):
-                                m = self._attr.complete(text, i)
-                                if m is None:
+                            for idx in range(200):
+                                match = self._attr.complete(text, idx)
+                                if match is None:
                                     break
-                                self._matches.append(m)
+                                self._matches.append(match)
                         elif not parts or (len(parts) == 1 and not buf.endswith(" ")):
-                            # First word: complete command names
-                            self._matches = [c for c in DebugREPL.COMMANDS
-                                             if c.startswith(text)]
+                            self._matches = [command for command in DebugREPL.COMMANDS if command.startswith(text)]
                         else:
                             self._matches = []
 
                     return self._matches[state] if state < len(self._matches) else None
 
             readline.set_completer(_Completer().complete)
-            # Use only whitespace as delimiters so "al.price_h<tab>" works as one token
             readline.set_completer_delims(" \t\n")
-            # macOS ships libedit; GNU readline uses a different binding call
             doc = getattr(readline, "__doc__", "") or ""
             if "libedit" in doc or sys.platform == "darwin":
                 readline.parse_and_bind("bind ^I rl_complete")
@@ -396,4 +465,4 @@ class DebugREPL:
                 readline.parse_and_bind("tab: complete")
             self._readline_ready = True
         except Exception:
-            pass  # readline unavailable — silently skip completion
+            pass

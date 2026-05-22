@@ -296,7 +296,7 @@ class Portfolio(ABC):
             self.positions[order.symbol] = Position(order.symbol, order.quantity)
         order.processed_by_portfolio = True
 
-        logger.info(f"BUY executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} (Cost: ${order.cash + order.tx_cost:,.2f})")
+        logger.debug(f"BUY executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} (Cost: ${order.cash + order.tx_cost:,.2f})")
         logger.debug(f"Cash after BUY: ${self.cash:,.2f}, Position: {self.positions[order.symbol].quantity}")
 
     @final
@@ -329,7 +329,7 @@ class Portfolio(ABC):
             del self.positions[order.symbol]
         order.processed_by_portfolio = True
 
-        logger.info(
+        logger.debug(
             f"SELL executed - {order.symbol}: {order.quantity} @ ${order.price:.2f} "
             f"(Proceeds: ${order.cash - order.tx_cost:,.2f}) order_id={order.order_id}"
         )
@@ -375,10 +375,10 @@ class Portfolio(ABC):
             if status == OrderStatus.FILLED:
                 if order.action == OrderAction.BUY:
                     self._update_pf_buy(order)
-                    logger.info(f"MARKET BUY order {order.symbol}: {order.quantity} @ ${order.price:.2f}")
+                    logger.debug(f"MARKET BUY order {order.symbol}: {order.quantity} @ ${order.price:.2f}")
                     return order
                 elif order.action == OrderAction.SELL:
-                    logger.info(
+                    logger.debug(
                         f"MARKET SELL order {order.symbol}: {order.quantity} @ ${order.price:.2f} "
                         f"order_id={order.order_id}"
                     )
@@ -387,7 +387,7 @@ class Portfolio(ABC):
                 else:
                     raise NotImplementedError(f"MARKET order {order.action} action not implemented")
             elif status == OrderStatus.CANCELED:
-                logger.info(f"MARKET CANCELED order {order.symbol}")
+                logger.debug(f"MARKET CANCELED order {order.symbol}")
                 # Do nothing
                 order.processed_by_portfolio = True
                 return order
@@ -400,7 +400,7 @@ class Portfolio(ABC):
                 self._update_pf_buy(order)
                 # Set the processed_by_portfolio flag back to False since it's still pending
                 order.processed_by_portfolio = False
-                logger.info(
+                logger.debug(
                     f"BRACKET order {order.symbol} - Initial BUY filled, awaiting STOP/PROFIT trigger "
                     f"at ${order.get_child_order('STOP').price:.2f}///${order.get_child_order('PROFIT').price:.2f}"
                 )
@@ -410,7 +410,7 @@ class Portfolio(ABC):
                 so = order.SOLD_ORDER
                 self._update_pf_sell(so)
                 exit_type = "STOP-LOSS" if so.type == OrderType.STOP_LOSS else "PROFIT-TAKER" if so.type == OrderType.PROFIT_TAKER else "MANUAL"
-                logger.info(
+                logger.debug(
                     f"BRACKET order {order.symbol} - Exited via {exit_type} @ ${so.price:.2f}///"
                     f"${(so.price - order.price) * so.quantity:.2f} net "
                     f"parent_order_id={order.order_id} exit_order_id={so.order_id}"
@@ -529,7 +529,7 @@ class Portfolio(ABC):
         changed_orders = self.om.update_pending_orders(tick, self.positions, self.cash)
 
         if len(changed_orders) > 0:
-            logger.info(f"Pending orders updated: {len(changed_orders)} orders changed status")
+            logger.debug(f"Pending orders updated: {len(changed_orders)} orders changed status")
 
         # Update the portfolio to reflect orders that changed status
         processed_orders = self._update_pf_from_changed_orders(changed_orders)
@@ -569,12 +569,12 @@ class Portfolio(ABC):
         submitted_orders = self.om.submit_orders(orders, tick, self.positions, self.cash)
 
         if len(submitted_orders) > 0:
-            logger.info(f"Submitted {len(submitted_orders)} new orders to OrderManager")
+            logger.debug(f"Submitted {len(submitted_orders)} new orders to OrderManager")
 
         # Process any new orders that were filled immediately
         filled_orders = [o.order_id for o in submitted_orders if o.status in {OrderStatus.FILLED, OrderStatus.PENDING_SALE}]
         if filled_orders:
-            logger.info(f"{len(filled_orders)} orders filled immediately on submission")
+            logger.debug(f"{len(filled_orders)} orders filled immediately on submission")
         self._update_pf_from_changed_orders(filled_orders)
 
         # Update portfolio value based on current tick, positions and cash
@@ -582,7 +582,7 @@ class Portfolio(ABC):
 
         # Log when an order is happening
         if len(orders) > 0:
-            logger.info(
+            logger.debug(
                 f"Tick {tick[0].timestamp} - Value: ${self.total_value:,.2f}, "
                 f"Cash: ${self.cash:,.2f}, Positions: {len(self.positions)}, "
                 f"Orders: {len(orders)}")

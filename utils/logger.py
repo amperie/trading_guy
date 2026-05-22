@@ -4,6 +4,7 @@ import os
 import sys
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from typing import Any
 from utils.config_manager import ConfigManager
 
 
@@ -262,6 +263,59 @@ class Logger:
                     path.unlink()
             except OSError:
                 pass
+
+    def _normalize_level(self, level: str) -> int:
+        if isinstance(level, int):
+            return level
+        normalized = str(level).upper()
+        if not hasattr(logging, normalized):
+            raise ValueError(f"Unknown log level: {level}")
+        return getattr(logging, normalized)
+
+    def describe_levels(self) -> dict[str, Any]:
+        """Return current root and handler log levels."""
+        root_logger = logging.getLogger()
+        console_levels = []
+        file_levels = []
+        other_levels = []
+        for handler in root_logger.handlers:
+            level_name = logging.getLevelName(handler.level)
+            if isinstance(handler, TimedRotatingFileHandler):
+                file_levels.append(level_name)
+            elif isinstance(handler, logging.StreamHandler):
+                console_levels.append(level_name)
+            else:
+                other_levels.append(type(handler).__name__ + ":" + level_name)
+        return {
+            "root": logging.getLevelName(root_logger.level),
+            "console": console_levels,
+            "file": file_levels,
+            "other": other_levels,
+        }
+
+    def set_console_level(self, level: str) -> str:
+        """Set all console handler levels at runtime."""
+        normalized = self._normalize_level(level)
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, TimedRotatingFileHandler):
+                handler.setLevel(normalized)
+        return logging.getLevelName(normalized)
+
+    def set_file_level(self, level: str) -> str:
+        """Set all file handler levels at runtime."""
+        normalized = self._normalize_level(level)
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            if isinstance(handler, TimedRotatingFileHandler):
+                handler.setLevel(normalized)
+        return logging.getLevelName(normalized)
+
+    def set_all_handler_levels(self, level: str) -> str:
+        """Set both console and file handler levels at runtime."""
+        normalized_name = self.set_console_level(level)
+        self.set_file_level(level)
+        return normalized_name
 
     def get_logger(self, name: str) -> ColorLogger:
         """Get a logger instance for a specific module."""

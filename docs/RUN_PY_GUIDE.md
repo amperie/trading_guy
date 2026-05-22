@@ -80,6 +80,30 @@ At runtime, command execution follows this pattern:
 
 This means a profile in `configs/` usually only needs to define the parts that are different from the root defaults.
 
+## Debug REPL
+
+The root [config.yaml](/E:/Programming/trading_guy/config.yaml) now controls whether `Ctrl-C` opens the debug REPL:
+
+```yaml
+debug_on_sigint: false
+```
+
+Set it to `true` when you want `Ctrl-C` to pause an engine-driven run and open the REPL instead of interrupting the process.
+
+Available REPL commands include:
+
+- `progress`: show engine progress, elapsed time, and estimated remaining work
+- `loglevel`: print current root, console, and file log levels
+- `loglevel DEBUG`: set console and file handlers to `DEBUG`
+- `loglevel console INFO`: change only console verbosity
+- `loglevel file DEBUG`: change only file logging verbosity
+- `al`, `pf`, `om`: inspect algorithm, portfolio, and order manager state
+- `dump ...`: write state snapshots or CSV histories to disk
+- `c`: resume execution
+- `q`: stop the engine
+
+For interactive terminals, walk-forward modes also emit a live one-line status bar. When stdout is redirected or not attached to a TTY, the system falls back to normal line-based logging.
+
 ## Backtest
 
 Basic example:

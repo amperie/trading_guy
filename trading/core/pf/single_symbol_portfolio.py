@@ -32,14 +32,14 @@ class SingleSymbolPortfolio(Portfolio):
                 order = Order.create_market_order(
                     symbol, OrderAction.BUY, quantity, 0.0, tick
                 )
-                logger.info(f"BUY {symbol} qty={quantity} price={price:.2f} order_id={order.order_id}")
+                logger.debug(f"BUY {symbol} qty={quantity} price={price:.2f} order_id={order.order_id}")
                 logger.debug(f"BUY details: cash={self.cash:.2f} max_qty={quantity} order={order}")
             # Sell everything
             elif signal.type == SignalType.SELL and symbol in self.positions:
                 order = Order.create_market_order(
                     symbol, OrderAction.SELL, self.positions[symbol].quantity, 0.0, tick
                 )
-                logger.info(f"SELL {symbol} qty={self.positions[symbol].quantity} price={price:.2f} order_id={order.order_id}")
+                logger.debug(f"SELL {symbol} qty={self.positions[symbol].quantity} price={price:.2f} order_id={order.order_id}")
                 logger.debug(f"SELL details: position_qty={self.positions[symbol].quantity} order={order}")
             else:
                 logger.debug(f"No action for {symbol}: signal={signal.type.name} has_position={symbol in self.positions}")
@@ -79,7 +79,7 @@ class SingleSymbolPortfolio(Portfolio):
                 quantity, 0.0, tick
             )
             signal.metadata['order_id'] = bo.order_id
-            logger.info(f"BUY BRACKET {symbol} qty={quantity} price={price:.2f} stop={stop_price:.2f} profit={profit_price:.2f} order_id={bo.order_id}")
+            logger.debug(f"BUY BRACKET {symbol} qty={quantity} price={price:.2f} stop={stop_price:.2f} profit={profit_price:.2f} order_id={bo.order_id}")
             logger.debug(f"BUY BRACKET details: cash={self.cash:.2f} stop_pct={stop_pct} profit_pct={profit_pct} bracket_order={bo}")
             ret_val = TickResults(orders=[bo])
             return ret_val
@@ -96,7 +96,7 @@ class SingleSymbolPortfolio(Portfolio):
                 symbol, OrderAction.SELL, qty, 0.0, tick
             )
             signal.metadata['order_id'] = so.order_id
-            logger.info(f"SELL {symbol} qty={qty} price={price:.2f} order_id={so.order_id} (canceled pending brackets)")
+            logger.debug(f"SELL {symbol} qty={qty} price={price:.2f} order_id={so.order_id} (canceled pending brackets)")
             logger.debug(f"SELL details: position_qty={qty} order={so}")
             return TickResults(
                 orders=[so],

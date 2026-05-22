@@ -1,6 +1,7 @@
+import math
+import os
 from pathlib import Path
 from typing import Type
-import math
 
 from trading.core.algorithm import Algorithm
 from trading.algorithms.macd_rsi_algorithm import MacdRsiAlgorithm
@@ -25,6 +26,13 @@ logger = Logger().get_logger(__name__)
 def _short_trial_dirname_creator(trial) -> str:
     """Keep Ray trial directory names short enough for Windows path limits."""
     return f"trial_{trial.trial_id}"
+
+
+def _restore_env_var(name: str, previous_value: str | None) -> None:
+    if previous_value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = previous_value
 
 
 def _build_algorithm(algorithm_class: Type[Algorithm], alg_cfg: dict) -> Algorithm:
@@ -536,25 +544,35 @@ def tune_backtest_hyperparameters(
             trial_dirname_creator=_short_trial_dirname_creator,
         )
     )
-    results = tuner.fit()
-    trial_summaries = []
-    for result in results:
-        metric = result.metrics.get("_metric")
-        if metric is None:
-            continue
-        metric_value = float(metric)
-        if not math.isfinite(metric_value):
-            continue
-        trial_summaries.append({"config": result.config, "metric": metric_value})
-    if not trial_summaries:
-        raise RuntimeError(
-            f"All {num_samples} HPO trials failed or produced no optimization metric. "
-            "Check Ray Tune logs for individual trial errors."
-        )
+    previous_sigint_setting = os.environ.get("TUNE_DISABLE_SIGINT_HANDLER")
+    os.environ["TUNE_DISABLE_SIGINT_HANDLER"] = "1"
+    try:
+        results = tuner.fit()
+        trial_summaries = []
+        for result in results:
+            metric = result.metrics.get("_metric")
+            if metric is None:
+                continue
+            metric_value = float(metric)
+            if not math.isfinite(metric_value):
+                continue
+            trial_summaries.append({"config": result.config, "metric": metric_value})
+        if not trial_summaries:
+            raise RuntimeError(
+                f"All {num_samples} HPO trials failed or produced no optimization metric. "
+                "Check Ray Tune logs for individual trial errors."
+            )
 
-    best_config = max(trial_summaries, key=lambda trial: trial["metric"])["config"]
-    if return_trial_summaries:
+        best_config = max(trial_summaries, key=lambda trial: trial["metric"])["config"]
+        if return_trial_summaries:
+            print(best_config)
+            return best_config, trial_summaries
         print(best_config)
-        return best_config, trial_summaries
-    print(best_config)
-    return best_config
+        return best_config
+    except KeyboardInterrupt:
+        logger.warning("KeyboardInterrupt received during Ray Tune HPO; shutting Ray down immediately.")
+        raise
+    finally:
+        _restore_env_var("TUNE_DISABLE_SIGINT_HANDLER", previous_sigint_setting)
+        if ray.is_initialized():
+            ray.shutdown()
