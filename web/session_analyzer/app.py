@@ -2,6 +2,7 @@ import os
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 import math
+from collections import defaultdict, deque
 
 from flask import Flask, jsonify, render_template, request
 
@@ -71,6 +72,141 @@ def _symbol_series_from_ticks(tick_history: dict) -> dict:
                 {"x": ts.isoformat(), "y": float(pd.close)}
             )
     return symbol_series
+
+
+def _signal_payload(signals_history: dict, tick_history: dict) -> list[dict]:
+    price_lookup = {}
+    for ts, tick in tick_history.items():
+        for pd in tick:
+            price_lookup[(ts, pd.symbol)] = float(pd.close)
+
+    payload = []
+    for ts in sorted(signals_history.keys()):
+        for sig in signals_history[ts]:
+            payload.append(
+                {
+                    "x": ts.isoformat(),
+                    "symbol": sig.symbol,
+                    "type": getattr(sig.type, "name", str(sig.type)),
+                    "strength": float(sig.strength) if sig.strength is not None else None,
+                    "price": price_lookup.get((ts, sig.symbol)),
+                    "metadata": _json_safe(sig.metadata or {}),
+                }
+            )
+    return payload
+
+
+def _calc_percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    sorted_vals = sorted(values)
+    index = int((percentile / 100.0) * (len(sorted_vals) - 1))
+    return float(sorted_vals[index])
+
+
+def _reconstruct_indicator_series(tick_history: dict, session_metadata: dict) -> dict:
+    algo_cfg = (session_metadata or {}).get("algorithm_config") or {}
+    regime_cfg = algo_cfg.get("regime_detection") or {}
+    rsi_cfg = algo_cfg.get("rsi_config") or {}
+
+    ma_short_period = int(round(float(regime_cfg.get("ma_short_period", 50))))
+    ma_long_period = int(round(float(regime_cfg.get("ma_long_period", 200))))
+    atr_period = int(round(float(regime_cfg.get("atr_period", 14))))
+    atr_percentile_window = int(round(float(regime_cfg.get("atr_percentile_window", 20))))
+    atr_percentile_level = float(regime_cfg.get("atr_percentile_level", 50))
+    rsi_period = int(round(float(rsi_cfg.get("rsi_period", 14))))
+
+    rows_by_symbol: dict[str, list[tuple[datetime, object]]] = defaultdict(list)
+    for ts in sorted(tick_history.keys()):
+        for pd in tick_history[ts]:
+            rows_by_symbol[pd.symbol].append((ts, pd))
+
+    indicators = {
+        "_config": {
+            "ma_short_period": ma_short_period,
+            "ma_long_period": ma_long_period,
+            "atr_period": atr_period,
+            "atr_percentile_window": atr_percentile_window,
+            "atr_percentile_level": atr_percentile_level,
+            "rsi_period": rsi_period,
+            "rsi_oversold_threshold": rsi_cfg.get("rsi_oversold_threshold"),
+            "rsi_overbought_threshold": rsi_cfg.get("rsi_overbought_threshold"),
+        }
+    }
+
+    for symbol, rows in rows_by_symbol.items():
+        closes: deque[float] = deque()
+        highs: deque[float] = deque()
+        lows: deque[float] = deque()
+        atr_history: deque[float] = deque(maxlen=atr_percentile_window)
+
+        symbol_payload = {
+            "ma_short": [],
+            "ma_long": [],
+            "rsi": [],
+            "atr": [],
+            "atr_percentile": [],
+        }
+
+        for ts, pd in rows:
+            closes.append(float(pd.close))
+            highs.append(float(pd.high))
+            lows.append(float(pd.low))
+
+            x = ts.isoformat()
+
+            if len(closes) >= ma_short_period:
+                window = list(closes)[-ma_short_period:]
+                symbol_payload["ma_short"].append({"x": x, "y": sum(window) / ma_short_period})
+
+            if len(closes) >= ma_long_period:
+                window = list(closes)[-ma_long_period:]
+                symbol_payload["ma_long"].append({"x": x, "y": sum(window) / ma_long_period})
+
+            if len(closes) >= rsi_period + 1:
+                gains = []
+                losses = []
+                close_list = list(closes)
+                for i in range(-rsi_period, 0):
+                    delta = close_list[i] - close_list[i - 1]
+                    if delta > 0:
+                        gains.append(delta)
+                        losses.append(0.0)
+                    else:
+                        gains.append(0.0)
+                        losses.append(abs(delta))
+
+                avg_gain = sum(gains) / rsi_period
+                avg_loss = sum(losses) / rsi_period
+                if avg_loss == 0:
+                    rsi = 100.0 if avg_gain > 0 else 50.0
+                else:
+                    rs = avg_gain / avg_loss
+                    rsi = 100.0 - (100.0 / (1.0 + rs))
+                symbol_payload["rsi"].append({"x": x, "y": rsi})
+
+            if len(closes) >= atr_period:
+                tr_values = []
+                close_list = list(closes)
+                high_list = list(highs)
+                low_list = list(lows)
+                for i in range(-atr_period, 0):
+                    high = high_list[i]
+                    low = low_list[i]
+                    close_prev = close_list[i - 1] if i > -len(close_list) else close_list[0]
+                    tr_values.append(max(high - low, abs(high - close_prev), abs(low - close_prev)))
+
+                current_atr = sum(tr_values) / atr_period if tr_values else None
+                if current_atr is not None:
+                    atr_history.append(current_atr)
+                    symbol_payload["atr"].append({"x": x, "y": current_atr})
+                    atr_pct = _calc_percentile(list(atr_history), atr_percentile_level)
+                    if atr_pct is not None:
+                        symbol_payload["atr_percentile"].append({"x": x, "y": atr_pct})
+
+        indicators[symbol] = symbol_payload
+
+    return indicators
 
 
 def _trades_payload(trades: list) -> list[dict]:
@@ -174,6 +310,11 @@ def session_data(session_id: str):
                 "cash": _series_from_history(pf_data["cash_history"]),
             },
             "symbols": _symbol_series_from_ticks(pf_data["tick_history"]),
+            "signals": _signal_payload(pf_data["signals_history"], pf_data["tick_history"]),
+            "indicators": _reconstruct_indicator_series(
+                pf_data["tick_history"],
+                (session or {}).get("metadata") or {},
+            ),
             "metrics": _json_safe(metrics),
             "benchmark": _json_safe(benchmark),
             "trades": _trades_payload(trades),

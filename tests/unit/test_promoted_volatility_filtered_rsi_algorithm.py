@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timedelta
 
 from trading.core.classes import PriceData
@@ -56,3 +57,46 @@ def test_promoted_algo_coerces_float_period_params():
     assert isinstance(algo.rsi_overbought_threshold, int)
     assert isinstance(algo.reversal_bar_lookback, int)
 
+
+def test_promoted_algo_emits_strength_on_0_to_100_scale(monkeypatch):
+    algo = VolatilityFilteredRsiMeanReversionAlgorithm(
+        {
+            "symbol": "SPY",
+            "regime_detection": {
+                "ma_short_period": 3,
+                "ma_long_period": 5,
+                "ma_proximity_tolerance": 0.02,
+                "atr_period": 3,
+                "atr_percentile_window": 3,
+                "atr_percentile_level": 50,
+            },
+            "rsi_config": {
+                "rsi_period": 3,
+                "rsi_oversold_threshold": 30,
+                "rsi_overbought_threshold": 70,
+            },
+            "price_confirmation": {"reversal_bar_lookback": 2},
+        },
+        history_length=10,
+    )
+
+    symbol = "SPY"
+    ts = datetime(2026, 1, 1, 9, 30)
+    bars = deque(
+        [_build_bar(ts + timedelta(minutes=i), close) for i, close in enumerate([100.0, 99.0, 98.0, 97.0, 98.0])],
+        maxlen=10,
+    )
+    algo.price_history[symbol] = deque([bar.close for bar in bars], maxlen=10)
+    algo.price_data_history[symbol] = bars
+
+    monkeypatch.setattr(algo, "_calculate_ma", lambda closes, period: 100.0)
+    monkeypatch.setattr(algo, "_calculate_atr", lambda highs, lows, closes, period: 1.0)
+    monkeypatch.setattr(algo, "_percentile", lambda values, percentile: 2.0)
+    monkeypatch.setattr(algo, "_calculate_rsi", lambda closes, period: 20.0)
+    monkeypatch.setattr(algo, "_detect_two_bar_reversal_up", lambda closes: True)
+    monkeypatch.setattr(algo, "_detect_two_bar_reversal_down", lambda closes: False)
+
+    signals = algo.on_data_logic([bars[-1]])
+
+    assert len(signals) == 1
+    assert 50 <= signals[0].strength <= 100

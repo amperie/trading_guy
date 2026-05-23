@@ -264,6 +264,8 @@ button:hover {
 .panel-actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .panel-actions button {
@@ -322,6 +324,11 @@ button:hover {
 
 .table-wrap {
   overflow-x: auto;
+}
+
+canvas {
+  width: 100%;
+  min-height: 280px;
 }
 
 table {

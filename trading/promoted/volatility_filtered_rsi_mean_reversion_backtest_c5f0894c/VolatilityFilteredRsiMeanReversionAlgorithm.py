@@ -198,15 +198,15 @@ class VolatilityFilteredRsiMeanReversionAlgorithm(Algorithm):
             strength = None
 
             if (rsi < self.rsi_oversold_threshold and reversal_up):
-                # Calculate strength: distance from midline (50) normalized to 0.5-1.0
+                # Emit strength on the framework's expected 0-100 scale.
                 rsi_distance = (self.rsi_oversold_threshold - rsi) / self.rsi_oversold_threshold
-                strength = max(0.5, min(1.0, 0.5 + rsi_distance * 0.5))
+                strength = max(50.0, min(100.0, 50.0 + rsi_distance * 50.0))
                 signal = SignalType.BUY
 
             elif (rsi > self.rsi_overbought_threshold and reversal_down):
-                # Calculate strength: distance from midline (50) normalized to 0.5-1.0
+                # Emit strength on the framework's expected 0-100 scale.
                 rsi_distance = (rsi - self.rsi_overbought_threshold) / (100 - self.rsi_overbought_threshold)
-                strength = max(0.5, min(1.0, 0.5 + rsi_distance * 0.5))
+                strength = max(50.0, min(100.0, 50.0 + rsi_distance * 50.0))
                 signal = SignalType.SELL
 
             if signal is not None:

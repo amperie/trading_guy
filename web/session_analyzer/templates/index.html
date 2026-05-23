@@ -158,6 +158,29 @@
         </div>
       </section>
 
+      <section class="grid charts" data-animate>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>RSI</h2>
+            <div class="panel-actions">
+              <p class="panel-note">Reconstructed from stored bars</p>
+              <button id="resetRsi" class="reset-zoom">Reset Zoom</button>
+            </div>
+          </div>
+          <canvas id="rsiChart"></canvas>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>ATR Regime Filter</h2>
+            <div class="panel-actions">
+              <p class="panel-note">Current ATR vs percentile threshold</p>
+              <button id="resetAtr" class="reset-zoom">Reset Zoom</button>
+            </div>
+          </div>
+          <canvas id="atrChart"></canvas>
+        </div>
+      </section>
+
       <section class="grid tables" data-animate>
         <div class="panel wide">
           <div class="panel-header">

@@ -95,6 +95,7 @@ class ExperimentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["backtest", "live", "walk-forward", "hpo", "session-replay"]
+    debug_on_sigint: bool = False
     algorithm: ComponentConfig
     portfolio: ComponentConfig
     order_manager: ComponentConfig

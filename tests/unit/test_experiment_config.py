@@ -138,6 +138,35 @@ def test_walk_forward_window_hpo_section_is_allowed():
     assert config.walk_forward_window_hpo.objective_metric == "wf_annualized_return"
 
 
+def test_debug_on_sigint_top_level_flag_is_allowed():
+    config = ExperimentService.from_dict({
+        "mode": "hpo",
+        "debug_on_sigint": False,
+        "algorithm": {
+            "implementation": "tests.fixtures.custom_components.CustomAlgorithm",
+            "params": {"lookback": 25, "threshold": 1.5, "history_length": 40},
+        },
+        "portfolio": {
+            "implementation": "tests.fixtures.custom_components.CustomPortfolio",
+            "params": {},
+        },
+        "order_manager": {
+            "implementation": "tests.fixtures.custom_components.CustomOrderManager",
+            "params": {},
+        },
+        "data_provider": {
+            "implementation": "tests.fixtures.custom_components.CustomDataProvider",
+            "params": {},
+        },
+        "analysis": {"enabled": False, "log_to_mlflow": False},
+        "state_store": {"enabled": False},
+        "mlflow": {"enabled": False},
+        "logging": {},
+    })
+
+    assert config.debug_on_sigint is False
+
+
 def test_known_component_validation_rejects_bad_param_type():
     cfg = _legacy_backtest_config()
     cfg["algorithm"]["macd_fast_period"] = "not-an-int"

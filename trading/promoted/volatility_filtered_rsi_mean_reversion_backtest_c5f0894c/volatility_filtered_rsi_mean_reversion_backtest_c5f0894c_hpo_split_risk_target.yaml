@@ -1,0 +1,149 @@
+mode: hpo
+
+data_provider:
+  provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+  symbols:
+    - UPRO
+  timeframe: Minute
+  start_date: '2025-01-01'
+  end_date: '2026-05-17'
+  adjustment: split
+  market_hours_only: true
+
+algorithm:
+  algorithm: VolatilityFilteredRsiMeanReversionAlgorithm
+  symbol: UPRO
+  symbols:
+    - UPRO
+  tradable_symbols:
+    - UPRO
+  macro_symbols: []
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+  price_confirmation:
+    reversal_bar_lookback: 2
+  history_length: 260
+  source_path: trading/promoted/volatility_filtered_rsi_mean_reversion_backtest_c5f0894c/VolatilityFilteredRsiMeanReversionAlgorithm.py
+  class_name: VolatilityFilteredRsiMeanReversionAlgorithm
+
+portfolio:
+  portfolio: trading.core.pf.risk_target_portfolio.RiskTargetPortfolio
+  symbol: UPRO
+  cash: 100000.0
+  keep_history: true
+  target_volatility: 0.15
+  volatility_lookback: 390
+  annualization_factor: 98280.0
+  max_exposure: 1.0
+  default_exposure: 0.5
+  min_trade_value: 100.0
+  min_signal_strength: 0
+  tx_cost: 1.5
+  drawdown_limit_pct: 0.1
+  halt_on_drawdown: true
+
+order_manager:
+  order_manager: trading.core.om.backtesting_om.BacktestingOrderManager
+
+hpo:
+  validation_period_days: 30
+  objective_metric: val_annualized_return
+  num_samples: 50
+  max_concurrent_trials: 16
+  log_trials_to_mlflow: true
+  log_ray_worker_output: true
+  search_space:
+    regime_detection.ma_short_period:
+      type: randint
+      low: 20
+      high: 80
+    regime_detection.ma_proximity_tolerance:
+      type: uniform
+      low: 0.005
+      high: 0.05
+    regime_detection.atr_percentile_level:
+      type: randint
+      low: 30
+      high: 70
+    rsi_config.rsi_period:
+      type: randint
+      low: 5
+      high: 25
+    rsi_config.rsi_oversold_threshold:
+      type: randint
+      low: 20
+      high: 40
+    rsi_config.rsi_overbought_threshold:
+      type: randint
+      low: 60
+      high: 80
+    target_volatility:
+      type: uniform
+      low: 0.05
+      high: 0.30
+    volatility_lookback:
+      type: randint
+      low: 120
+      high: 780
+    max_exposure:
+      type: uniform
+      low: 0.25
+      high: 1.25
+    default_exposure:
+      type: uniform
+      low: 0.0
+      high: 1.0
+    min_trade_value:
+      type: uniform
+      low: 0.0
+      high: 500.0
+    min_signal_strength:
+      type: randint
+      low: 0
+      high: 101
+    drawdown_limit_pct:
+      type: uniform
+      low: 0.05
+      high: 0.25
+    halt_on_drawdown:
+      type: choice
+      values:
+        - true
+        - false
+    annualization_factor:
+      type: choice
+      values:
+        - 19656.0
+        - 98280.0
+  algorithm_param_keys:
+    - regime_detection.ma_short_period
+    - regime_detection.ma_proximity_tolerance
+    - regime_detection.atr_percentile_level
+    - rsi_config.rsi_period
+    - rsi_config.rsi_oversold_threshold
+    - rsi_config.rsi_overbought_threshold
+  portfolio_param_keys:
+    - target_volatility
+    - volatility_lookback
+    - max_exposure
+    - default_exposure
+    - min_trade_value
+    - min_signal_strength
+    - drawdown_limit_pct
+    - halt_on_drawdown
+    - annualization_factor
+
+analysis:
+  log_to_mlflow: true
+  experiment_name: hpo_split_runs
+  run_name: volatility_filtered_rsi_mean_reversion_backtest_c5f0894c_hpo_split_risk_target
+  description: Split HPO for the promoted volatility-filtered RSI mean-reversion strategy on UPRO Alpaca minute bars using RiskTargetPortfolio
