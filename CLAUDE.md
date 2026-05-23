@@ -38,6 +38,15 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
           if attr in new_params: setattr(self, attr, new_params[attr])
   ```
 
+**MultiTimeframeAlgorithm** (`core.multi_timeframe_algorithm.MultiTimeframeAlgorithm`):
+- Extends `Algorithm` — all warmup gate, price history, and reconfigure machinery is inherited
+- Override `on_mtf_data(tick, new_bars) -> list[MarketSignal]`; do NOT override `on_data_logic()` — it's `@final` here
+- Config: `timeframes` (list[int] of minute periods, required), plus all `Algorithm` config keys
+- `self.bar_history[period_minutes][symbol]` — deque of completed `PriceData` bars, maxlen=`history_length`
+- `new_bars: dict[int, list[PriceData]]` — sparse; key only present when a bar completed this tick at that period
+- `required_warmup_bars` defaults to `history_length × max(timeframes)`; override to change threshold
+- Window alignment mirrors `TickAggregationPassthroughEngine`: anchors to market open, boundary ticks flush immediately
+
 **DataProvider** (`data_providers.data_provider.DataProvider`):
 - Override `load_data()` to populate `self.data` (DataFrame: `timestamp`, `symbol`, `open`, `high`, `low`, `close`, `volume`; optional: `trade_count`, `vwap`, `exchange`)
 - `iterate()` yields `list[PriceData]` per timestamp, auto-detects chronological order, groups by timestamp
@@ -157,9 +166,10 @@ All subcommands (`backtest`, `live`, `walk-forward`, `hpo`, `session-replay`) sh
 ```
 trading/
   core/
-    classes.py               # Enums/dataclasses: PriceData, MarketSignal, Order, Position, BracketOrder
-    algorithm.py             # Algorithm base class
-    portfolio.py             # Portfolio base class
+    classes.py                    # Enums/dataclasses: PriceData, MarketSignal, Order, Position, BracketOrder
+    algorithm.py                  # Algorithm base class
+    multi_timeframe_algorithm.py  # MultiTimeframeAlgorithm base class (aggregates N timeframes in-process)
+    portfolio.py                  # Portfolio base class
     pf/                      # Portfolio implementations
       single_symbol_portfolio.py
       dual_symbol_switch_portfolio.py
@@ -219,6 +229,7 @@ tests/
     test_tick_aggregation.py          # 40/40 — TickAggregationPassthroughEngine (window alignment, OHLCV, timing, multi-symbol, BacktestingEngine integration, AlpacaRealTimeEngine routing)
     test_warmup.py                    # 21/21 — Algorithm warmup gate (required_warmup_bars, is_warmed_up, _ticks_seen, signal suppression)
     test_session_replay.py            # 24/24 — compute_warmup_start_date, SessionReplayDataProvider, PortfolioAnalyzer._contribute_to_run
+    test_multi_timeframe_algorithm.py # 23/23 — MultiTimeframeAlgorithm (init, warmup gate, bar completion, OHLCV, multi-symbol, bar_history)
     test_analysis_engine.py           # needs fixtures
 scratch/
   run_agg_sweep.py           # Sweep [1,3,5,10,15]-min aggregation periods; logs to MLflow
@@ -232,7 +243,7 @@ run.py                       # Main entry point (backtest / live / hpo / walk-fo
 .venv/Scripts/pytest tests/ -v                    # All tests
 .venv/Scripts/pytest tests/unit/ -v               # Unit tests only
 # Only passing suites:
-.venv/Scripts/pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py tests/unit/test_portfolio.py tests/unit/test_get_price.py tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py tests/unit/test_macd_algorithm.py tests/unit/test_tick_aggregation.py tests/unit/test_warmup.py tests/unit/test_session_replay.py -v
+.venv/Scripts/pytest tests/unit/test_aggregate_stock_data.py tests/unit/test_indicators.py tests/unit/test_technical_analyzer.py tests/unit/test_bracket_order_progression.py tests/unit/test_portfolio.py tests/unit/test_get_price.py tests/unit/test_dual_symbol_switch_portfolio.py tests/unit/test_macd_calculation.py tests/unit/test_macd_algorithm.py tests/unit/test_tick_aggregation.py tests/unit/test_warmup.py tests/unit/test_session_replay.py tests/unit/test_multi_timeframe_algorithm.py -v
 # Coverage:
 .venv/Scripts/pytest tests/ --cov=core --cov=utils --cov-report=html
 ```

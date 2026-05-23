@@ -38,6 +38,14 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
           if attr in new_params: setattr(self, attr, new_params[attr])
   ```
 
+**MultiTimeframeAlgorithm** (`core.multi_timeframe_algorithm.MultiTimeframeAlgorithm`):
+- Extends `Algorithm` — all warmup gate, price history, and reconfigure machinery is inherited
+- Override `on_mtf_data(tick, new_bars) -> list[MarketSignal]` (do NOT override `on_data_logic()` — it's `@final` here)
+- Config: `timeframes` (list[int] of minute periods, required), plus all `Algorithm` config keys
+- `self.bar_history[period_minutes][symbol]` — deque of completed `PriceData` bars per timeframe
+- `new_bars: dict[int, list[PriceData]]` — only contains keys for timeframes that completed a bar this tick
+- `required_warmup_bars` defaults to `history_length × max(timeframes)` so the slowest TF is fully populated before signals fire; override to adjust
+
 **DataProvider** (`data_providers.data_provider.DataProvider`):
 - Override `load_data()` to populate `self.data` (DataFrame: `timestamp`, `symbol`, `open`, `high`, `low`, `close`, `volume`; optional: `trade_count`, `vwap`, `exchange`)
 - `iterate()` yields `list[PriceData]` per timestamp, auto-detects chronological order, groups by timestamp
@@ -157,9 +165,10 @@ All subcommands (`backtest`, `live`, `walk-forward`, `hpo`, `session-replay`) sh
 ```
 trading/
   core/
-    classes.py               # Enums/dataclasses: PriceData, MarketSignal, Order, Position, BracketOrder
-    algorithm.py             # Algorithm base class
-    portfolio.py             # Portfolio base class
+    classes.py                    # Enums/dataclasses: PriceData, MarketSignal, Order, Position, BracketOrder
+    algorithm.py                  # Algorithm base class
+    multi_timeframe_algorithm.py  # MultiTimeframeAlgorithm base class (aggregates N timeframes in-process)
+    portfolio.py                  # Portfolio base class
     pf/                      # Portfolio implementations
       single_symbol_portfolio.py
       dual_symbol_switch_portfolio.py

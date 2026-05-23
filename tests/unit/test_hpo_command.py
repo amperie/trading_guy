@@ -79,6 +79,55 @@ def test_resolve_data_path_prefers_existing_cwd_relative_path(tmp_path, monkeypa
     assert hpo_cmd._resolve_data_path("data/prices.csv") == csv_path.resolve()
 
 
+def test_build_minimal_warmup_dp_cfg_uses_limit_for_alpaca():
+    class DummyAlgo:
+        def __init__(self, cfg, history_length=0):
+            self.required_warmup_bars = history_length
+
+    class DummyAlpacaProvider:
+        __module__ = "trading.data_providers.alpaca_data_provider"
+        __name__ = "AlpacaDataProvider"
+
+    warmup_cfg = hpo_cmd._build_minimal_warmup_dp_cfg(
+        alg_cfg={"history_length": 260},
+        validation_dp_cfg={"start_date": "2024-03-22"},
+        training_dp_cfg={
+            "symbols": ["UPRO"],
+            "timeframe": "Minute",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-21 23:59:59.999999",
+        },
+        algorithm_class=DummyAlgo,
+        data_provider_class=DummyAlpacaProvider,
+    )
+
+    assert warmup_cfg["limit"] == 260
+    assert "start_date" not in warmup_cfg
+    assert warmup_cfg["end_date"] == "2024-03-21 23:59:59.999999"
+
+
+def test_build_minimal_warmup_dp_cfg_uses_reduced_start_for_non_alpaca():
+    class DummyAlgo:
+        def __init__(self, cfg, history_length=0):
+            self.required_warmup_bars = history_length
+
+    warmup_cfg = hpo_cmd._build_minimal_warmup_dp_cfg(
+        alg_cfg={"history_length": 100},
+        validation_dp_cfg={"start_date": "2024-03-22"},
+        training_dp_cfg={
+            "path": "data.csv",
+            "timeframe": "Day",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-21 23:59:59.999999",
+        },
+        algorithm_class=DummyAlgo,
+        data_provider_class=object,
+    )
+
+    assert warmup_cfg["end_date"] == "2024-03-21 23:59:59.999999"
+    assert warmup_cfg["start_date"] != "2024-01-01"
+
+
 def test_select_best_split_config_rejects_empty_trial_summaries():
     with pytest.raises(RuntimeError, match="no completed trial metrics"):
         hpo_cmd._select_best_split_config(
@@ -118,11 +167,7 @@ def test_select_best_split_config_rejects_non_finite_training_metrics():
 
 
 def test_select_best_split_config_rejects_non_finite_validation_metrics(monkeypatch):
-    monkeypatch.setattr(
-        hpo_cmd,
-        "_run_backtest_analysis",
-        lambda **kwargs: {"metrics": SimpleNamespace(annualized_return=float("nan"))},
-    )
+    monkeypatch.setattr(hpo_cmd, "_score_split_validation_trials", lambda **kwargs: [])
 
     with pytest.raises(RuntimeError, match="no finite validation trial metrics"):
         hpo_cmd._select_best_split_config(
@@ -140,6 +185,42 @@ def test_select_best_split_config_rejects_non_finite_validation_metrics(monkeypa
             algorithm_param_keys=["alpha"],
             portfolio_param_keys=[],
         )
+
+
+def test_select_best_split_config_uses_parallel_validation_scores(monkeypatch):
+    monkeypatch.setattr(
+        hpo_cmd,
+        "_score_split_validation_trials",
+        lambda **kwargs: [
+            (1.5, {"alpha": 3}, {"alpha": 3}, {"symbol": "SPY"}),
+            (2.5, {"alpha": 4}, {"alpha": 4}, {"symbol": "SPY"}),
+        ],
+    )
+
+    best_config, best_al_cfg, best_pf_cfg, best_score = hpo_cmd._select_best_split_config(
+        trial_summaries=[
+            {"config": {"alpha": 3}, "metric": 1.0},
+            {"config": {"alpha": 4}, "metric": 2.0},
+        ],
+        objective_metric="val_annualized_return",
+        base_backtest_cfg={},
+        base_al_cfg={},
+        base_pf_cfg={},
+        train_dp_cfg={},
+        val_dp_cfg={},
+        algorithm_class=object,
+        portfolio_class=object,
+        data_provider_class=object,
+        order_manager_class=object,
+        algorithm_param_keys=["alpha"],
+        portfolio_param_keys=[],
+        max_concurrent_trials=4,
+    )
+
+    assert best_config == {"alpha": 4}
+    assert best_al_cfg == {"alpha": 4}
+    assert best_pf_cfg == {"symbol": "SPY"}
+    assert best_score == pytest.approx(2.5)
 
 
 def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
@@ -184,6 +265,11 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
     monkeypatch.setattr(hpo_cmd, "get_git_info", lambda: {})
     monkeypatch.setattr(hpo_cmd, "_resolve_hpo_split_dates", lambda cfg, validation_period_days: ("2024-01-01", "2024-03-21", "2024-03-22", "2024-03-31"))
     monkeypatch.setattr(hpo_cmd, "_collect_config_artifact_paths", lambda cfg, config_path=None: ["cfg.yaml"])
+    monkeypatch.setattr(
+        hpo_cmd,
+        "_build_minimal_warmup_dp_cfg",
+        lambda **kwargs: {"end_date": "2024-03-21 23:59:59.999999", "limit": 42},
+    )
 
     def fake_tune_backtest_hyperparameters(**kwargs):
         return {"alpha": 2}, [{"config": {"alpha": 2}, "metric": 9.9}]
@@ -191,6 +277,10 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
     def fake_run_backtest_analysis(**kwargs):
         calls.append(kwargs)
         return {"metrics": SimpleNamespace(annualized_return=1.23)}
+
+    def fake_score_split_validation_trials(**kwargs):
+        calls.append(kwargs)
+        return [(1.23, {"alpha": 2}, {"alpha": 2}, {"symbol": "SPY"})]
 
     class FakeMLflowClient:
         enabled = True
@@ -219,6 +309,7 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
         fake_tune_backtest_hyperparameters,
     )
     monkeypatch.setattr(hpo_cmd, "_run_backtest_analysis", fake_run_backtest_analysis)
+    monkeypatch.setattr(hpo_cmd, "_score_split_validation_trials", fake_score_split_validation_trials)
     monkeypatch.setattr(hpo_cmd, "MLflowClient", FakeMLflowClient)
 
     hpo_cmd.cmd_hpo_split(
@@ -232,16 +323,16 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
     )
 
     assert len(calls) == 3
-    assert calls[0]["log_to_mlflow"] is False
+    assert calls[0]["max_concurrent_trials"] == 2
+    assert calls[0]["train_dp_cfg"]["start_date"] == "2024-01-01"
+    assert calls[0]["train_dp_cfg"]["end_date"] == "2024-03-21"
     assert calls[1]["metric_prefix"] == "trn_"
     assert calls[1].get("artifact_prefix", "") == ""
     assert calls[2]["metric_prefix"] == "val_"
     assert calls[2]["artifact_prefix"] == "val_"
-    assert calls[0]["warmup_dp_cfg"]["start_date"] == "2024-01-01"
-    assert calls[0]["warmup_dp_cfg"]["end_date"] == "2024-03-21"
     assert "warmup_dp_cfg" not in calls[1]
-    assert calls[2]["warmup_dp_cfg"]["start_date"] == "2024-01-01"
-    assert calls[2]["warmup_dp_cfg"]["end_date"] == "2024-03-21"
+    assert calls[2]["warmup_dp_cfg"]["limit"] == 42
+    assert calls[2]["warmup_dp_cfg"]["end_date"] == "2024-03-21 23:59:59.999999"
     assert calls[1]["parameters"]["hpo.validation_period_days"] == 15
     assert calls[1]["parameters"]["hpo.objective_metric"] == "val_annualized_return"
     assert any(event[0] == "log_json" and event[1] == "hpo_best_config.json" for event in mlflow_events)

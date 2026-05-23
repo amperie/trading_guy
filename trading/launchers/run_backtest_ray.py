@@ -1,5 +1,6 @@
 import math
 import os
+import time
 from pathlib import Path
 from typing import Type
 
@@ -14,6 +15,7 @@ from trading.data_providers.test_data_provider import TestDataProvider
 from trading.engines.backtest_engine import BacktestingEngine
 from trading.analysis.analysis_engine import AnalysisEngine
 from utils.logger import Logger
+from utils.status_line import StatusLine
 from utils.utils import apply_tunable_config
 import ray
 from ray import air
@@ -21,6 +23,72 @@ from ray import tune
 from ray.tune.search.optuna import OptunaSearch
 
 logger = Logger().get_logger(__name__)
+
+
+class _TuneStatusCallback(tune.Callback):
+    """TTY status line for driver-side Ray Tune progress."""
+
+    def __init__(self, total_trials: int, metric_name: str = "_metric", enabled: bool | None = None):
+        self.total_trials = max(0, int(total_trials))
+        self.metric_name = metric_name
+        self.completed_trials = 0
+        self.best_metric = None
+        self.started_at = time.monotonic()
+        self.status_line = StatusLine(enabled=enabled)
+
+    @staticmethod
+    def _format_duration(seconds: float | None) -> str:
+        if seconds is None:
+            return "n/a"
+        total = int(max(0, round(seconds)))
+        hours, rem = divmod(total, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours > 0:
+            return f"{hours:d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    def _maybe_update_best(self, trial) -> None:
+        metric = getattr(trial, "last_result", {}).get(self.metric_name)
+        if metric is None:
+            return
+        metric = float(metric)
+        if not math.isfinite(metric):
+            return
+        if self.best_metric is None or metric > self.best_metric:
+            self.best_metric = metric
+
+    def _refresh(self, final: bool = False) -> None:
+        elapsed = max(0.0, time.monotonic() - self.started_at)
+        eta = None
+        if self.completed_trials > 0 and self.total_trials > self.completed_trials:
+            eta = (elapsed / self.completed_trials) * (self.total_trials - self.completed_trials)
+        text = (
+            f"[HPO] trials={self.completed_trials}/{self.total_trials} "
+            f"elapsed={self._format_duration(elapsed)} "
+            f"eta={self._format_duration(eta)}"
+        )
+        if self.best_metric is not None:
+            text += f" best={self.best_metric:.4f}"
+        if final:
+            text += " completed"
+        self.status_line.update(text)
+
+    def on_trial_result(self, iteration, trials, trial, result, **info):
+        self._maybe_update_best(trial)
+        self._refresh()
+
+    def on_trial_complete(self, iteration, trials, trial, **info):
+        self.completed_trials += 1
+        self._maybe_update_best(trial)
+        self._refresh()
+
+    def on_trial_error(self, iteration, trials, trial, **info):
+        self.completed_trials += 1
+        self._refresh()
+
+    def close(self) -> None:
+        self._refresh(final=True)
+        self.status_line.close()
 
 
 def _short_trial_dirname_creator(trial) -> str:
@@ -529,11 +597,14 @@ def tune_backtest_hyperparameters(
         mode="max",
     )
 
+    status_callback = _TuneStatusCallback(num_samples)
+
     tuner = tune.Tuner(
         trainable_with_params,
         param_space=search_space,
         run_config=air.RunConfig(
             name="hpo",
+            callbacks=[status_callback],
         ),
         tune_config=tune.TuneConfig(
             metric="_metric",
@@ -573,6 +644,7 @@ def tune_backtest_hyperparameters(
         logger.warning("KeyboardInterrupt received during Ray Tune HPO; shutting Ray down immediately.")
         raise
     finally:
+        status_callback.close()
         _restore_env_var("TUNE_DISABLE_SIGINT_HANDLER", previous_sigint_setting)
         if ray.is_initialized():
             ray.shutdown()

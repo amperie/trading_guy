@@ -41,6 +41,50 @@ class SmaCrossover(Algorithm):
         return [MarketSignal(type=SignalType.SELL, symbol="SPY", strength=75)]
 ```
 
+### Multi-Timeframe Algorithms
+
+`MultiTimeframeAlgorithm` extends `Algorithm` to maintain separate bar histories for N timeframes simultaneously. Raw ticks are aggregated in-process — no external aggregation engine is needed.
+
+```python
+from trading.core.multi_timeframe_algorithm import MultiTimeframeAlgorithm
+from trading.core.classes import PriceData, MarketSignal, SignalType
+
+class RegimeEntryAlgo(MultiTimeframeAlgorithm):
+    def on_mtf_data(
+        self,
+        tick: list[PriceData],
+        new_bars: dict[int, list[PriceData]],
+    ) -> list[MarketSignal]:
+        # new_bars only contains keys for timeframes that completed this tick
+        if 60 not in new_bars:
+            return []   # wait for hourly regime bar
+
+        hourly = list(self.bar_history[60]["SPY"])
+        intraday = list(self.bar_history[5]["SPY"])
+        if not hourly or not intraday:
+            return []
+
+        if intraday[-1].close > hourly[-1].close:
+            return [MarketSignal(SignalType.BUY, "SPY", 75)]
+        return []
+```
+
+Config:
+```yaml
+algorithm:
+  algorithm: "my_strategies.RegimeEntryAlgo"
+  timeframes: [5, 60]         # periods in minutes; can be any number of timeframes
+  history_length: 200         # bars to keep per timeframe
+  market_open_hour: 9
+  market_open_minute: 30
+```
+
+Key properties:
+- `self.bar_history[period_minutes][symbol]` — deque of completed `PriceData` bars per timeframe
+- `self.price_history[symbol]` / `self.price_data_history[symbol]` — raw tick history (inherited)
+- `required_warmup_bars` defaults to `history_length × max(timeframes)` so the slowest TF is fully populated before signals fire
+- Implement `on_mtf_data()` — do **not** override `on_data_logic()` (it is `@final` in this class)
+
 **2. Point a config at it:**
 
 ```yaml
@@ -353,11 +397,12 @@ Cleanup notes:
 ```
 trading/
   core/
-    algorithm.py              # Algorithm base (subclass this)
-    portfolio.py              # Portfolio base (subclass this)
-    classes.py                # PriceData, MarketSignal, Order, BracketOrder
-    pf/                       # Portfolio implementations
-    om/                       # OrderManager implementations
+    algorithm.py                    # Algorithm base (subclass this)
+    multi_timeframe_algorithm.py    # MultiTimeframeAlgorithm base (multi-TF strategies)
+    portfolio.py                    # Portfolio base (subclass this)
+    classes.py                      # PriceData, MarketSignal, Order, BracketOrder
+    pf/                             # Portfolio implementations
+    om/                             # OrderManager implementations
   algorithms/                 # Built-in strategies
   analysis/
     analysis_engine.py        # 30+ metrics, charts, MLflow

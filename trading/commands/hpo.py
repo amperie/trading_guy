@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import copy
 import math
+import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import ray
 
 from trading.analysis.analysis_engine import AnalysisEngine
 from trading.commands.analysis import get_git_info
@@ -24,9 +26,53 @@ from trading.engines.backtest_engine import BacktestingEngine
 from trading.engines.walk_forward_policy import metric_value
 from utils.mlflow_client import MLflowClient
 from utils.logger import Logger
-from utils.utils import apply_tunable_config, parse_search_space
+from utils.status_line import StatusLine
+from utils.utils import apply_tunable_config, compute_warmup_start_date, parse_search_space
 
 logger = Logger().get_logger(__name__)
+
+
+class _SplitValidationStatus:
+    def __init__(self, total_trials: int, enabled: bool | None = None):
+        self.total_trials = max(0, int(total_trials))
+        self.completed_trials = 0
+        self.best_metric = None
+        self.started_at = time.monotonic()
+        self._status_line = StatusLine(enabled=enabled)
+
+    @staticmethod
+    def _format_duration(seconds: float | None) -> str:
+        if seconds is None:
+            return "n/a"
+        total = int(max(0, round(seconds)))
+        hours, rem = divmod(total, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours > 0:
+            return f"{hours:d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    def update(self, completed_trials: int, best_metric: float | None = None, final: bool = False) -> None:
+        self.completed_trials = max(0, int(completed_trials))
+        if best_metric is not None and math.isfinite(best_metric):
+            self.best_metric = best_metric if self.best_metric is None else max(self.best_metric, best_metric)
+        elapsed = max(0.0, time.monotonic() - self.started_at)
+        eta = None
+        if self.completed_trials > 0 and self.total_trials > self.completed_trials:
+            eta = (elapsed / self.completed_trials) * (self.total_trials - self.completed_trials)
+        text = (
+            f"[HPO-SPLIT] validation={self.completed_trials}/{self.total_trials} "
+            f"elapsed={self._format_duration(elapsed)} "
+            f"eta={self._format_duration(eta)}"
+        )
+        if self.best_metric is not None:
+            text += f" best_val={self.best_metric:.4f}"
+        if final:
+            text += " completed"
+        self._status_line.update(text)
+
+    def close(self) -> None:
+        self.update(self.completed_trials, final=True)
+        self._status_line.close()
 
 
 def _fill_hpo_data_provider_creds(raw_cfg: dict[str, Any], creds: dict[str, str]) -> None:
@@ -245,6 +291,183 @@ def _build_trial_configs(
     return al_cfg, pf_cfg
 
 
+def _build_minimal_warmup_dp_cfg(
+    *,
+    alg_cfg: dict[str, Any],
+    validation_dp_cfg: dict[str, Any],
+    training_dp_cfg: dict[str, Any],
+    algorithm_class,
+    data_provider_class=None,
+) -> dict[str, Any] | None:
+    history_length = alg_cfg.get("history_length", 0)
+    al = algorithm_class(
+        {k: v for k, v in alg_cfg.items() if k != "history_length"},
+        history_length=history_length,
+    )
+    warmup_bars = int(al.required_warmup_bars)
+    if warmup_bars <= 0:
+        return None
+
+    warmup_cfg = copy.deepcopy(training_dp_cfg)
+    warmup_end = training_dp_cfg.get("end_date")
+    if warmup_end is None:
+        val_start = validation_dp_cfg.get("start_date")
+        if val_start is None:
+            return warmup_cfg
+        warmup_end = (
+            pd.to_datetime(val_start) - pd.Timedelta(microseconds=1)
+        ).strftime("%Y-%m-%d %H:%M:%S.%f")
+    warmup_cfg["end_date"] = warmup_end
+
+    provider_name = ""
+    if data_provider_class is not None:
+        provider_name = f"{data_provider_class.__module__}.{data_provider_class.__name__}"
+    timeframe = str(training_dp_cfg.get("timeframe", "Minute"))
+    if "alpaca" in provider_name.lower():
+        warmup_cfg.pop("start_date", None)
+        warmup_cfg["limit"] = warmup_bars
+        return warmup_cfg
+
+    reference_dt = pd.to_datetime(validation_dp_cfg.get("start_date") or warmup_end).to_pydatetime()
+    warmup_start = compute_warmup_start_date(warmup_bars, timeframe, reference_dt)
+    warmup_cfg["start_date"] = pd.to_datetime(warmup_start).strftime("%Y-%m-%d %H:%M:%S.%f")
+    return warmup_cfg
+
+
+@ray.remote
+def _score_split_validation_trial_remote(
+    *,
+    trial_config: dict[str, Any],
+    base_backtest_cfg: dict[str, Any],
+    base_al_cfg: dict[str, Any],
+    base_pf_cfg: dict[str, Any],
+    train_dp_cfg: dict[str, Any],
+    val_dp_cfg: dict[str, Any],
+    algorithm_class,
+    portfolio_class,
+    data_provider_class,
+    order_manager_class,
+    algorithm_param_keys: list[str],
+    portfolio_param_keys: list[str],
+) -> dict[str, Any]:
+    al_cfg, pf_cfg = _build_trial_configs(
+        trial_config,
+        base_al_cfg=base_al_cfg,
+        base_pf_cfg=base_pf_cfg,
+        algorithm_param_keys=algorithm_param_keys,
+        portfolio_param_keys=portfolio_param_keys,
+    )
+    warmup_dp_cfg = _build_minimal_warmup_dp_cfg(
+        alg_cfg=al_cfg,
+        validation_dp_cfg=val_dp_cfg,
+        training_dp_cfg=train_dp_cfg,
+        algorithm_class=algorithm_class,
+        data_provider_class=data_provider_class,
+    )
+    val_results = _run_backtest_analysis(
+        backtest_cfg=base_backtest_cfg,
+        alg_cfg=al_cfg,
+        pf_cfg=pf_cfg,
+        dp_cfg=val_dp_cfg,
+        algorithm_class=algorithm_class,
+        portfolio_class=portfolio_class,
+        data_provider_class=data_provider_class,
+        order_manager_class=order_manager_class,
+        warmup_dp_cfg=warmup_dp_cfg,
+        log_to_mlflow=False,
+    )
+    score = float(metric_value(val_results["metrics"], "annualized_return"))
+    return {
+        "score": score,
+        "config": trial_config,
+        "alg_cfg": al_cfg,
+        "pf_cfg": pf_cfg,
+    }
+
+
+def _score_split_validation_trials(
+    *,
+    trial_summaries: list[dict[str, Any]],
+    base_backtest_cfg: dict[str, Any],
+    base_al_cfg: dict[str, Any],
+    base_pf_cfg: dict[str, Any],
+    train_dp_cfg: dict[str, Any],
+    val_dp_cfg: dict[str, Any],
+    algorithm_class,
+    portfolio_class,
+    data_provider_class,
+    order_manager_class,
+    algorithm_param_keys: list[str],
+    portfolio_param_keys: list[str],
+    max_concurrent_trials: int,
+) -> list[tuple[float, dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    scored_trials: list[tuple[float, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    if not trial_summaries:
+        return scored_trials
+
+    started_ray = False
+    if not ray.is_initialized():
+        ray.init(ignore_reinit_error=True, log_to_driver=False)
+        started_ray = True
+
+    max_in_flight = max(1, int(max_concurrent_trials or 1))
+    status = _SplitValidationStatus(len(trial_summaries))
+    pending: dict[Any, dict[str, Any]] = {}
+    next_idx = 0
+    completed = 0
+
+    def _submit_trial(trial: dict[str, Any]) -> Any:
+        return _score_split_validation_trial_remote.remote(
+            trial_config=trial["config"],
+            base_backtest_cfg=base_backtest_cfg,
+            base_al_cfg=base_al_cfg,
+            base_pf_cfg=base_pf_cfg,
+            train_dp_cfg=train_dp_cfg,
+            val_dp_cfg=val_dp_cfg,
+            algorithm_class=algorithm_class,
+            portfolio_class=portfolio_class,
+            data_provider_class=data_provider_class,
+            order_manager_class=order_manager_class,
+            algorithm_param_keys=algorithm_param_keys,
+            portfolio_param_keys=portfolio_param_keys,
+        )
+
+    try:
+        while next_idx < len(trial_summaries) and len(pending) < max_in_flight:
+            trial = trial_summaries[next_idx]
+            pending[_submit_trial(trial)] = trial
+            next_idx += 1
+
+        while pending:
+            ready_refs, _ = ray.wait(list(pending.keys()), num_returns=1)
+            ready_ref = ready_refs[0]
+            trial = pending.pop(ready_ref)
+            result = ray.get(ready_ref)
+            completed += 1
+
+            score = float(result["score"])
+            if not math.isfinite(score):
+                logger.warning(
+                    "Skipping split-HPO trial with non-finite validation annualized_return: %s",
+                    score,
+                )
+                status.update(completed)
+            else:
+                scored_trials.append((score, result["config"], result["alg_cfg"], result["pf_cfg"]))
+                status.update(completed, best_metric=score)
+
+            if next_idx < len(trial_summaries):
+                next_trial = trial_summaries[next_idx]
+                pending[_submit_trial(next_trial)] = next_trial
+                next_idx += 1
+    finally:
+        status.close()
+        if started_ray and ray.is_initialized():
+            ray.shutdown()
+
+    return scored_trials
+
+
 def _select_best_split_config(
     *,
     trial_summaries: list[dict[str, Any]],
@@ -260,6 +483,7 @@ def _select_best_split_config(
     order_manager_class,
     algorithm_param_keys: list[str],
     portfolio_param_keys: list[str],
+    max_concurrent_trials: int = 8,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], float]:
     if not trial_summaries:
         raise RuntimeError(
@@ -290,35 +514,21 @@ def _select_best_split_config(
             "'val_annualized_return' or 'trn_annualized_return'"
         )
 
-    scored_trials: list[tuple[float, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
-    for trial in trial_summaries:
-        al_cfg, pf_cfg = _build_trial_configs(
-            trial["config"],
-            base_al_cfg=base_al_cfg,
-            base_pf_cfg=base_pf_cfg,
-            algorithm_param_keys=algorithm_param_keys,
-            portfolio_param_keys=portfolio_param_keys,
-        )
-        val_results = _run_backtest_analysis(
-            backtest_cfg=base_backtest_cfg,
-            alg_cfg=al_cfg,
-            pf_cfg=pf_cfg,
-            dp_cfg=val_dp_cfg,
-            algorithm_class=algorithm_class,
-            portfolio_class=portfolio_class,
-            data_provider_class=data_provider_class,
-            order_manager_class=order_manager_class,
-            warmup_dp_cfg=train_dp_cfg,
-            log_to_mlflow=False,
-        )
-        score = float(metric_value(val_results["metrics"], "annualized_return"))
-        if not math.isfinite(score):
-            logger.warning(
-                "Skipping split-HPO trial with non-finite validation annualized_return: %s",
-                score,
-            )
-            continue
-        scored_trials.append((score, trial["config"], al_cfg, pf_cfg))
+    scored_trials = _score_split_validation_trials(
+        trial_summaries=trial_summaries,
+        base_backtest_cfg=base_backtest_cfg,
+        base_al_cfg=base_al_cfg,
+        base_pf_cfg=base_pf_cfg,
+        train_dp_cfg=train_dp_cfg,
+        val_dp_cfg=val_dp_cfg,
+        algorithm_class=algorithm_class,
+        portfolio_class=portfolio_class,
+        data_provider_class=data_provider_class,
+        order_manager_class=order_manager_class,
+        algorithm_param_keys=algorithm_param_keys,
+        portfolio_param_keys=portfolio_param_keys,
+        max_concurrent_trials=max_concurrent_trials,
+    )
 
     if not scored_trials:
         raise RuntimeError(
@@ -433,6 +643,7 @@ def run_hpo_split_from_raw_config(
         order_manager_class=om_class,
         algorithm_param_keys=hpo_cfg.get("algorithm_param_keys", []),
         portfolio_param_keys=hpo_cfg.get("portfolio_param_keys", []),
+        max_concurrent_trials=hpo_cfg.get("max_concurrent_trials", 8),
     )
     run_parameters = base_backtest_cfg | best_al_cfg | best_pf_cfg | base_dp_cfg | {
         "hpo.validation_period_days": validation_period_days,
@@ -443,6 +654,13 @@ def run_hpo_split_from_raw_config(
         "hpo.val_end_date": val_end,
     }
     artifact_paths = _collect_config_artifact_paths(raw_cfg, config_path=config_artifact_path)
+    val_warmup_dp_cfg = _build_minimal_warmup_dp_cfg(
+        alg_cfg=best_al_cfg,
+        validation_dp_cfg=val_dp_cfg,
+        training_dp_cfg=train_dp_cfg,
+        algorithm_class=al_class,
+        data_provider_class=dp_class,
+    )
 
     if analysis_cfg.get("log_to_mlflow", True):
         mlflow_client = MLflowClient(
@@ -484,7 +702,7 @@ def run_hpo_split_from_raw_config(
                 metric_prefix="val_",
                 artifact_prefix="val_",
                 artifact_paths=artifact_paths,
-                warmup_dp_cfg=train_dp_cfg,
+                warmup_dp_cfg=val_warmup_dp_cfg,
             )
     else:
         train_results = _run_backtest_analysis(
@@ -506,7 +724,7 @@ def run_hpo_split_from_raw_config(
             portfolio_class=pf_class,
             data_provider_class=dp_class,
             order_manager_class=om_class,
-            warmup_dp_cfg=train_dp_cfg,
+            warmup_dp_cfg=val_warmup_dp_cfg,
         )
 
     logger.info("Split HPO complete. Best config:")
