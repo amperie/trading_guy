@@ -12,7 +12,7 @@ logging:
     - pymongo.connection
     - pymongo.serverSelection
 
-debug_on_sigint: false  # true => Ctrl-C opens the debug REPL instead of interrupting engine-driven runs
+debug_on_sigint: true  # true => Ctrl-C opens the debug REPL instead of interrupting engine-driven runs
 
 mlflow:
   enabled: true
