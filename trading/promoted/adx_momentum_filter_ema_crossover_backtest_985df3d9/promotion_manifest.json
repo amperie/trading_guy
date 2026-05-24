@@ -1,0 +1,20 @@
+{
+  "source_run_id": "985df3d9f77b4827b134f560210c7e88",
+  "source_run_name": "adx_momentum_filter_ema_crossover_backtest",
+  "source_run_url": "http://hp.lan:8899/#/experiments/319602620181902644/runs/985df3d9f77b4827b134f560210c7e88",
+  "source_tracking_uri": "http://hp.lan:8899",
+  "config_path": "trading/promoted/adx_momentum_filter_ema_crossover_backtest_985df3d9/adx_momentum_filter_ema_crossover_backtest_985df3d9.yaml",
+  "launch_example": "python run.py live --config trading/promoted/adx_momentum_filter_ema_crossover_backtest_985df3d9/adx_momentum_filter_ema_crossover_backtest_985df3d9.yaml --account <account> --session-id <session-id>",
+  "components": {
+    "algorithm": {
+      "implementation": "AdxMomentumFilterEmaAlgorithm",
+      "class_name": "AdxMomentumFilterEmaAlgorithm",
+      "source_path": "trading/promoted/adx_momentum_filter_ema_crossover_backtest_985df3d9/AdxMomentumFilterEmaAlgorithm.py"
+    },
+    "portfolio": {
+      "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+      "class_name": "SingleSymbolPortfolio",
+      "source_path": "trading/promoted/adx_momentum_filter_ema_crossover_backtest_985df3d9/single_symbol_portfolio.py"
+    }
+  }
+}

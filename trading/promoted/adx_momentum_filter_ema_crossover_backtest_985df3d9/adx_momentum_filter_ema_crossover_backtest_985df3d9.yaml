@@ -1,0 +1,59 @@
+mode: live
+algorithm:
+  algorithm: AdxMomentumFilterEmaAlgorithm
+  symbol: UPRO
+  symbols:
+  - UPRO
+  tradable_symbols:
+  - UPRO
+  macro_symbols: []
+  adx_config:
+    adx_period: 14
+    trend_threshold: 25
+    strong_trend_threshold: 35
+    weak_trend_lower_bound: 20
+  strong_trend_ema_params:
+    fast_ema_period: 8
+    mid_ema_period: 40
+    slow_ema_period: 100
+  moderate_trend_ema_params:
+    fast_ema_period: 12
+    mid_ema_period: 40
+    slow_ema_period: 150
+  history_length: 310
+  source_path: trading/promoted/adx_momentum_filter_ema_crossover_backtest_985df3d9/AdxMomentumFilterEmaAlgorithm.py
+  class_name: AdxMomentumFilterEmaAlgorithm
+portfolio:
+  portfolio: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
+  cash: 100000.0
+  keep_history: true
+  stop_pct: 2.0
+  profit_pct: 3.0
+  tx_cost: 1.5
+  symbol: UPRO
+  source_path: trading/promoted/adx_momentum_filter_ema_crossover_backtest_985df3d9/single_symbol_portfolio.py
+  class_name: SingleSymbolPortfolio
+order_manager:
+  order_manager: trading.core.om.alpaca_om.AlpacaOrderManager
+  paper: true
+  time_in_force: day
+alpaca:
+  api_key: ''
+  secret_key: ''
+  symbols_to_subscribe: &id001
+  - UPRO
+  subscribe_to_bars: true
+  subscribe_to_quotes: false
+  subscribe_to_trades: false
+  override_url: ws://hp.lan:8765
+  warmup:
+    provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+    symbols: *id001
+analysis:
+  enabled: true
+  log_to_mlflow: true
+state_store:
+  enabled: true
+  session_id: ''
+  connection_uri: mongodb://hp.lan:27017
+  database: live_trading

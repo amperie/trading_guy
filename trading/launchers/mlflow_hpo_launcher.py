@@ -306,6 +306,25 @@ def _component_source_missing(cfg: dict[str, Any], section_name: str) -> bool:
     return not bool(section.get("source_path") or section.get("source_url"))
 
 
+def _component_source_unusable(cfg: dict[str, Any], section_name: str) -> bool:
+    section = cfg.get(section_name)
+    if not isinstance(section, dict):
+        return False
+
+    source_url = section.get("source_url")
+    if source_url:
+        return False
+
+    source_path = section.get("source_path")
+    if not source_path:
+        return True
+
+    candidate = Path(_normalized_path_string(str(source_path))).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    return not candidate.exists()
+
+
 def _extract_source_run_url_from_description(description: str | None) -> str | None:
     if not description:
         return None
@@ -327,7 +346,7 @@ def _merge_missing_component_sources(
             continue
         if section.get("implementation") != fallback_section.get("implementation"):
             continue
-        if _component_source_missing(merged, section_name):
+        if _component_source_unusable(merged, section_name):
             if fallback_section.get("source_path"):
                 section["source_path"] = fallback_section["source_path"]
             if fallback_section.get("source_url"):
