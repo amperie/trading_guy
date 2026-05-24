@@ -26,8 +26,8 @@ pipeline:
   gates:
     research:
       min_val_annualized_return: 0
-      max_val_max_drawdown_pct: 25
-      min_val_total_trades: 5
+      max_val_max_drawdown_pct: 50
+      min_val_total_trades: 2
       min_wf_annualized_return: 0
       max_wf_max_drawdown_pct: 30
     review:

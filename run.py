@@ -32,6 +32,20 @@ from trading.commands.pipeline import (
     cmd_pipeline_review,
 )
 from trading.commands.hpo_from_mlflow import cmd_hpo_from_mlflow, cmd_hpo_split_from_mlflow
+from trading.cli_help import (
+    BACKTEST_DESCRIPTION,
+    BACKTEST_EPILOG,
+    HPO_DESCRIPTION,
+    HPO_EPILOG,
+    PIPELINE_EPILOG,
+    PIPELINE_LIVE_EPILOG,
+    PIPELINE_PAPER_EPILOG,
+    PIPELINE_RESEARCH_EPILOG,
+    PIPELINE_REVIEW_EPILOG,
+    PROMOTE_EPILOG,
+    SESSION_REPLAY_DESCRIPTION,
+    SESSION_REPLAY_EPILOG,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -172,7 +186,14 @@ def build_parser() -> argparse.ArgumentParser:
     shared_account = argparse.ArgumentParser(add_help=False)
     shared_account.add_argument("--account", required=True, help="Account name from accounts.yaml")
 
-    backtest_p = subparsers.add_parser("backtest", parents=[shared], help="Run a backtest")
+    backtest_p = subparsers.add_parser(
+        "backtest",
+        parents=[shared],
+        help="Run a backtest",
+        description=BACKTEST_DESCRIPTION,
+        epilog=BACKTEST_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
     backtest_p.add_argument("--data", help="Override data provider path")
     backtest_p.set_defaults(func=cmd_backtest)
 
@@ -180,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
         "mongo-backtest",
         parents=[shared],
         help="Run a backtest against MongoDB bars for a stored session",
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Reuse the algorithm and portfolio wiring from the provided config, but force the runtime "
             "onto MongoDBDataProvider plus BacktestingOrderManager for the supplied session_id."
@@ -191,6 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
         "live",
         parents=[shared],
         help="Run live trading",
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Start a live Alpaca-driven session. Depending on the optimization config, this can run as plain live, "
             "background self-optimizing live, or live walk-forward mode (optimization.mode=walk_forward_live)."
@@ -209,6 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
         "walk-forward",
         parents=[shared],
         help="Run walk-forward optimization",
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Run historical walk-forward optimization with three rolling windows: optimization, validation, and "
             "trading. The challenger is tuned on the optimization window, compared against the incumbent on the "
@@ -259,6 +283,9 @@ def build_parser() -> argparse.ArgumentParser:
         "hpo",
         parents=[shared],
         help="Run standalone Ray Tune hyperparameter optimization over a single date range",
+        description=HPO_DESCRIPTION,
+        epilog=HPO_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     hpo_p.add_argument("--num-samples", dest="num_samples", type=int, help="Override hpo.num_samples")
     hpo_p.add_argument(
@@ -273,6 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
         "hpo-split",
         parents=[shared],
         help="Run split HPO with best-config training and validation analysis",
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Reserve the final validation_period_days as an out-of-sample holdout, run HPO on the "
             "earlier training span, then log the best config on both spans inside one MLflow run."
@@ -301,6 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
         "hpo-from-mlflow",
         parents=[shared_account],
         help="Recreate an HPO search from an MLflow run, edit the generated YAML, then execute it",
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Load a prior MLflow run, reconstruct its runtime config, prefill HPO settings from MLflow artifacts "
             "when available, open the generated HPO YAML in a local editor, then run HPO from the saved file."
@@ -322,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
         "hpo-split-from-mlflow",
         parents=[shared_account],
         help="Recreate a split HPO search from an MLflow run, edit the generated YAML, then execute it",
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Load a prior MLflow run, reconstruct its runtime config, prefill HPO settings from MLflow artifacts "
             "when available, open the generated HPO YAML in a local editor, then run split HPO with the final "
@@ -344,6 +374,9 @@ def build_parser() -> argparse.ArgumentParser:
         "session-replay",
         parents=[shared],
         help="Replay a stored live session using Alpaca historical bars and MongoDB state",
+        description=SESSION_REPLAY_DESCRIPTION,
+        epilog=SESSION_REPLAY_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     sr_p.add_argument("--timeframe", help="Override replay timeframe when session metadata is missing it")
     sr_p.add_argument(
@@ -356,6 +389,8 @@ def build_parser() -> argparse.ArgumentParser:
     promote_p = subparsers.add_parser(
         "promote",
         help="Create a portable live config and local promoted code from an MLflow run",
+        epilog=PROMOTE_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Load a prior MLflow run, recover its runtime config and component source artifacts, "
             "copy algorithm/portfolio code into trading/promoted/<bundle>/, and write the live config into that same bundle directory."
@@ -376,6 +411,8 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline_p = subparsers.add_parser(
         "pipeline",
         help="Run end-to-end strategy pipeline stages",
+        epilog=PIPELINE_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Higher-level release workflow. `research` evaluates a strategy and can register a candidate bundle, "
             "`paper` launches a paper-trading bundle from MLflow, `review` replays the session and can register "
@@ -388,6 +425,8 @@ def build_parser() -> argparse.ArgumentParser:
         "research",
         parents=[shared],
         help="Run research pipeline",
+        epilog=PIPELINE_RESEARCH_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Runs backtest, split HPO, and walk-forward in sequence. The command evaluates `pipeline.gates.research`, "
             "prints the MLflow URLs for each stage, and can auto-register a candidate bundle in the dedicated "
@@ -414,6 +453,8 @@ def build_parser() -> argparse.ArgumentParser:
         "paper",
         parents=[shared_account],
         help="Promote to paper trading",
+        epilog=PIPELINE_PAPER_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Materializes a paper bundle from a source MLflow run URL, logs the bundle into the pipeline MLflow "
             "experiment, prints both local and MLflow launch locations, and starts a paper-trading session."
@@ -438,6 +479,8 @@ def build_parser() -> argparse.ArgumentParser:
         "review",
         parents=[shared],
         help="Review paper/live session and approve bundle",
+        epilog=PIPELINE_REVIEW_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Runs session replay for a paper or live session, evaluates `pipeline.gates.review`, and when the "
             "session passes, registers an approved live bundle locally and in the pipeline MLflow experiment."
@@ -452,6 +495,8 @@ def build_parser() -> argparse.ArgumentParser:
         "live",
         parents=[shared],
         help="Start live trading from local or MLflow bundle config",
+        epilog=PIPELINE_LIVE_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Starts live trading from either a local promoted bundle YAML or an MLflow run URL that contains a "
             "promoted or approved bundle config."

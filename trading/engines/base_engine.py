@@ -433,6 +433,8 @@ class AsyncEngine(BaseEngine):
         super().__init__(cfg, dp, al, om, pf)
         self._queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: asyncio.Task | None = None
+        self._debug_task: asyncio.Task | None = None
+        self._debug_exit_exc: BaseException | None = None
 
     @final
     async def start(self):
@@ -445,8 +447,18 @@ class AsyncEngine(BaseEngine):
         """
         logger.debug("Starting async engine: spawning worker task")
         self._worker_task = asyncio.create_task(self._worker())
+        self._debug_task = asyncio.create_task(self._debug_monitor())
         logger.debug("Connecting to data source")
-        await self._connect()
+        try:
+            await self._connect()
+        finally:
+            if self._debug_task is not None:
+                self._debug_task.cancel()
+                self._debug_task = None
+        if self._debug_exit_exc is not None:
+            exc = self._debug_exit_exc
+            self._debug_exit_exc = None
+            raise exc
 
     @final
     def run(self):
@@ -480,7 +492,12 @@ class AsyncEngine(BaseEngine):
         await self._disconnect()
         logger.debug(f"Draining queue ({self._queue.qsize()} items remaining)")
         await self._queue.join()
-        self._worker_task.cancel()
+        if self._worker_task is not None:
+            self._worker_task.cancel()
+            self._worker_task = None
+        if self._debug_task is not None:
+            self._debug_task.cancel()
+            self._debug_task = None
         logger.debug("Worker task canceled, engine stopped")
 
     async def submit_tick(self, tick: list[PriceData]):
@@ -549,6 +566,18 @@ class AsyncEngine(BaseEngine):
             # keepalives while the user is at the prompt.
             if self._debug_requested:
                 await asyncio.to_thread(self._check_debug)
+
+    async def _debug_monitor(self):
+        """Poll for debug requests even when no ticks are flowing."""
+        while True:
+            try:
+                if self._debug_requested:
+                    await asyncio.to_thread(self._check_debug)
+            except SystemExit as exc:
+                self._debug_exit_exc = exc
+                await self._disconnect()
+                return
+            await asyncio.sleep(0.1)
 
     @abstractmethod
     async def _connect(self):

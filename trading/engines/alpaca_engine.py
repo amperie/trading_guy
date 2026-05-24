@@ -1,3 +1,7 @@
+import asyncio
+import logging
+
+import websockets
 from alpaca.data.live.stock import StockDataStream
 from alpaca.data.enums import \
     DataFeed  # IEX or SIP
@@ -11,6 +15,73 @@ from trading.engines.base_engine import BaseEngine, AsyncEngine
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+alpaca_ws_logger = logging.getLogger("alpaca.data.live.websocket")
+
+
+def _backoff_delay_seconds(attempt: int, base: float = 1.0, maximum: float = 60.0) -> float:
+    return min(base * (2 ** max(attempt - 1, 0)), maximum)
+
+
+class BackoffStockDataStream(StockDataStream):
+
+    def __init__(self, *args, reconnect_base_seconds: float = 1.0, reconnect_max_seconds: float = 60.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._reconnect_base_seconds = reconnect_base_seconds
+        self._reconnect_max_seconds = reconnect_max_seconds
+
+    async def _run_forever(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        while not any(v for k, v in self._handlers.items() if k not in ("cancelErrors", "corrections")):
+            if not self._stop_stream_queue.empty():
+                self._stop_stream_queue.get(timeout=1)
+                return
+            await asyncio.sleep(0)
+        alpaca_ws_logger.info(f"started {self._name} stream")
+        self._should_run = True
+        self._running = False
+        attempts = 0
+        while True:
+            try:
+                if not self._should_run:
+                    alpaca_ws_logger.info(f"{self._name} stream stopped")
+                    return
+                if not self._running:
+                    alpaca_ws_logger.info(f"starting {self._name} websocket connection")
+                    await self._start_ws()
+                    await self._send_subscribe_msg()
+                    self._running = True
+                    attempts = 0
+                await self._consume()
+            except websockets.WebSocketException as exc:
+                await self.close()
+                self._running = False
+                attempts += 1
+                delay = _backoff_delay_seconds(attempts, self._reconnect_base_seconds, self._reconnect_max_seconds)
+                alpaca_ws_logger.warning(f"data websocket error, restarting connection in {delay:.1f}s: {exc}")
+                await asyncio.sleep(delay)
+            except ValueError as exc:
+                if "insufficient subscription" in str(exc):
+                    await self.close()
+                    self._running = False
+                    alpaca_ws_logger.exception(f"error during websocket communication: {exc}")
+                    return
+                await self.close()
+                self._running = False
+                attempts += 1
+                delay = _backoff_delay_seconds(attempts, self._reconnect_base_seconds, self._reconnect_max_seconds)
+                alpaca_ws_logger.exception(f"error during websocket communication: {exc}")
+                alpaca_ws_logger.info(f"retrying websocket connection in {delay:.1f}s")
+                await asyncio.sleep(delay)
+            except Exception as exc:
+                await self.close()
+                self._running = False
+                attempts += 1
+                delay = _backoff_delay_seconds(attempts, self._reconnect_base_seconds, self._reconnect_max_seconds)
+                alpaca_ws_logger.exception(f"error during websocket communication: {exc}")
+                alpaca_ws_logger.info(f"retrying websocket connection in {delay:.1f}s")
+                await asyncio.sleep(delay)
+            finally:
+                await asyncio.sleep(0)
 
 class AlpacaRealTimeEngine(AsyncEngine):
 
@@ -104,6 +175,8 @@ class AlpacaRealTimeEngine(AsyncEngine):
         self._quote_subscribe = cfg.get("subscribe_to_quotes", True)
         self._trades_subscribe = cfg.get("subscribe_to_trades", False)
         self._override_url = cfg.get("override_url", None)
+        self._reconnect_base_seconds = cfg.get("reconnect_backoff_base_seconds", 1.0)
+        self._reconnect_max_seconds = cfg.get("reconnect_backoff_max_seconds", 60.0)
         self.stream = None
 
     async def _connect(self):
@@ -111,19 +184,23 @@ class AlpacaRealTimeEngine(AsyncEngine):
         url_desc = f"override_url={self._override_url}" if self._override_url else "production feed (SIP)"
         logger.info(f"Connecting to Alpaca WebSocket ({url_desc})")
         if self._override_url is not None:
-            stream = StockDataStream(
+            stream = BackoffStockDataStream(
                 api_key=self._api_key,
                 secret_key=self._secret_key,
                 url_override=self._override_url,
                 feed=DataFeed.SIP,
-                raw_data=False
+                raw_data=False,
+                reconnect_base_seconds=self._reconnect_base_seconds,
+                reconnect_max_seconds=self._reconnect_max_seconds,
             )
         else:
-            stream = StockDataStream(
+            stream = BackoffStockDataStream(
                 api_key=self._api_key,
                 secret_key=self._secret_key,
                 feed=DataFeed.SIP,
-                raw_data=False
+                raw_data=False,
+                reconnect_base_seconds=self._reconnect_base_seconds,
+                reconnect_max_seconds=self._reconnect_max_seconds,
             )
         self.stream = stream
 
