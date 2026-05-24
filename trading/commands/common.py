@@ -79,11 +79,23 @@ def _set_component_field(cfg: dict[str, Any], section_name: str, field: str, val
 
 
 def load_raw_config(config_path: str) -> dict[str, Any]:
+    """
+    Load a runtime config from either a local YAML file or an MLflow run URL.
+
+    MLflow-backed configs are reconstructed from the run's logged config
+    artifacts/params, then merged over the root defaults from config.yaml the
+    same way local profiles are.
+    """
     from utils.config_manager import ConfigManager
 
     root_cfg = ConfigManager().config
-    with open(config_path, "r") as handle:
-        profile = yaml.safe_load(handle) or {}
+    if config_path.startswith(("http://", "https://")) and "/runs/" in config_path:
+        from trading.launchers.mlflow_hpo_launcher import load_source_run_context
+
+        profile = load_source_run_context(config_path).raw_config
+    else:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            profile = yaml.safe_load(handle) or {}
     return deep_merge(root_cfg, profile)
 
 

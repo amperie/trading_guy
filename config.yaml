@@ -20,6 +20,20 @@ mlflow:
   experiment_name: "Trading Backtest"
   auto_log_system_info: true
 
+pipeline:
+  experiment_name: "Trading Pipeline"
+  auto_promote_research: true
+  gates:
+    research:
+      min_val_annualized_return: 0
+      max_val_max_drawdown_pct: 25
+      min_val_total_trades: 5
+      min_wf_annualized_return: 0
+      max_wf_max_drawdown_pct: 30
+    review:
+      max_alpaca_live_equity_drift_pct: 5
+      max_mongo_live_equity_drift_pct: 5
+
 state_store:
   enabled: true
   connection_uri: "mongodb://hp.lan:27017"

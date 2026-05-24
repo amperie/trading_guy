@@ -69,6 +69,7 @@ def cmd_walk_forward(args: argparse.Namespace):
     logger.info("Walk-forward complete:")
     for key, val in agg.items():
         logger.info(f"  {key}: {val:.4f}" if isinstance(val, float) else f"  {key}: {val}")
+    return results
 
 
 def cmd_walk_forward_hpo(args: argparse.Namespace):
@@ -124,3 +125,4 @@ def cmd_walk_forward_hpo(args: argparse.Namespace):
     final_agg = results.get("final_result", {}).get("aggregate", {})
     for key, val in final_agg.items():
         logger.info(f"  final_{key}: {val:.4f}" if isinstance(val, float) else f"  final_{key}: {val}")
+    return results

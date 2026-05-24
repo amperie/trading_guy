@@ -7,6 +7,7 @@ from trading.config.models import (
     HPOConfig,
     MLflowConfig,
     OptimizationConfig,
+    PipelineConfig,
     StateStoreConfig,
     WalkForwardConfig,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "HPOConfig",
     "MLflowConfig",
     "OptimizationConfig",
+    "PipelineConfig",
     "StateStoreConfig",
     "WalkForwardConfig",
     "build_components",

@@ -21,6 +21,7 @@ Inspect a specific command:
 python run.py backtest -h
 python run.py mongo-backtest -h
 python run.py live -h
+python run.py pipeline -h
 python run.py walk-forward-hpo -h
 python run.py promote -h
 ```
@@ -40,12 +41,16 @@ python run.py promote -h
 - `hpo-split-from-mlflow`: reconstruct an HPO config from a prior MLflow run, edit it, then launch split HPO with a validation holdout
 - `session-replay`: replay a stored live session offline
 - `promote`: turn a prior MLflow run into a portable live bundle
+- `pipeline research`: run backtest, split HPO, and walk-forward, then evaluate research gates
+- `pipeline paper`: materialize a paper bundle from MLflow, log it to the pipeline experiment, and start paper trading
+- `pipeline review`: replay a paper/live session, evaluate review gates, and register an approved live bundle
+- `pipeline live`: launch a local or MLflow-backed promoted bundle
 
 ## Shared CLI Model
 
 Most commands use a shared set of flags:
 
-- `--config`: YAML profile to load
+- `--config`: local YAML profile to load, or an MLflow run URL with a reconstructable config
 - `--account`: account name from `accounts.yaml`
 - `--symbol`: override the portfolio symbol
 - `--cash`: override starting cash
@@ -66,6 +71,7 @@ Important details:
 - `hpo-split` also supports `--num-samples`, `--max-concurrent-trials`, and `--validation-period-days`
 - `walk-forward-hpo` uses `walk_forward_window_hpo` config keys rather than command-specific trial flags
 - `hpo-from-mlflow`, `hpo-split-from-mlflow`, and `promote` operate from MLflow run URLs instead of local config paths
+- `pipeline live` can also use an MLflow run URL as `--config`
 
 ## Config Loading Rules
 
@@ -79,6 +85,108 @@ At runtime, command execution follows this pattern:
 6. Build components from `implementation`, `source_path`, or `source_url`
 
 This means a profile in `configs/` usually only needs to define the parts that are different from the root defaults.
+
+`--config` is no longer only a filesystem concept. When you pass an MLflow run URL, `run.py` reconstructs the runtime config from that run's artifacts and logged params, then merges that reconstructed config over `config.yaml` just like a normal local profile.
+
+## Pipeline Workflow
+
+The recommended release workflow is:
+
+```text
+research -> paper -> review -> live
+```
+
+Use the high-level `pipeline` command when you want the system to enforce that flow instead of manually stitching together low-level commands.
+
+### `pipeline research`
+
+Example:
+
+```bash
+python run.py pipeline research --config configs/example_hpo_split.yaml --account paper
+```
+
+What it does:
+
+1. Runs `backtest`
+2. Runs `hpo-split`
+3. Runs `walk-forward`
+4. Evaluates `pipeline.gates.research`
+5. If the gates pass and `pipeline.auto_promote_research` is true, creates a candidate bundle
+6. Logs that candidate bundle to the dedicated pipeline MLflow experiment
+7. Prints the backtest, split-HPO, walk-forward, and candidate-bundle MLflow URLs plus the local bundle paths
+
+### `pipeline paper`
+
+Example:
+
+```bash
+python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<candidate_run_id> --account paper
+```
+
+What it does:
+
+1. Loads the source MLflow run
+2. Materializes a paper bundle under `trading/promoted/<bundle>/`
+3. Logs the bundle into the pipeline MLflow experiment
+4. Prints both the local bundle paths and the pipeline MLflow run URL
+5. Starts paper trading with a generated or explicit session id
+
+### `pipeline review`
+
+Example:
+
+```bash
+python run.py pipeline review --config trading/promoted/<paper_bundle>/<paper_bundle>.yaml --account paper --session-id <paper_session_id>
+```
+
+What it does:
+
+1. Runs `session-replay`
+2. Computes drift metrics such as Alpaca replay vs live and Mongo replay vs live
+3. Evaluates `pipeline.gates.review`
+4. If the gates pass, creates an approved live bundle
+5. Logs the approved bundle into the pipeline MLflow experiment
+6. Prints the replay MLflow URL, the approved local bundle path, and the approved MLflow bundle URL
+
+### `pipeline live`
+
+Examples:
+
+```bash
+python run.py pipeline live --config trading/promoted/<approved_bundle>/<approved_bundle>.yaml --account live --session-id <live_session_id>
+python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account live --session-id <live_session_id>
+```
+
+This is the last stage. It launches from either:
+
+- a local promoted bundle after a git pull
+- an MLflow run URL that contains a reconstructable promoted bundle config
+
+That dual launch path is intentional. It lets another node run the same approved artifact from local source control or directly from MLflow.
+
+### Pipeline Config
+
+The root `config.yaml` can define a dedicated pipeline experiment and promotion gates:
+
+```yaml
+pipeline:
+  experiment_name: "Trading Pipeline"
+  artifact_location: null
+  auto_promote_research: true
+  gates:
+    research:
+      min_val_annualized_return: 0
+      max_val_max_drawdown_pct: 25
+      min_val_total_trades: 5
+      min_wf_annualized_return: 0
+      max_wf_max_drawdown_pct: 30
+    review:
+      max_alpaca_live_equity_drift_pct: 5
+      max_mongo_live_equity_drift_pct: 5
+```
+
+That dedicated experiment is where candidate, paper, and approved bundle artifacts are registered so they can be launched later by URL.
 
 ## Debug REPL
 
@@ -555,6 +663,14 @@ Example:
 ```bash
 python run.py live --config trading/promoted/spy_macd_live_v1/spy_macd_live_v1.yaml --account paper --session-id live-20260513-b
 ```
+
+Direct MLflow launch is also supported now:
+
+```bash
+python run.py live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account paper --session-id live-20260513-c
+```
+
+That works because `--config` can reconstruct a runtime config from MLflow artifacts and logged params when the bundle run contains them.
 
 Important constraints:
 - the target node still needs the repo and Python environment

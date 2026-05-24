@@ -81,7 +81,13 @@ def cmd_backtest(args: argparse.Namespace):
         f"Backtest complete — Value: ${built.portfolio.total_value:,.2f}, "
         f"Cash: ${built.portfolio.cash:,.2f}, Positions: {list(built.portfolio.positions.keys())}"
     )
-    run_analysis(raw_cfg, built.portfolio, built.order_manager, config_path=args.config)
+    analysis = run_analysis(raw_cfg, built.portfolio, built.order_manager, config_path=args.config)
+    return {
+        "analysis": analysis,
+        "final_value": built.portfolio.total_value,
+        "cash": built.portfolio.cash,
+        "positions": list(built.portfolio.positions.keys()),
+    }
 
 
 def cmd_mongo_backtest(args: argparse.Namespace):

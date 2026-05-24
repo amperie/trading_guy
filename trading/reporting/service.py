@@ -104,15 +104,16 @@ class ExperimentReporter:
         _print_summary(summary)
 
     @staticmethod
-    def log_to_mlflow(report: ExperimentReport) -> None:
+    def log_to_mlflow(report: ExperimentReport) -> dict[str, str] | None:
         if report.tracking_uri:
             client = MLflowClient(experiment_name=report.experiment_name, tracking_uri=report.tracking_uri)
         else:
             client = MLflowClient.from_config(experiment_name=report.experiment_name)
         if not client.enabled:
-            return
+            return None
 
         with client.start_run(run_name=report.run_name, description=report.description, tags=report.tags):
+            run_info = {"run_id": client.run_id or "", "run_url": client.get_run_url()}
             if report.parameters:
                 client.log_params(report.parameters)
 
@@ -134,6 +135,7 @@ class ExperimentReporter:
                         target_name = spec.filename
                         from utils.logger import Logger
                         Logger().get_logger(__name__).warning(f"Failed to log {target_name}: {exc}")
+            return run_info
 
     @staticmethod
     def _log_target(client: MLflowClient, target: AnalyzerReportTarget) -> None:

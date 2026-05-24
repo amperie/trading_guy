@@ -122,6 +122,60 @@ Results (metrics, equity curve, trade log) are printed and logged to MLflow auto
 
 ---
 
+## Recommended Workflow
+
+The intended release path is now:
+
+```text
+research -> paper -> review -> live
+```
+
+Use the high-level pipeline commands when you want the lowest-friction path:
+
+```bash
+# 1. Research: backtest -> split HPO -> walk-forward -> gate checks
+python run.py pipeline research --config configs/example_hpo_split.yaml --account paper
+
+# 2. Paper: build a paper bundle from the winning MLflow run and launch it
+python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<candidate_run_id> --account paper
+
+# 3. Review: replay the paper session and approve a live bundle if drift gates pass
+python run.py pipeline review --config trading/promoted/<paper_bundle>/<paper_bundle>.yaml --account paper --session-id <paper_session_id>
+
+# 4. Live: launch from local bundle YAML or directly from the approved MLflow bundle URL
+python run.py pipeline live --config trading/promoted/<approved_bundle>/<approved_bundle>.yaml --account live --session-id <live_session_id>
+python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account live --session-id <live_session_id>
+```
+
+What the pipeline does:
+
+- `pipeline research` prints the backtest, split-HPO, and walk-forward MLflow URLs, evaluates `pipeline.gates.research`, and can auto-register a candidate bundle in the dedicated pipeline MLflow experiment.
+- `pipeline paper` materializes a paper bundle from a source MLflow run, stores that bundle locally under `trading/promoted/`, logs the same bundle into the pipeline MLflow experiment, and prints both launch paths.
+- `pipeline review` runs `session-replay`, prints replay MLflow links and drift numbers, evaluates `pipeline.gates.review`, and when the session passes, registers an approved live bundle.
+- `pipeline live` launches from either the local filesystem after a git pull or directly from an MLflow run URL containing a reconstructable promoted bundle config.
+
+The root [config.yaml](/E:/Programming/trading_guy/config.yaml) now includes a dedicated `pipeline` section:
+
+```yaml
+pipeline:
+  experiment_name: "Trading Pipeline"
+  auto_promote_research: true
+  gates:
+    research:
+      min_val_annualized_return: 0
+      max_val_max_drawdown_pct: 25
+      min_val_total_trades: 5
+      min_wf_annualized_return: 0
+      max_wf_max_drawdown_pct: 30
+    review:
+      max_alpaca_live_equity_drift_pct: 5
+      max_mongo_live_equity_drift_pct: 5
+```
+
+That experiment is where promoted and approved bundles are registered so another node can run them directly from MLflow without depending only on local promoted files.
+
+---
+
 ## All Run Modes
 
 ```bash
@@ -160,13 +214,19 @@ python run.py hpo-split --config configs/example_hpo_split.yaml --validation-per
 
 # Recreate HPO settings from a prior MLflow run
 python run.py hpo-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id>
+
+# Full release pipeline
+python run.py pipeline research --config configs/example_hpo_split.yaml --account paper
+python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<candidate_run_id> --account paper
+python run.py pipeline review --config trading/promoted/<paper_bundle>/<paper_bundle>.yaml --account paper --session-id <paper_session_id>
+python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account live --session-id <live_session_id>
 ```
 
 Common flags (all modes):
 
 | Flag | Description |
 |---|---|
-| `--config` | YAML config profile (required) |
+| `--config` | Local YAML config profile, or an MLflow run URL with a reconstructable config |
 | `--account` | Account name from `accounts.yaml` |
 | `--cash` | Override starting cash |
 | `--symbol` | Override trading symbol |
@@ -389,6 +449,29 @@ Cleanup notes:
   CLI, so only use it with a dedicated staging prefix.
 - optimization event tables and JSON exports
 - MongoDB `optimization_events` records keyed by event id so chart markers can be traced back to the stored decision
+
+---
+
+## MLflow-Backed Bundles
+
+Promoted and approved bundles now have two valid launch paths:
+
+- local filesystem: `trading/promoted/<bundle>/<bundle>.yaml`
+- MLflow run URL: `http://.../#/experiments/<id>/runs/<bundle_run_id>`
+
+That means a second node can either:
+
+1. `git pull` and run the local promoted YAML
+2. skip the local promoted files and run directly from the MLflow bundle URL
+
+Example:
+
+```bash
+python run.py live --config trading/promoted/spy_macd_live_v1/spy_macd_live_v1.yaml --account paper --session-id live-20260513-b
+python run.py live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account paper --session-id live-20260513-c
+```
+
+The pipeline commands print both the local paths they created and the MLflow links they logged so there is no ambiguity about what artifact was produced.
 
 ---
 

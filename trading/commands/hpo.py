@@ -542,6 +542,7 @@ def run_hpo_split_from_raw_config(
     num_samples_override: int | None = None,
     max_concurrent_override: int | None = None,
     validation_period_days_override: int | None = None,
+    return_details: bool = False,
 ) -> dict[str, Any]:
     hpo_cfg = raw_cfg.setdefault("hpo", {})
     if num_samples_override is not None:
@@ -659,6 +660,7 @@ def run_hpo_split_from_raw_config(
         data_provider_class=dp_class,
     )
 
+    mlflow_info: dict[str, str] = {}
     if analysis_cfg.get("log_to_mlflow", True):
         mlflow_client = MLflowClient(
             experiment_name=base_backtest_cfg["experiment_name"],
@@ -669,6 +671,7 @@ def run_hpo_split_from_raw_config(
             description=base_backtest_cfg["description"],
             tags=base_backtest_cfg["git_tags"] or None,
         ):
+            mlflow_info = {"run_id": mlflow_client.run_id or "", "run_url": mlflow_client.get_run_url()}
             mlflow_client.log_json(best_config, "hpo_best_config.json")
             train_results = _run_backtest_analysis(
                 backtest_cfg=base_backtest_cfg,
@@ -733,7 +736,21 @@ def run_hpo_split_from_raw_config(
         train_results["metrics"].annualized_return,
         val_results["metrics"].annualized_return,
     )
-    return best_config
+    if not return_details:
+        return best_config
+    return {
+        "best_config": best_config,
+        "train_results": train_results,
+        "val_results": val_results,
+        "objective_metric": objective_metric,
+        "objective_value": selected_objective_value,
+        "run_id": mlflow_info.get("run_id"),
+        "run_url": mlflow_info.get("run_url"),
+        "train_start": train_start,
+        "train_end": train_end,
+        "val_start": val_start,
+        "val_end": val_end,
+    }
 
 
 def cmd_hpo_split(args: argparse.Namespace):

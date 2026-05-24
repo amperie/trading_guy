@@ -660,7 +660,7 @@ class WalkForwardEngine(BaseEngine):
         analysis_results: dict[str, Any],
         plans: list[dict[str, Any]],
         aggregate: dict[str, Any],
-    ) -> str | None:
+    ) -> dict[str, str] | None:
         mlflow_client = self._create_mlflow_client()
         if mlflow_client is None:
             return None
@@ -672,7 +672,7 @@ class WalkForwardEngine(BaseEngine):
                 run_name=self.run_name,
                 description=self.description or f"Walk-forward backtest with {len(plans)} periods",
             ):
-                run_id = mlflow_client.run_id
+                run_info = {"run_id": mlflow_client.run_id or "", "run_url": mlflow_client.get_run_url()}
                 if self.mlflow_tags:
                     mlflow_client.set_tags(self.mlflow_tags)
                 parameters = {
@@ -719,7 +719,7 @@ class WalkForwardEngine(BaseEngine):
                 self._log_optimization_events_artifacts(mlflow_client, event_rows)
                 for filename, payload in self.extra_mlflow_json_artifacts.items():
                     mlflow_client.log_json(payload, filename)
-                return run_id
+                return run_info
         except Exception as exc:
             logger.warning(f"Failed to log walk-forward run to MLflow: {exc}")
             return None
@@ -782,7 +782,7 @@ class WalkForwardEngine(BaseEngine):
         analysis = continuous["analysis"]
         analysis_results = continuous["results"]
         aggregate = self._build_aggregate_summary(plans, analysis_results["metrics"])
-        mlflow_run_id = self._log_full_run_to_mlflow(analysis, analysis_results, plans, aggregate)
+        mlflow_info = self._log_full_run_to_mlflow(analysis, analysis_results, plans, aggregate) or {}
         self._progress_phase = "completed"
         self._refresh_status_line(final=True)
         self._status_line.close()
@@ -792,7 +792,8 @@ class WalkForwardEngine(BaseEngine):
             "aggregate": aggregate,
             "metrics": analysis_results["metrics"],
             "optimization_events": self._build_optimization_events_rows(plans),
-            "mlflow_run_id": mlflow_run_id,
+            "mlflow_run_id": mlflow_info.get("run_id"),
+            "mlflow_run_url": mlflow_info.get("run_url"),
         }
 
     def _create_mlflow_client(self):

@@ -279,7 +279,15 @@ def cmd_session_replay(args: argparse.Namespace):
         connection_uri=ss_cfg.get("connection_uri"),
         database=ss_cfg.get("database"),
     )
+    replay_metrics = replay_analyzer.get_metrics()
+    mongo_metrics = mongo_analyzer.get_metrics()
+    live_metrics = live_analyzer.get_metrics()
 
+    def _equity_drift_pct(lhs: float, rhs: float) -> float:
+        baseline = abs(rhs) if abs(rhs) > 1e-9 else 1.0
+        return abs(lhs - rhs) / baseline * 100.0
+
+    mlflow_info: dict[str, str] = {}
     if log_mlflow:
         from trading.commands.common import flatten_config
 
@@ -402,7 +410,7 @@ def cmd_session_replay(args: argparse.Namespace):
             combined_artifacts=combined_artifacts,
         )
 
-        ExperimentReporter.log_to_mlflow(report)
+        mlflow_info = ExperimentReporter.log_to_mlflow(report) or {}
         logger.info("MLflow run complete")
     else:
         summary = ExperimentReporter.build_single_report(
@@ -414,3 +422,13 @@ def cmd_session_replay(args: argparse.Namespace):
             parameters=None,
         )[1]
         ExperimentReporter.show_summary(summary)
+    return {
+        "session_id": args.session_id,
+        "mlflow_run_id": mlflow_info.get("run_id"),
+        "mlflow_run_url": mlflow_info.get("run_url"),
+        "alpaca_live_equity_drift_pct": _equity_drift_pct(replay_metrics.final_equity, live_metrics.final_equity),
+        "mongo_live_equity_drift_pct": _equity_drift_pct(mongo_metrics.final_equity, live_metrics.final_equity),
+        "alpaca_final_equity": replay_metrics.final_equity,
+        "mongo_final_equity": mongo_metrics.final_equity,
+        "live_final_equity": live_metrics.final_equity,
+    }

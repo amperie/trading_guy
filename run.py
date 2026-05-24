@@ -1,8 +1,13 @@
 """
-CLI entrypoint for backtesting, live trading, HPO, walk-forward, and session replay.
+CLI entrypoint for research, promotion, replay, and live deployment workflows.
+
+Low-level commands still exist for one-off backtests, HPO, promotion, and live
+trading. The `pipeline` command is the higher-level release workflow:
+research -> paper -> review -> live.
 
 The operational logic lives in importable command modules so external systems can
-reuse the same config normalization and runtime wiring without shelling out.
+reuse the same config normalization, MLflow reconstruction, and runtime wiring
+without shelling out.
 """
 
 from __future__ import annotations
@@ -20,6 +25,12 @@ from trading.commands import (
     cmd_walk_forward,
     cmd_walk_forward_hpo,
 )
+from trading.commands.pipeline import (
+    cmd_pipeline_live,
+    cmd_pipeline_paper,
+    cmd_pipeline_research,
+    cmd_pipeline_review,
+)
 from trading.commands.hpo_from_mlflow import cmd_hpo_from_mlflow, cmd_hpo_split_from_mlflow
 
 
@@ -27,7 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Trading framework CLI. Commands share a typed config normalization layer "
-            "so internal runs and external experiment runners use the same interface."
+            "so internal runs and external experiment runners use the same interface. "
+            "--config accepts either a local YAML path or an MLflow run URL when the "
+            "run contains a reconstructable config artifact."
         ),
         epilog=(
             "Top-level command summary:\n"
@@ -90,6 +103,21 @@ def build_parser() -> argparse.ArgumentParser:
             "    Promote a prior MLflow run into a portable live config plus checked-in component source files.\n"
             "    --run-url [--tracking-uri] [--name]\n"
             "    Example: python run.py promote --run-url http://localhost:5000/#/experiments/1/runs/<run_id>\n"
+            "  pipeline research:\n"
+            "    Run backtest -> split HPO -> walk-forward, evaluate configured gates, and optionally register a candidate bundle.\n"
+            "    Prints backtest/HPO/walk-forward MLflow links plus any candidate bundle logged to the pipeline experiment.\n"
+            "    Example: python run.py pipeline research --config configs/example_hpo_split.yaml --account paper\n"
+            "  pipeline paper:\n"
+            "    Materialize a paper bundle from a source MLflow run, log it to the pipeline experiment, and start paper trading.\n"
+            "    The bundle can later be launched from the local filesystem or directly from the pipeline MLflow run URL.\n"
+            "    Example: python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --account paper\n"
+            "  pipeline review:\n"
+            "    Replay a paper/live session, evaluate review gates, and register an approved live bundle when the session passes.\n"
+            "    Prints replay MLflow links plus the approved bundle location and MLflow registration URL.\n"
+            "    Example: python run.py pipeline review --config trading/promoted/my_live_bundle/my_live_bundle.yaml --account paper --session-id paper-20260523-120000\n"
+            "  pipeline live:\n"
+            "    Start a real-money session from a local promoted bundle or directly from an MLflow run URL containing a promoted bundle.\n"
+            "    Example: python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account live\n"
             "\n"
             "Workflow Examples:\n"
             "  Backtest -> promote directly to live bundle:\n"
@@ -99,6 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
             "  Backtest -> recreate HPO from MLflow -> promote the derived winner:\n"
             "    python run.py hpo-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id>\n"
             "    python run.py promote --run-url http://localhost:5000/#/experiments/1/runs/<derived_run_id>\n"
+            "  End-to-end pipeline:\n"
+            "    python run.py pipeline research --config configs/example_hpo_split.yaml --account paper\n"
+            "    python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<candidate_run_id> --account paper\n"
+            "    python run.py pipeline review --config trading/promoted/<paper_bundle>/<paper_bundle>.yaml --account paper --session-id <paper_session_id>\n"
+            "    python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account live --session-id <live_session_id>\n"
             "  Derived-run fallback:\n"
             "    If a recreated HPO run does not contain algorithm code artifacts, promote will inspect the MLflow\n"
             "    description for the original source run URL and retry component recovery from that run.\n"
@@ -110,7 +143,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument("--config", required=True, help="Path to YAML config profile")
+    shared.add_argument(
+        "--config",
+        required=True,
+        help="Local YAML config path, or an MLflow run URL containing a reconstructable config",
+    )
     shared.add_argument("--account", required=True, help="Account name from accounts.yaml")
     shared.add_argument("--symbol", help="Override portfolio symbol")
     shared.add_argument("--cash", type=float, help="Override starting cash")
@@ -335,6 +372,93 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional promotion bundle name. Defaults to a slug based on the source run name and run ID.",
     )
     promote_p.set_defaults(func=cmd_promote)
+
+    pipeline_p = subparsers.add_parser(
+        "pipeline",
+        help="Run end-to-end strategy pipeline stages",
+        description=(
+            "Higher-level release workflow. `research` evaluates a strategy and can register a candidate bundle, "
+            "`paper` launches a paper-trading bundle from MLflow, `review` replays the session and can register "
+            "an approved live bundle, and `live` launches from either a local bundle YAML or an MLflow bundle URL."
+        ),
+    )
+    pipeline_sub = pipeline_p.add_subparsers(dest="pipeline_stage", required=True)
+
+    pipeline_research_p = pipeline_sub.add_parser(
+        "research",
+        parents=[shared],
+        help="Run research pipeline",
+        description=(
+            "Runs backtest, split HPO, and walk-forward in sequence. The command evaluates `pipeline.gates.research`, "
+            "prints the MLflow URLs for each stage, and can auto-register a candidate bundle in the dedicated "
+            "pipeline MLflow experiment."
+        ),
+    )
+    pipeline_research_p.add_argument("--num-samples", dest="num_samples", type=int, help="Override hpo.num_samples")
+    pipeline_research_p.add_argument(
+        "--max-concurrent-trials",
+        dest="max_concurrent_trials",
+        type=int,
+        help="Override hpo.max_concurrent_trials",
+    )
+    pipeline_research_p.add_argument(
+        "--validation-period-days",
+        dest="validation_period_days",
+        type=int,
+        help="Override hpo.validation_period_days",
+    )
+    pipeline_research_p.add_argument("--name", help="Optional candidate bundle name when research auto-promotes")
+    pipeline_research_p.set_defaults(func=cmd_pipeline_research)
+
+    pipeline_paper_p = pipeline_sub.add_parser(
+        "paper",
+        parents=[shared_account],
+        help="Promote to paper trading",
+        description=(
+            "Materializes a paper bundle from a source MLflow run URL, logs the bundle into the pipeline MLflow "
+            "experiment, prints both local and MLflow launch locations, and starts a paper-trading session."
+        ),
+    )
+    pipeline_paper_p.add_argument("--run-url", required=True, help="Source MLflow run URL")
+    pipeline_paper_p.add_argument("--name", help="Optional local bundle name")
+    pipeline_paper_p.add_argument("--session-id", dest="session_id", help="Optional paper session ID")
+    pipeline_paper_p.add_argument("--run-name", dest="run_name", help="Override MLflow run name for the live paper run")
+    pipeline_paper_p.add_argument("--agg-period", dest="agg_period", type=int, help="Override aggregation period")
+    pipeline_paper_p.add_argument("--alpaca-override-url", dest="alpaca_override_url", help="Override Alpaca websocket URL")
+    pipeline_paper_p.add_argument("--symbol", help="Override portfolio symbol")
+    pipeline_paper_p.add_argument("--cash", type=float, help="Override starting cash")
+    pipeline_paper_p.add_argument("--algorithm", help="Override algorithm implementation path")
+    pipeline_paper_p.add_argument("--algorithm-url", dest="algorithm_url", help="Load algorithm class code from an HTTP(S) URL")
+    pipeline_paper_p.add_argument("--portfolio", help="Override portfolio implementation path")
+    pipeline_paper_p.add_argument("--portfolio-url", dest="portfolio_url", help="Load portfolio class code from an HTTP(S) URL")
+    pipeline_paper_p.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging for the live paper run")
+    pipeline_paper_p.set_defaults(func=cmd_pipeline_paper)
+
+    pipeline_review_p = pipeline_sub.add_parser(
+        "review",
+        parents=[shared],
+        help="Review paper/live session and approve bundle",
+        description=(
+            "Runs session replay for a paper or live session, evaluates `pipeline.gates.review`, and when the "
+            "session passes, registers an approved live bundle locally and in the pipeline MLflow experiment."
+        ),
+    )
+    pipeline_review_p.add_argument("--timeframe", help="Override replay timeframe when session metadata is missing it")
+    pipeline_review_p.add_argument("--start-date", dest="start_date", help="Optional extended replay start date")
+    pipeline_review_p.add_argument("--name", help="Optional approved live bundle name")
+    pipeline_review_p.set_defaults(func=cmd_pipeline_review)
+
+    pipeline_live_p = pipeline_sub.add_parser(
+        "live",
+        parents=[shared],
+        help="Start live trading from local or MLflow bundle config",
+        description=(
+            "Starts live trading from either a local promoted bundle YAML or an MLflow run URL that contains a "
+            "promoted or approved bundle config."
+        ),
+    )
+    pipeline_live_p.add_argument("--alpaca-override-url", dest="alpaca_override_url", help="Override Alpaca websocket URL")
+    pipeline_live_p.set_defaults(func=cmd_pipeline_live)
 
     return parser
 

@@ -159,6 +159,13 @@ def run_analysis(cfg: dict, pf, om, config_path: str | None = None):
         config_artifact_paths=_collect_config_artifact_paths(cfg, config_path=config_path),
     )
     ExperimentReporter.show_summary(summary)
+    summary_dict = ExperimentReporter.summary_to_legacy_dict(summary)
     if analysis_cfg.get("log_to_mlflow", True):
-        ExperimentReporter.log_to_mlflow(report)
-    return ExperimentReporter.summary_to_legacy_dict(summary)
+        mlflow_info = ExperimentReporter.log_to_mlflow(report) or {}
+        summary_dict.update(
+            {
+                "mlflow_run_id": mlflow_info.get("run_id"),
+                "mlflow_run_url": mlflow_info.get("run_url"),
+            }
+        )
+    return summary_dict

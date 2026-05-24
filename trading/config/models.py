@@ -91,6 +91,15 @@ class HPOConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class PipelineConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    experiment_name: str | None = None
+    artifact_location: str | None = None
+    auto_promote_research: bool = True
+    gates: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExperimentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -107,6 +116,7 @@ class ExperimentConfig(BaseModel):
     walk_forward: WalkForwardConfig = Field(default_factory=WalkForwardConfig)
     walk_forward_window_hpo: WalkForwardWindowHPOConfig = Field(default_factory=WalkForwardWindowHPOConfig)
     hpo: HPOConfig = Field(default_factory=HPOConfig)
+    pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     state_store: StateStoreConfig = Field(default_factory=StateStoreConfig)
     mlflow: MLflowConfig = Field(default_factory=MLflowConfig)
     logging: dict[str, Any] = Field(default_factory=dict)

@@ -111,3 +111,9 @@ def cmd_live(args: argparse.Namespace):
         logger.info(f"Live aggregation enabled: {agg_cfg.get('aggregation_period_minutes', 5)}-min bars")
 
     engine.run()
+    return {
+        "session_id": raw_cfg.get("state_store", {}).get("session_id"),
+        "config_path": args.config,
+        "config_hash": ExperimentService.describe(experiment).config_hash,
+        "symbols": alpaca_cfg.get("symbols_to_subscribe", []),
+    }
