@@ -158,7 +158,7 @@ The root [config.yaml](/E:/Programming/trading_guy/config.yaml) now includes a d
 
 ```yaml
 pipeline:
-  experiment_name: "Trading Pipeline"
+  experiment_name: "Trading Pipeline Bundle Registry"
   auto_promote_research: true
   gates:
     research:
@@ -172,7 +172,7 @@ pipeline:
       max_mongo_live_equity_drift_pct: 5
 ```
 
-That experiment is where promoted and approved bundles are registered so another node can run them directly from MLflow without depending only on local promoted files.
+That experiment is where bundle-registration runs live. Those runs store promoted/approved bundle artifacts, manifests, and launch metadata. They are not intended to hold strategy performance metrics.
 
 ---
 

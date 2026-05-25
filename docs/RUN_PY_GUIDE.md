@@ -171,7 +171,7 @@ The root `config.yaml` can define a dedicated pipeline experiment and promotion 
 
 ```yaml
 pipeline:
-  experiment_name: "Trading Pipeline"
+  experiment_name: "Trading Pipeline Bundle Registry"
   artifact_location: null
   auto_promote_research: true
   gates:
@@ -186,7 +186,7 @@ pipeline:
       max_mongo_live_equity_drift_pct: 5
 ```
 
-That dedicated experiment is where candidate, paper, and approved bundle artifacts are registered so they can be launched later by URL.
+That dedicated experiment is where candidate, paper, and approved bundle-registration runs are stored. Those runs contain manifests, promoted bundle files, and launch instructions, not strategy metrics.
 
 ## Debug REPL
 

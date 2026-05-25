@@ -49,6 +49,7 @@ alpaca:
   warmup:
     provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
     symbols: *id001
+  paper: true
 analysis:
   enabled: true
   log_to_mlflow: true

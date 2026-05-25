@@ -29,15 +29,24 @@ def _pd(symbol: str, ts: datetime, price: float, volume: float = 1.0):
     )
 
 
-def test_tick_aggregation_passthrough_engine_per_symbol():
-    downstream = _Downstream()
+def _cfg(downstream, **overrides):
     cfg = {
         "downstream_engine": downstream,
-        "aggregation_period_minutes": 5,
-        "use_market_open": True,
-        "market_open_hour": 9,
-        "market_open_minute": 30,
+        "state_store": {"enabled": False},
     }
+    cfg.update(overrides)
+    return cfg
+
+
+def test_tick_aggregation_passthrough_engine_per_symbol():
+    downstream = _Downstream()
+    cfg = _cfg(
+        downstream,
+        aggregation_period_minutes=5,
+        use_market_open=True,
+        market_open_hour=9,
+        market_open_minute=30,
+    )
     engine = TickAggregationPassthroughEngine(cfg)
 
     # Minutes 09:31 -> 09:35 should aggregate into a bar ending at 09:35.
@@ -70,13 +79,13 @@ def test_tick_aggregation_passthrough_engine_per_symbol():
 
 def test_tick_aggregation_emits_on_exact_boundary():
     downstream = _Downstream()
-    cfg = {
-        "downstream_engine": downstream,
-        "aggregation_period_minutes": 5,
-        "use_market_open": True,
-        "market_open_hour": 9,
-        "market_open_minute": 30,
-    }
+    cfg = _cfg(
+        downstream,
+        aggregation_period_minutes=5,
+        use_market_open=True,
+        market_open_hour=9,
+        market_open_minute=30,
+    )
     engine = TickAggregationPassthroughEngine(cfg)
 
     # Start exactly on boundary 09:30 and should emit at 09:30 immediately.
@@ -97,13 +106,13 @@ def test_tick_aggregation_emits_on_exact_boundary():
 
 def test_tick_aggregation_respects_timezone_alignment():
     downstream = _Downstream()
-    cfg = {
-        "downstream_engine": downstream,
-        "aggregation_period_minutes": 7,
-        "use_market_open": True,
-        "market_open_hour": 9,
-        "market_open_minute": 30,
-    }
+    cfg = _cfg(
+        downstream,
+        aggregation_period_minutes=7,
+        use_market_open=True,
+        market_open_hour=9,
+        market_open_minute=30,
+    )
     engine = TickAggregationPassthroughEngine(cfg)
 
     # Use timezone-aware timestamps; boundary should preserve tzinfo
@@ -121,13 +130,13 @@ def test_tick_aggregation_respects_timezone_alignment():
 
 def test_tick_aggregation_skips_empty_windows():
     downstream = _Downstream()
-    cfg = {
-        "downstream_engine": downstream,
-        "aggregation_period_minutes": 5,
-        "use_market_open": True,
-        "market_open_hour": 9,
-        "market_open_minute": 30,
-    }
+    cfg = _cfg(
+        downstream,
+        aggregation_period_minutes=5,
+        use_market_open=True,
+        market_open_hour=9,
+        market_open_minute=30,
+    )
     engine = TickAggregationPassthroughEngine(cfg)
 
     # AAA appears, then no AAA for next window; should not emit empty bar.
@@ -148,16 +157,16 @@ def test_tick_aggregation_skips_empty_windows():
 
 
 def _batch_cfg(downstream, **overrides):
-    cfg = {
-        "downstream_engine": downstream,
-        "aggregation_period_minutes": 5,
-        "use_market_open": True,
-        "market_open_hour": 9,
-        "market_open_minute": 30,
-        "batch_symbols": True,
-        "expected_symbols": ["AAA", "BBB"],
-        "batch_timeout_seconds": 2.0,
-    }
+    cfg = _cfg(
+        downstream,
+        aggregation_period_minutes=5,
+        use_market_open=True,
+        market_open_hour=9,
+        market_open_minute=30,
+        batch_symbols=True,
+        expected_symbols=["AAA", "BBB"],
+        batch_timeout_seconds=2.0,
+    )
     cfg.update(overrides)
     return cfg
 

@@ -1,0 +1,14 @@
+{
+  "stage": "paper",
+  "status": "paper_ready",
+  "registered_at": "2026-05-25T05:31:59.257442Z",
+  "bundle_name": "adx_momentum_filter_ema_crossover_backtest_985df3d9",
+  "bundle_config_path": "E:\\Programming\\trading_guy\\trading\\promoted\\adx_momentum_filter_ema_crossover_backtest_985df3d9\\adx_momentum_filter_ema_crossover_backtest_985df3d9.yaml",
+  "bundle_manifest_path": "E:\\Programming\\trading_guy\\trading\\promoted\\adx_momentum_filter_ema_crossover_backtest_985df3d9\\promotion_manifest.json",
+  "source_run_id": "985df3d9f77b4827b134f560210c7e88",
+  "source_run_name": "adx_momentum_filter_ema_crossover_backtest",
+  "source_run_url": "http://hp.lan:8899/#/experiments/319602620181902644/runs/985df3d9f77b4827b134f560210c7e88",
+  "metadata": {
+    "session_id": "paper-test"
+  }
+}

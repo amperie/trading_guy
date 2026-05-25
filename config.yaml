@@ -21,7 +21,7 @@ mlflow:
   auto_log_system_info: true
 
 pipeline:
-  experiment_name: "Trading Pipeline"
+  experiment_name: "Trading Pipeline Bundle Registry"
   auto_promote_research: true
   gates:
     research:

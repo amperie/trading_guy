@@ -14,6 +14,8 @@ from trading.commands.common import flatten_config
 from trading.launchers.mlflow_promote_launcher import PromotionBundle, promote_run
 from utils.mlflow_client import MLflowClient
 
+DEFAULT_PIPELINE_EXPERIMENT = "Trading Pipeline Bundle Registry"
+
 
 @dataclass(slots=True)
 class GateCheck:
@@ -255,8 +257,9 @@ def log_registered_bundle(
 ) -> dict[str, Any]:
     pipeline_cfg = raw_cfg.get("pipeline", {}) or {}
     tracking_uri = (raw_cfg.get("mlflow") or {}).get("tracking_uri")
+    bundle_name = Path(bundle.promoted_dir).name
     client = MLflowClient(
-        experiment_name=pipeline_cfg.get("experiment_name") or "Trading Pipeline",
+        experiment_name=pipeline_cfg.get("experiment_name") or DEFAULT_PIPELINE_EXPERIMENT,
         tracking_uri=tracking_uri,
         artifact_location=pipeline_cfg.get("artifact_location"),
     )
@@ -264,7 +267,7 @@ def log_registered_bundle(
         "stage": stage,
         "status": status,
         "registered_at": datetime.utcnow().isoformat() + "Z",
-        "bundle_name": Path(bundle.promoted_dir).name,
+        "bundle_name": bundle_name,
         "bundle_config_path": bundle.config_path,
         "bundle_manifest_path": bundle.manifest_path,
         "source_run_id": bundle.source_run_id,
@@ -274,27 +277,37 @@ def log_registered_bundle(
     }
     local_manifest = Path(bundle.promoted_dir) / f"pipeline_{stage}_manifest.json"
     local_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    run_name = f"{stage}_{Path(bundle.promoted_dir).name}_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    run_name = f"bundle-registry {stage} {bundle_name} {timestamp}"
+    description = (
+        f"Pipeline bundle registration run for '{bundle_name}'. "
+        f"Stage={stage}, status={status}. This run stores promoted bundle "
+        f"artifacts and launch metadata only. Performance metrics live in the "
+        f"source research, backtest, walk-forward, or replay runs."
+    )
 
     with client.start_run(
         run_name=run_name,
-        description=f"{stage} bundle registration for {Path(bundle.promoted_dir).name}",
+        description=description,
         tags={
             "pipeline.stage": stage,
             "pipeline.status": status,
+            "pipeline.run_type": "bundle_registry",
+            "pipeline.bundle_name": bundle_name,
             "pipeline.source_run_id": bundle.source_run_id,
             "pipeline.source_run_url": source_run_url or bundle.source_run_url,
         },
     ):
         run_info = {"run_id": client.run_id or "", "run_url": client.get_run_url()}
         params = {
-            "bundle_name": Path(bundle.promoted_dir).name,
+            "bundle_name": bundle_name,
             "bundle_source_run_id": bundle.source_run_id,
             "bundle_source_run_name": bundle.source_run_name,
             "bundle_source_run_url": source_run_url or bundle.source_run_url,
             "bundle_config_filename": Path(bundle.config_path).name,
             "bundle_stage": stage,
             "bundle_status": status,
+            "bundle_registry_run": True,
         }
         params.update(flatten_config({"pipeline_bundle": metadata or {}}, prefix="meta"))
         client.log_params(params)
