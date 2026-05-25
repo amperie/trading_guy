@@ -26,6 +26,7 @@ Implementations:
     - AlpacaRealTimeEngine:      Streams live data from Alpaca WebSocket
     - TickAggregationPassthroughEngine: Aggregates ticks before processing
 """
+import copy
 from typing import final
 from trading.core.classes import PriceData, TickResults
 from trading.core.algorithm import Algorithm
@@ -156,6 +157,7 @@ class BaseEngine(ABC):
         self.pf = pf
         self.state_store = None
         self.session_id = None
+        self._last_indicator_snapshot = None
         self._debug_requested = False
         self._debug_repl = None
         self._install_debug_handler()
@@ -263,6 +265,14 @@ class BaseEngine(ABC):
         if timestamp is None:
             return
 
+        indicator_snapshot = None
+        persisted_signals = signals
+        if self._should_persist_live_state_extensions():
+            previous_snapshot = self._last_indicator_snapshot
+            indicator_snapshot = self._get_indicator_snapshot_for_persistence(tick)
+            persisted_signals = self._decorate_persisted_signals(signals, previous_snapshot)
+            self._last_indicator_snapshot = indicator_snapshot
+
         try:
             self.state_store.save_tick(
                 self.session_id,
@@ -270,13 +280,34 @@ class BaseEngine(ABC):
                 tick,
                 self.pf.cash if self.pf else 0.0,
                 self.pf.total_value if self.pf else 0.0,
-                signals,
+                persisted_signals,
                 self.pf.positions if self.pf else {},
+                indicator_snapshot=indicator_snapshot,
             )
             if self.om:
                 self.state_store.save_orders(self.session_id, self.om.all_orders)
         except Exception:
             logger.exception("Failed to persist tick to state_store")
+
+    def _should_persist_live_state_extensions(self) -> bool:
+        return False
+
+    def _get_indicator_snapshot_for_persistence(self, tick: list[PriceData]) -> dict | None:
+        if self.al is None:
+            return None
+        return self.al.get_indicator_snapshot(tick)
+
+    def _decorate_persisted_signals(
+        self,
+        signals: list | None,
+        previous_tick_metadata: dict | None,
+    ) -> list | None:
+        if not signals or previous_tick_metadata is None:
+            return signals
+        persisted_signals = copy.deepcopy(signals)
+        for sig in persisted_signals:
+            sig.metadata.setdefault("previous_tick_metadata", previous_tick_metadata)
+        return persisted_signals
 
     def warm_up(self, data_provider: DataProvider):
         """Pre-populate the algorithm's price history from a DataProvider.
@@ -435,6 +466,9 @@ class AsyncEngine(BaseEngine):
         self._worker_task: asyncio.Task | None = None
         self._debug_task: asyncio.Task | None = None
         self._debug_exit_exc: BaseException | None = None
+
+    def _should_persist_live_state_extensions(self) -> bool:
+        return True
 
     @final
     async def start(self):

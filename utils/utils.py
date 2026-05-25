@@ -1,6 +1,8 @@
 import copy
 import importlib
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any, Union
 
 import pandas as pd
@@ -393,6 +395,46 @@ def deserialize_pricedata(data: dict) -> PriceData:
     )
 
 
+def make_json_serializable(value: Any) -> Any:
+    """Recursively convert common Python objects into JSON/Mongo-safe values."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.name
+    if is_dataclass(value):
+        value = asdict(value)
+    if isinstance(value, dict):
+        return {str(k): make_json_serializable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [make_json_serializable(v) for v in value]
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            return make_json_serializable(value.item())
+        except Exception:
+            pass
+    if hasattr(value, "__dict__") and not isinstance(value, type):
+        return {
+            key: make_json_serializable(val)
+            for key, val in vars(value).items()
+            if not key.startswith("_")
+        }
+    return value
+
+
+def restore_serialized_datetimes(value: Any) -> Any:
+    """Recursively convert ISO datetime strings back into datetime objects."""
+    if isinstance(value, dict):
+        return {k: restore_serialized_datetimes(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [restore_serialized_datetimes(v) for v in value]
+    if isinstance(value, str) and "T" in value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    return value
+
+
 def serialize_order(order: Order) -> dict:
     """Convert an Order or BracketOrder to a dictionary suitable for MongoDB storage.
 
@@ -532,21 +574,11 @@ def serialize_market_signal(signal: MarketSignal) -> dict:
         >>> data = serialize_market_signal(signal)
         >>> # {'type': 'BUY', 'symbol': 'AAPL', 'strength': 75, 'metadata': {'reason': 'crossover'}}
     """
-    from datetime import datetime
-
-    # Deep copy metadata and convert datetime objects to ISO strings
-    metadata_copy = {}
-    for key, value in signal.metadata.items():
-        if isinstance(value, datetime):
-            metadata_copy[key] = value.isoformat()
-        else:
-            metadata_copy[key] = value
-
     return {
         "type": signal.type.name,  # Convert enum to string (e.g., "BUY")
         "symbol": signal.symbol,
         "strength": signal.strength,
-        "metadata": metadata_copy
+        "metadata": make_json_serializable(signal.metadata),
     }
 
 
@@ -566,25 +598,11 @@ def deserialize_market_signal(data: dict) -> MarketSignal:
         >>> # MarketSignal(type=SignalType.BUY, symbol='AAPL', strength=75, metadata={'reason': 'crossover'})
     """
     from trading.core.classes import SignalType
-    from datetime import datetime
-
-    # Reconstruct metadata, converting ISO strings back to datetime
-    metadata = {}
-    for key, value in data.get("metadata", {}).items():
-        # Try to parse as datetime if it looks like ISO format
-        if isinstance(value, str) and "T" in value:
-            try:
-                metadata[key] = datetime.fromisoformat(value)
-            except ValueError:
-                metadata[key] = value
-        else:
-            metadata[key] = value
-
     return MarketSignal(
         type=SignalType[data["type"]],  # Convert string back to enum
         symbol=data["symbol"],
         strength=data["strength"],
-        metadata=metadata
+        metadata=restore_serialized_datetimes(data.get("metadata", {})),
     )
 
 

@@ -173,6 +173,7 @@ def test_pipeline_research_uses_edited_config_path_for_logged_artifacts(monkeypa
     monkeypatch.setattr(pipeline_cmd, "load_raw_config", fake_load_raw_config)
     monkeypatch.setattr(pipeline_cmd, "apply_cli_overrides", fake_apply_cli_overrides)
     monkeypatch.setattr(pipeline_cmd, "apply_session_log_file", fake_apply_session_log_file)
+    monkeypatch.setattr(pipeline_cmd, "_preflight_pipeline_research", lambda raw_cfg, **kwargs: None)
     monkeypatch.setattr(pipeline_cmd, "cmd_backtest", fake_cmd_backtest)
 
     def fake_hpo(raw_cfg, *, config_artifact_path, **kwargs):
@@ -213,3 +214,137 @@ def test_pipeline_research_uses_edited_config_path_for_logged_artifacts(monkeypa
     assert calls["backtest_config"] == edited_path
     assert calls["hpo_config_artifact_path"] == edited_path
     assert calls["walk_forward_config"] == edited_path
+
+
+def test_pipeline_research_fills_alpaca_data_provider_creds_before_hpo(monkeypatch):
+    calls = {}
+
+    monkeypatch.setattr(pipeline_cmd, "_materialize_editable_research_config", lambda args: args.config)
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "load_raw_config",
+        lambda path: {"data_provider": {"provider": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"}},
+    )
+    monkeypatch.setattr(pipeline_cmd, "apply_cli_overrides", lambda raw_cfg, args: raw_cfg)
+    monkeypatch.setattr(pipeline_cmd, "apply_session_log_file", lambda raw_cfg, args: None)
+    monkeypatch.setattr(pipeline_cmd, "_preflight_pipeline_research", lambda raw_cfg, **kwargs: None)
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "load_account_creds",
+        lambda account: {"api_key": "key-123", "secret_key": "secret-456"},
+    )
+    monkeypatch.setattr(pipeline_cmd, "cmd_backtest", lambda args: {"analysis": {}})
+    monkeypatch.setattr(pipeline_cmd, "cmd_walk_forward", lambda args: {"aggregate": {}})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "evaluate_research_gates",
+        lambda raw_cfg, backtest_result, hpo_result, walk_forward_result: SimpleNamespace(
+            passed=False,
+            checks=[],
+            to_dict=lambda: {"passed": False},
+        ),
+    )
+
+    def fake_hpo(raw_cfg, **kwargs):
+        calls["hpo_raw_cfg"] = raw_cfg
+        return {"val_results": {"metrics": _Metrics(annualized_return=0, max_drawdown_pct=0, total_trades=0)}}
+
+    monkeypatch.setattr(pipeline_cmd, "run_hpo_split_from_raw_config", fake_hpo)
+
+    args = SimpleNamespace(
+        config="configs/example_hpo_split.yaml",
+        account="paper3",
+        num_samples=None,
+        max_concurrent_trials=None,
+        validation_period_days=30,
+        name=None,
+    )
+
+    pipeline_cmd.cmd_pipeline_research(args)
+
+    assert calls["hpo_raw_cfg"]["data_provider"]["api_key"] == "key-123"
+    assert calls["hpo_raw_cfg"]["data_provider"]["secret_key"] == "secret-456"
+
+
+def test_pipeline_research_runs_preflight_before_backtest(monkeypatch):
+    calls = {}
+
+    monkeypatch.setattr(pipeline_cmd, "_materialize_editable_research_config", lambda args: args.config)
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {"auto_promote_research": False}})
+    monkeypatch.setattr(pipeline_cmd, "apply_cli_overrides", lambda raw_cfg, args: raw_cfg)
+    monkeypatch.setattr(pipeline_cmd, "apply_session_log_file", lambda raw_cfg, args: None)
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "_preflight_pipeline_research",
+        lambda raw_cfg, **kwargs: calls.setdefault("preflight", True),
+    )
+    monkeypatch.setattr(pipeline_cmd, "cmd_backtest", lambda args: {"analysis": {}})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "run_hpo_split_from_raw_config",
+        lambda raw_cfg, **kwargs: {"val_results": {"metrics": _Metrics(annualized_return=0, max_drawdown_pct=0, total_trades=0)}},
+    )
+    monkeypatch.setattr(pipeline_cmd, "cmd_walk_forward", lambda args: {"aggregate": {}})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "evaluate_research_gates",
+        lambda raw_cfg, backtest_result, hpo_result, walk_forward_result: SimpleNamespace(
+            passed=False,
+            checks=[],
+            to_dict=lambda: {"passed": False},
+        ),
+    )
+
+    args = SimpleNamespace(
+        config="configs/example_hpo_split.yaml",
+        account="paper3",
+        num_samples=None,
+        max_concurrent_trials=None,
+        validation_period_days=30,
+        name=None,
+    )
+
+    pipeline_cmd.cmd_pipeline_research(args)
+    assert calls["preflight"] is True
+
+
+def test_pipeline_research_passes_cli_validation_period_days_to_preflight(monkeypatch):
+    calls = {}
+
+    monkeypatch.setattr(pipeline_cmd, "_materialize_editable_research_config", lambda args: args.config)
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {"auto_promote_research": False}})
+    monkeypatch.setattr(pipeline_cmd, "apply_cli_overrides", lambda raw_cfg, args: raw_cfg)
+    monkeypatch.setattr(pipeline_cmd, "apply_session_log_file", lambda raw_cfg, args: None)
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "_preflight_pipeline_research",
+        lambda raw_cfg, **kwargs: calls.setdefault("validation_period_days_override", kwargs.get("validation_period_days_override")),
+    )
+    monkeypatch.setattr(pipeline_cmd, "cmd_backtest", lambda args: {"analysis": {}})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "run_hpo_split_from_raw_config",
+        lambda raw_cfg, **kwargs: {"val_results": {"metrics": _Metrics(annualized_return=0, max_drawdown_pct=0, total_trades=0)}},
+    )
+    monkeypatch.setattr(pipeline_cmd, "cmd_walk_forward", lambda args: {"aggregate": {}})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "evaluate_research_gates",
+        lambda raw_cfg, backtest_result, hpo_result, walk_forward_result: SimpleNamespace(
+            passed=False,
+            checks=[],
+            to_dict=lambda: {"passed": False},
+        ),
+    )
+
+    args = SimpleNamespace(
+        config="configs/example_hpo_split.yaml",
+        account="paper3",
+        num_samples=None,
+        max_concurrent_trials=None,
+        validation_period_days=30,
+        name=None,
+    )
+
+    pipeline_cmd.cmd_pipeline_research(args)
+    assert calls["validation_period_days_override"] == 30

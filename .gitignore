@@ -28,7 +28,7 @@ MANIFEST
 workspace.xml
 .idea/
 .venv1/
-
+scratch/tmp*
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

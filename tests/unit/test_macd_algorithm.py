@@ -158,3 +158,30 @@ class TestMACDAlgorithm:
             assert signal.metadata.get('macd_line') is not None
             assert signal.metadata.get('signal_line') is not None
             assert signal.metadata.get('histogram') is not None
+
+    def test_indicator_snapshot_exposes_current_macd_state(self, algorithm):
+        prices = list(range(100, 150))
+        snapshot = None
+
+        for i, price in enumerate(prices):
+            base_time = datetime(2022, 1, 1, 9, 30)
+            current_time = base_time + timedelta(minutes=5 * i)
+            tick = [
+                PriceData(symbol='SPY', timestamp=current_time,
+                          open=price, high=price + 1, low=price - 1,
+                          close=price, volume=1000000),
+                PriceData(symbol='UPRO', timestamp=current_time,
+                          open=price * 3, high=price * 3 + 1, low=price * 3 - 1,
+                          close=price * 3, volume=100000),
+                PriceData(symbol='SPXU', timestamp=current_time,
+                          open=100, high=101, low=99,
+                          close=100, volume=100000)
+            ]
+            algorithm.on_data(tick)
+            snapshot = algorithm.get_indicator_snapshot(tick)
+
+        assert snapshot is not None
+        assert snapshot["macd_line"] is not None
+        assert snapshot["signal_line"] is not None
+        assert snapshot["histogram"] is not None
+        assert snapshot["target"] in {"UPRO", "SPXU"}

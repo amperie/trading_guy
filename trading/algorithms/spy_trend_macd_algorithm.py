@@ -241,6 +241,31 @@ class SpyTrendMACDAlgorithm(Algorithm):
         sign = 1.0 if macd_line >= signal_line else -1.0
         return sign * magnitude
 
+    def get_indicator_snapshot(self, data: list[PriceData] | None = None) -> dict | None:
+        history = self.price_history.get(self.spy_symbol)
+        if history is None:
+            return None
+
+        pd = None if data is None else find_pricedata_in_list(self.spy_symbol, data)
+        current_price = pd.close if pd is not None else (history[-1] if history else None)
+        if current_price in (None, 0):
+            return None
+
+        macd_result = self._calculate_macd(history)
+        if macd_result is None:
+            return None
+
+        macd_line, signal_line, histogram = macd_result
+        target = self.upro_symbol if macd_line >= signal_line else self.spxu_symbol
+        return {
+            "spy_price": current_price,
+            "macd_line": macd_line,
+            "signal_line": signal_line,
+            "histogram": histogram,
+            "histogram_pct": (abs(histogram) / current_price) * 100.0,
+            "target": target,
+        }
+
     def reconfigure(self, new_params: dict) -> None:
         super().reconfigure(new_params)
         for attr in ("macd_fast_period", "macd_slow_period", "macd_signal_period"):

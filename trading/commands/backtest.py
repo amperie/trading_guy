@@ -9,7 +9,7 @@ from trading.commands.common import (
     apply_cli_overrides,
     apply_session_log_file,
     build_experiment_config,
-    fill_alpaca_creds,
+    fill_data_provider_creds,
     load_account_creds,
     load_raw_config,
     validate_session_id,
@@ -36,8 +36,8 @@ def cmd_backtest(args: argparse.Namespace):
     dp_section = raw_cfg.get("data_provider", {})
     provider_name = dp_section.get("provider") or dp_section.get("implementation", "")
     if "alpaca" in provider_name.lower():
+        fill_data_provider_creds(raw_cfg, creds)
         target = dp_section.setdefault("params", {}) if "implementation" in dp_section else dp_section
-        fill_alpaca_creds(target, creds)
         if not target.get("api_key") or not target.get("secret_key"):
             logger.error(
                 "AlpacaDataProvider requires credentials. Set api_key / secret_key in the config file or in accounts.yaml."

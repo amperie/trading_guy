@@ -286,6 +286,35 @@ class TestTickPersistence:
         assert len(data["value_history"]) == 5
         assert len(data["tick_history"]) == 5
 
+    def test_save_tick_persists_indicator_snapshot_and_previous_tick_metadata(self, store, sample_tick):
+        sid = store.create_session(name="Test")
+        ts = sample_tick[0].timestamp
+        signals = [
+            MarketSignal(
+                SignalType.BUY,
+                "AAPL",
+                75,
+                metadata={"current": {"macd_line": 1.5}, "previous_tick_metadata": {"macd_line": 1.2}},
+            )
+        ]
+        snapshot = {"AAPL": {"macd_line": 1.5, "signal_line": 1.1}}
+
+        store.save_tick(
+            sid,
+            ts,
+            sample_tick,
+            cash=95000.0,
+            total_value=102500.0,
+            signals=signals,
+            indicator_snapshot=snapshot,
+        )
+
+        tick_doc = store._ticks.find_one({"session_id": sid, "timestamp": ts, "symbol": "AAPL"})
+        assert tick_doc["indicator_snapshot"] == snapshot
+
+        signal_doc = store._signals.find_one({"session_id": sid, "timestamp": ts, "symbol": "AAPL"})
+        assert signal_doc["metadata"]["previous_tick_metadata"] == {"macd_line": 1.2}
+
 
 # ------------------------------------------------------------------ #
 #  Order persistence tests

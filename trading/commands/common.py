@@ -149,6 +149,15 @@ def fill_alpaca_creds(section: dict[str, Any], creds: dict[str, str]) -> None:
     section["secret_key"] = creds.get("secret_key", "")
 
 
+def fill_data_provider_creds(raw_cfg: dict[str, Any], creds: dict[str, str]) -> None:
+    dp_section = raw_cfg.get("data_provider", {})
+    provider_name = dp_section.get("provider") or dp_section.get("implementation", "")
+    if "alpaca" not in provider_name.lower():
+        return
+    target = dp_section.setdefault("params", {}) if "implementation" in dp_section else dp_section
+    fill_alpaca_creds(target, creds)
+
+
 def flatten_config(cfg: dict[str, Any], prefix: str = "config") -> dict[str, Any]:
     from trading.config.service import _flatten_dict
 

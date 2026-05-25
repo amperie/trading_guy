@@ -109,6 +109,27 @@ class SpyTrendSwitchAlgorithm(Algorithm):
             )
         ]
 
+    def get_indicator_snapshot(self, data: list[PriceData] | None = None) -> dict | None:
+        pd = None if data is None else find_pricedata_in_list(self.spy_symbol, data)
+        history = self.price_history.get(self.spy_symbol)
+        if pd is None or history is None or len(history) < self.slow_window:
+            return None
+
+        fast = self._sma(history, self.fast_window)
+        slow = self._sma(history, self.slow_window)
+        if fast is None or slow is None or slow == 0:
+            return None
+
+        target = self.upro_symbol if fast >= slow else self.spxu_symbol
+        diff_pct = abs(fast - slow) / slow * 100.0
+        return {
+            "spy_price": pd.close,
+            "spy_fast_sma": fast,
+            "spy_slow_sma": slow,
+            "diff_pct": diff_pct,
+            "target": target,
+        }
+
     def reconfigure(self, new_params: dict) -> None:
         super().reconfigure(new_params)
         for attr in ("fast_window", "slow_window"):

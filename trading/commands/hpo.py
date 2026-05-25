@@ -17,6 +17,7 @@ from trading.commands.common import (
     apply_cli_overrides,
     apply_session_log_file,
     build_experiment_config,
+    fill_data_provider_creds,
     flatten_config,
     load_account_creds,
     load_raw_config,
@@ -76,12 +77,7 @@ class _SplitValidationStatus:
 
 
 def _fill_hpo_data_provider_creds(raw_cfg: dict[str, Any], creds: dict[str, str]) -> None:
-    dp_section = raw_cfg.get("data_provider", {})
-    provider_name = dp_section.get("provider") or dp_section.get("implementation", "")
-    if "alpaca" in provider_name.lower():
-        target = dp_section.setdefault("params", {}) if "implementation" in dp_section else dp_section
-        target["api_key"] = creds["api_key"]
-        target["secret_key"] = creds["secret_key"]
+    fill_data_provider_creds(raw_cfg, creds)
 
 
 def run_hpo_from_raw_config(
@@ -758,7 +754,7 @@ def cmd_hpo_split(args: argparse.Namespace):
     raw_cfg = apply_cli_overrides(raw_cfg, args)
     apply_session_log_file(raw_cfg, args)
     creds = load_account_creds(args.account)
-    _fill_hpo_data_provider_creds(raw_cfg, creds)
+    fill_data_provider_creds(raw_cfg, creds)
 
     run_hpo_split_from_raw_config(
         raw_cfg,
@@ -774,7 +770,7 @@ def cmd_hpo(args: argparse.Namespace):
     raw_cfg = apply_cli_overrides(raw_cfg, args)
     apply_session_log_file(raw_cfg, args)
     creds = load_account_creds(args.account)
-    _fill_hpo_data_provider_creds(raw_cfg, creds)
+    fill_data_provider_creds(raw_cfg, creds)
 
     logger.info(f"Starting HPO with profile: {args.config}")
     best_config = run_hpo_from_raw_config(

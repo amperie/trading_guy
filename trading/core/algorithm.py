@@ -306,6 +306,14 @@ class Algorithm(ABC):
         """
         return None
 
+    def get_indicator_snapshot(self, data: list[PriceData] | None = None) -> dict | None:
+        """Return a per-tick indicator snapshot suitable for persistence.
+
+        Live engines use this hook to persist indicator values alongside ticks
+        in MongoDB. Override in algorithms that want live indicator logging.
+        """
+        return None
+
     def get_bias(self, data: list[PriceData] | None = None) -> float:
         """Return the algorithm's current directional bias on a [-1, 1] scale.
 

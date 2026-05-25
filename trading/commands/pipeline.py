@@ -6,11 +6,20 @@ from types import SimpleNamespace
 from typing import Any
 
 from trading.commands.backtest import cmd_backtest
-from trading.commands.common import apply_cli_overrides, apply_session_log_file, load_raw_config
+from trading.commands.common import (
+    apply_cli_overrides,
+    apply_session_log_file,
+    build_experiment_config,
+    fill_data_provider_creds,
+    load_account_creds,
+    load_raw_config,
+)
 from trading.commands.hpo import run_hpo_split_from_raw_config
+from trading.commands.hpo import _resolve_hpo_split_dates
 from trading.commands.live import cmd_live
 from trading.commands.session_replay import cmd_session_replay
 from trading.commands.walk_forward import cmd_walk_forward
+from trading.config.component_loader import import_component_class
 from trading.pipeline import (
     build_session_id,
     evaluate_research_gates,
@@ -95,6 +104,40 @@ def _materialize_editable_research_config(args: argparse.Namespace) -> str:
     )
 
 
+def _preflight_pipeline_research(
+    raw_cfg: dict[str, Any],
+    *,
+    validation_period_days_override: int | None = None,
+) -> None:
+    experiment = build_experiment_config(raw_cfg)
+    if experiment.data_provider is None:
+        raise ValueError("Pipeline research requires a data_provider section.")
+
+    validation_period_days = int(
+        validation_period_days_override
+        if validation_period_days_override is not None
+        else (raw_cfg.get("hpo") or {}).get("validation_period_days", 0)
+    )
+    _resolve_hpo_split_dates(dict(experiment.data_provider.params), validation_period_days)
+
+    dp_class = import_component_class(experiment.data_provider)
+    provider_name = f"{dp_class.__module__}.{dp_class.__name__}".lower()
+    if "alpaca" not in provider_name:
+        return
+
+    probe_cfg = dict(experiment.data_provider.params)
+    probe_cfg.pop("start_date", None)
+    probe_cfg.pop("end_date", None)
+    probe_cfg["limit"] = 1
+    try:
+        dp_class(probe_cfg).get_data_length()
+    except Exception as exc:
+        raise RuntimeError(
+            "Pipeline research preflight failed while probing Alpaca historical data access. "
+            "Check accounts.yaml credentials, provider config, and network access before rerunning."
+        ) from exc
+
+
 def cmd_pipeline_research(args: argparse.Namespace):
     effective_config = _materialize_editable_research_config(args)
     stage_args = copy.copy(args)
@@ -103,6 +146,14 @@ def cmd_pipeline_research(args: argparse.Namespace):
     raw_cfg = load_raw_config(effective_config)
     raw_cfg = apply_cli_overrides(raw_cfg, stage_args)
     apply_session_log_file(raw_cfg, stage_args)
+    dp_section = raw_cfg.get("data_provider", {})
+    provider_name = dp_section.get("provider") or dp_section.get("implementation", "")
+    if "alpaca" in provider_name.lower():
+        fill_data_provider_creds(raw_cfg, load_account_creds(stage_args.account))
+    _preflight_pipeline_research(
+        raw_cfg,
+        validation_period_days_override=getattr(stage_args, "validation_period_days", None),
+    )
 
     backtest_result = cmd_backtest(stage_args)
     hpo_result = run_hpo_split_from_raw_config(

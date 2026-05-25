@@ -103,6 +103,28 @@ class MacdRsiAlgorithm(Algorithm):
 
         return ret_val
 
+    def get_indicator_snapshot(self, data: list[PriceData] | None = None) -> dict | None:
+        snapshot = {}
+        source = data or []
+        for pd in source:
+            symbol = pd.symbol
+            macd = self.ta.calculate_macd(
+                self.price_history[symbol],
+                self.macd_slowperiod,
+                self.macd_fastperiod,
+                self.macd_signalperiod,
+                True,
+            )
+            rsi = self.ta.calculate_rsi(self.price_history[symbol], self.rsi_period)
+            if rsi is None or macd is None or macd.last_macd is None:
+                continue
+            snapshot[symbol] = {
+                "rsi": rsi,
+                "macd": macd,
+                "macd_last": macd.last_macd,
+            }
+        return snapshot or None
+
     def reconfigure(self, new_params: dict) -> None:
         super().reconfigure(new_params)
         for attr in ("macd_fastperiod", "macd_slowperiod", "macd_signalperiod", "rsi_period"):

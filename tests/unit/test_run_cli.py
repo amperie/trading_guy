@@ -90,6 +90,7 @@ def test_build_parser_pipeline_research_mlflow_editor_args():
         "research",
         "--config", "http://localhost:5000/#/experiments/1/runs/abc123",
         "--account", "paper",
+        "--validation-period-days", "30",
         "--tracking-uri", "http://localhost:5000",
         "--editor", "vim",
     ])
@@ -97,8 +98,20 @@ def test_build_parser_pipeline_research_mlflow_editor_args():
     assert args.command == "pipeline"
     assert args.pipeline_stage == "research"
     assert args.config == "http://localhost:5000/#/experiments/1/runs/abc123"
+    assert args.validation_period_days == 30
     assert args.tracking_uri == "http://localhost:5000"
     assert args.editor == "vim"
+
+
+def test_build_parser_pipeline_research_requires_validation_period_days():
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "pipeline",
+            "research",
+            "--config", "configs/example_hpo_split.yaml",
+            "--account", "paper",
+        ])
 
 
 def test_build_parser_promote_args():

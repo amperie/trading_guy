@@ -446,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--validation-period-days",
         dest="validation_period_days",
         type=int,
+        required=True,
         help="Override hpo.validation_period_days",
     )
     pipeline_research_p.add_argument(

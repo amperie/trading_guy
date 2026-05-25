@@ -125,6 +125,7 @@ from utils.utils import (
     serialize_pricedata, deserialize_pricedata,
     serialize_order, deserialize_order,
     serialize_market_signal, deserialize_market_signal,
+    make_json_serializable,
 )
 from utils.logger import Logger
 
@@ -345,6 +346,7 @@ class TradingStateStore:
         total_value: float,
         signals: list[MarketSignal] = None,
         positions: dict = None,
+        indicator_snapshot: dict | None = None,
     ):
         """Save tick data, portfolio snapshot, and signals for one timestamp.
 
@@ -361,6 +363,8 @@ class TradingStateStore:
         for pd_obj in tick:
             doc = serialize_pricedata(pd_obj)
             doc["session_id"] = session_id
+            if indicator_snapshot is not None:
+                doc["indicator_snapshot"] = make_json_serializable(indicator_snapshot)
             self._ticks.replace_one(
                 {"session_id": session_id, "timestamp": doc["timestamp"], "symbol": doc["symbol"]},
                 doc,
