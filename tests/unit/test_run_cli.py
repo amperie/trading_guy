@@ -83,6 +83,24 @@ def test_build_parser_hpo_split_from_mlflow_args():
     assert args.editor == "vim"
 
 
+def test_build_parser_pipeline_research_mlflow_editor_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "pipeline",
+        "research",
+        "--config", "http://localhost:5000/#/experiments/1/runs/abc123",
+        "--account", "paper",
+        "--tracking-uri", "http://localhost:5000",
+        "--editor", "vim",
+    ])
+
+    assert args.command == "pipeline"
+    assert args.pipeline_stage == "research"
+    assert args.config == "http://localhost:5000/#/experiments/1/runs/abc123"
+    assert args.tracking_uri == "http://localhost:5000"
+    assert args.editor == "vim"
+
+
 def test_build_parser_promote_args():
     parser = build_parser()
     args = parser.parse_args([
@@ -131,6 +149,7 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "configs/example_live_walk_forward.yaml" in help_text
     assert "hpo-split" in help_text
     assert "hpo-split-from-mlflow" in help_text
+    assert "MLflow configs are opened in an editor" in help_text
 
 
 def test_backtest_help_mentions_remote_component_options(capsys):
@@ -222,6 +241,18 @@ def test_hpo_split_help_mentions_validation_period_days(capsys):
     help_text = capsys.readouterr().out
     assert "--validation-period-days" in help_text
     assert "hpo.validation_period_days" in help_text
+
+
+def test_pipeline_research_help_mentions_mlflow_editor_and_logged_config(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["pipeline", "research", "-h"])
+    help_text = capsys.readouterr().out
+    assert "--tracking-uri" in help_text
+    assert "--editor" in help_text
+    assert "MLflow run URL" in help_text
+    assert "scratch/generated_pipeline_configs" in help_text
+    assert "logged later reflects the run that actually executed" in help_text
 
 
 def test_promote_help_mentions_name(capsys):

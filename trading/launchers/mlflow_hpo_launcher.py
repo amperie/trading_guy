@@ -471,13 +471,19 @@ def _editor_command(editor: str | None = None) -> list[str]:
     )
 
 
-def edit_hpo_config(prepared_cfg: dict[str, Any], editor: str | None = None) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="trading_hpo_edit_") as tmpdir:
-        config_path = Path(tmpdir) / "recreated_hpo_config.yaml"
+def edit_config_dict(
+    prepared_cfg: dict[str, Any],
+    editor: str | None = None,
+    *,
+    filename: str = "recreated_config.yaml",
+    label: str = "config",
+) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="trading_config_edit_") as tmpdir:
+        config_path = Path(tmpdir) / filename
         config_path.write_text(yaml.safe_dump(prepared_cfg, sort_keys=False), encoding="utf-8")
 
         cmd = _editor_command(editor) + [str(config_path)]
-        logger.info(f"Opening HPO config in editor: {' '.join(cmd)}")
+        logger.info(f"Opening {label} in editor: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)
 
         with open(config_path, "r", encoding="utf-8") as handle:
@@ -485,14 +491,38 @@ def edit_hpo_config(prepared_cfg: dict[str, Any], editor: str | None = None) -> 
         return edited
 
 
-def persist_edited_hpo_config(source_context: SourceRunContext, edited_cfg: dict[str, Any]) -> str:
-    out_dir = Path.cwd() / "scratch" / "generated_hpo_configs"
+def edit_hpo_config(prepared_cfg: dict[str, Any], editor: str | None = None) -> dict[str, Any]:
+    return edit_config_dict(
+        prepared_cfg,
+        editor=editor,
+        filename="recreated_hpo_config.yaml",
+        label="HPO config",
+    )
+
+
+def persist_edited_config(
+    source_context: SourceRunContext,
+    edited_cfg: dict[str, Any],
+    *,
+    output_dir_name: str,
+    filename_prefix: str,
+) -> str:
+    out_dir = Path.cwd() / "scratch" / output_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", source_context.run_name).strip("_") or "mlflow_hpo"
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    path = out_dir / f"{safe_name}_{source_context.run_id[:8]}_{timestamp}.yaml"
+    path = out_dir / f"{filename_prefix}_{safe_name}_{source_context.run_id[:8]}_{timestamp}.yaml"
     path.write_text(yaml.safe_dump(edited_cfg, sort_keys=False), encoding="utf-8")
     return str(path)
+
+
+def persist_edited_hpo_config(source_context: SourceRunContext, edited_cfg: dict[str, Any]) -> str:
+    return persist_edited_config(
+        source_context,
+        edited_cfg,
+        output_dir_name="generated_hpo_configs",
+        filename_prefix="hpo",
+    )
 
 
 def log_hpo_launcher_summary(

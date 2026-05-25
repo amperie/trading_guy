@@ -9,7 +9,7 @@ import pytest
 
 from trading.engines import walk_forward_engine as wf_module
 from trading.engines.walk_forward_engine import WalkForwardEngine
-from trading.engines.walk_forward_policy import metric_value
+from trading.engines.walk_forward_policy import compute_walk_forward_periods, metric_value
 from trading.data_providers.data_provider import DataProvider
 from trading.core.algorithm import Algorithm
 from trading.core.portfolio import Portfolio
@@ -149,6 +149,17 @@ def test_compute_periods_final_window_includes_last_data_timestamp():
 
     data_end = engine._get_date_range()[1]
     assert periods[-1].trading_end == data_end + pd.Timedelta(microseconds=1)
+
+
+def test_compute_periods_rejects_non_positive_windows():
+    with pytest.raises(ValueError, match="trading_window_days must be > 0"):
+        compute_walk_forward_periods(
+            data_start=datetime(2024, 1, 1),
+            data_end=datetime(2024, 2, 1),
+            optimization_window_days=30,
+            validation_window_days=5,
+            trading_window_days=0,
+        )
 
 
 def test_create_dp_for_range_preserves_intraday_end_boundaries():
