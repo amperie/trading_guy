@@ -119,8 +119,10 @@ def build_parser() -> argparse.ArgumentParser:
             "    Example: python run.py promote --run-url http://localhost:5000/#/experiments/1/runs/<run_id>\n"
             "  pipeline research:\n"
             "    Run backtest -> split HPO -> walk-forward, evaluate configured gates, and optionally register a candidate bundle.\n"
+            "    --config may be a local YAML path or an MLflow run URL; MLflow configs are opened in an editor before running.\n"
             "    Prints backtest/HPO/walk-forward MLflow links plus any candidate bundle logged to the pipeline experiment.\n"
             "    Example: python run.py pipeline research --config configs/example_hpo_split.yaml --account paper\n"
+            "    Example: python run.py pipeline research --config http://localhost:5000/#/experiments/1/runs/<run_id> --account paper --editor vim\n"
             "  pipeline paper:\n"
             "    Materialize a paper bundle from a source MLflow run, log it to the pipeline experiment, and start paper trading.\n"
             "    The bundle can later be launched from the local filesystem or directly from the pipeline MLflow run URL.\n"
@@ -445,6 +447,18 @@ def build_parser() -> argparse.ArgumentParser:
         dest="validation_period_days",
         type=int,
         help="Override hpo.validation_period_days",
+    )
+    pipeline_research_p.add_argument(
+        "--tracking-uri",
+        dest="tracking_uri",
+        help="Optional MLflow tracking URI override when --config is an MLflow run URL",
+    )
+    pipeline_research_p.add_argument(
+        "--editor",
+        help=(
+            "Editor executable or command used to edit a config reconstructed from an MLflow run URL. "
+            "Defaults to CODEX_EDITOR, VISUAL, EDITOR, then vim."
+        ),
     )
     pipeline_research_p.add_argument("--name", help="Optional candidate bundle name when research auto-promotes")
     pipeline_research_p.set_defaults(func=cmd_pipeline_research)

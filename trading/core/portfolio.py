@@ -626,4 +626,7 @@ class Portfolio(ABC):
     def reconfigure(self, new_params: dict) -> None:
         """Update portfolio config without losing cash/positions/history."""
         merge_nested_config(self.cfg, new_params)
+        for key, value in new_params.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
         logger.info(f"{self.__class__.__name__} reconfigured: {new_params}")

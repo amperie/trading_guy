@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,6 +18,10 @@ from trading.pipeline import (
     log_registered_bundle,
     materialize_bundle,
 )
+
+
+def _is_mlflow_run_url(value: str | None) -> bool:
+    return bool(value and value.startswith(("http://", "https://")) and "/runs/" in value)
 
 
 def _print_header(title: str) -> None:
@@ -60,21 +65,55 @@ def _as_live_args(args: argparse.Namespace, config_path: str, session_id: str) -
     )
 
 
-def cmd_pipeline_research(args: argparse.Namespace):
-    raw_cfg = load_raw_config(args.config)
-    raw_cfg = apply_cli_overrides(raw_cfg, args)
-    apply_session_log_file(raw_cfg, args)
+def _materialize_editable_research_config(args: argparse.Namespace) -> str:
+    if not _is_mlflow_run_url(args.config):
+        return args.config
 
-    backtest_result = cmd_backtest(args)
+    from trading.launchers.mlflow_hpo_launcher import (
+        edit_config_dict,
+        load_source_run_context,
+        persist_edited_config,
+        sanitize_source_config,
+    )
+
+    source_context = load_source_run_context(
+        args.config,
+        tracking_uri=getattr(args, "tracking_uri", None),
+    )
+    edited_cfg = edit_config_dict(
+        source_context.raw_config,
+        editor=getattr(args, "editor", None),
+        filename="pipeline_research_config.yaml",
+        label="pipeline research config",
+    )
+    edited_cfg = sanitize_source_config(edited_cfg) if "execution_config" in edited_cfg else edited_cfg
+    return persist_edited_config(
+        source_context,
+        edited_cfg,
+        output_dir_name="generated_pipeline_configs",
+        filename_prefix="pipeline_research",
+    )
+
+
+def cmd_pipeline_research(args: argparse.Namespace):
+    effective_config = _materialize_editable_research_config(args)
+    stage_args = copy.copy(args)
+    stage_args.config = effective_config
+
+    raw_cfg = load_raw_config(effective_config)
+    raw_cfg = apply_cli_overrides(raw_cfg, stage_args)
+    apply_session_log_file(raw_cfg, stage_args)
+
+    backtest_result = cmd_backtest(stage_args)
     hpo_result = run_hpo_split_from_raw_config(
         raw_cfg,
-        config_artifact_path=args.config,
-        num_samples_override=getattr(args, "num_samples", None),
-        max_concurrent_override=getattr(args, "max_concurrent_trials", None),
-        validation_period_days_override=getattr(args, "validation_period_days", None),
+        config_artifact_path=effective_config,
+        num_samples_override=getattr(stage_args, "num_samples", None),
+        max_concurrent_override=getattr(stage_args, "max_concurrent_trials", None),
+        validation_period_days_override=getattr(stage_args, "validation_period_days", None),
         return_details=True,
     )
-    walk_forward_result = cmd_walk_forward(args)
+    walk_forward_result = cmd_walk_forward(stage_args)
     gate_report = evaluate_research_gates(raw_cfg, backtest_result, hpo_result, walk_forward_result)
 
     bundle = None
@@ -92,13 +131,15 @@ def cmd_pipeline_research(args: argparse.Namespace):
                 "backtest_mlflow_run_url": ((backtest_result or {}).get("analysis") or {}).get("mlflow_run_url"),
                 "hpo_mlflow_run_url": hpo_result.get("run_url"),
                 "walk_forward_mlflow_run_url": (walk_forward_result or {}).get("mlflow_run_url"),
+                "research_config_path": effective_config,
             },
         )
 
     _print_header("PIPELINE RESEARCH")
     _print_pairs(
         [
-            ("Config", args.config),
+            ("Config", effective_config),
+            ("Source Config", args.config if effective_config != args.config else None),
             ("Backtest MLflow", ((backtest_result or {}).get("analysis") or {}).get("mlflow_run_url")),
             ("HPO Split MLflow", hpo_result.get("run_url")),
             ("Walk-Forward MLflow", (walk_forward_result or {}).get("mlflow_run_url")),

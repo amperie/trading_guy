@@ -296,6 +296,29 @@ class TestPortfolioHistory:
         assert value_at_15 > value_at_10
 
 
+class TestPortfolioReconfigure:
+    """Test portfolio runtime reconfiguration."""
+
+    def test_reconfigure_syncs_cached_matching_attrs(self):
+        om = BacktestingOrderManager()
+        pf = SingleSymbolPortfolio(
+            {"symbol": "AAPL", "stop_pct": 10.0, "profit_pct": 20.0},
+            om,
+            1000.0,
+            {},
+            True,
+        )
+        pf.stop_pct = 10.0
+        pf.profit_pct = 20.0
+
+        pf.reconfigure({"stop_pct": 5.0, "profit_pct": 12.0})
+
+        assert pf.cfg["stop_pct"] == 5.0
+        assert pf.cfg["profit_pct"] == 12.0
+        assert pf.stop_pct == 5.0
+        assert pf.profit_pct == 12.0
+
+
 class TestPortfolioValueCalculation:
     """Test portfolio total value calculation"""
 

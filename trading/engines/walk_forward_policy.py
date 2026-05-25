@@ -50,6 +50,13 @@ def compute_walk_forward_periods(
     validation_window_days: int,
     trading_window_days: int,
 ) -> list[WalkForwardPeriod]:
+    if optimization_window_days <= 0:
+        raise ValueError("optimization_window_days must be > 0")
+    if validation_window_days <= 0:
+        raise ValueError("validation_window_days must be > 0")
+    if trading_window_days <= 0:
+        raise ValueError("trading_window_days must be > 0")
+
     periods: list[WalkForwardPeriod] = []
     opt_start = data_start
     data_end_exclusive = data_end + timedelta(microseconds=1)
