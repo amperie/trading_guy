@@ -17,6 +17,27 @@ from utils.mlflow_client import MLflowClient
 DEFAULT_PIPELINE_EXPERIMENT = "Trading Pipeline Bundle Registry"
 
 
+def _bundle_registry_experiment_name(raw_cfg: dict[str, Any]) -> str:
+    pipeline_cfg = raw_cfg.get("pipeline", {}) or {}
+    experiments = pipeline_cfg.get("experiments", {}) or {}
+    if experiments.get("bundle_registry"):
+        return str(experiments["bundle_registry"])
+    if pipeline_cfg.get("experiment_name"):
+        return str(pipeline_cfg["experiment_name"])
+    try:
+        from utils.config_manager import ConfigManager
+
+        global_pipeline_cfg = ConfigManager().get("pipeline") or {}
+        global_experiments = global_pipeline_cfg.get("experiments", {}) or {}
+        if global_experiments.get("bundle_registry"):
+            return str(global_experiments["bundle_registry"])
+        if global_pipeline_cfg.get("experiment_name"):
+            return str(global_pipeline_cfg["experiment_name"])
+    except Exception:
+        pass
+    return DEFAULT_PIPELINE_EXPERIMENT
+
+
 @dataclass(slots=True)
 class GateCheck:
     name: str
@@ -259,7 +280,7 @@ def log_registered_bundle(
     tracking_uri = (raw_cfg.get("mlflow") or {}).get("tracking_uri")
     bundle_name = Path(bundle.promoted_dir).name
     client = MLflowClient(
-        experiment_name=pipeline_cfg.get("experiment_name") or DEFAULT_PIPELINE_EXPERIMENT,
+        experiment_name=_bundle_registry_experiment_name(raw_cfg),
         tracking_uri=tracking_uri,
         artifact_location=pipeline_cfg.get("artifact_location"),
     )

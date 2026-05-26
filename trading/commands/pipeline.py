@@ -27,6 +27,14 @@ from trading.pipeline import (
     materialize_bundle,
 )
 
+PIPELINE_EXPERIMENT_DEFAULTS = {
+    "backtest": "Pipeline HPO",
+    "hpo_split": "Pipeline HPO Split",
+    "walk_forward": "Pipeline Walk-Forward",
+    "review": "Pipeline - Review",
+    "bundle_registry": "Pipeline - Bundle Registry",
+}
+
 
 def _is_mlflow_run_url(value: str | None) -> bool:
     return bool(value and value.startswith(("http://", "https://")) and "/runs/" in value)
@@ -100,6 +108,29 @@ def _as_live_args(args: argparse.Namespace, config_path: str, session_id: str) -
         agg_period=getattr(args, "agg_period", None),
         alpaca_override_url=getattr(args, "alpaca_override_url", None),
     )
+
+
+def _pipeline_experiment_name(raw_cfg: dict[str, Any], key: str) -> str:
+    pipeline_cfg = raw_cfg.get("pipeline", {}) or {}
+    experiments = pipeline_cfg.get("experiments", {}) or {}
+    if experiments.get(key):
+        return str(experiments[key])
+    try:
+        from utils.config_manager import ConfigManager
+
+        global_pipeline_cfg = ConfigManager().get("pipeline") or {}
+        global_experiments = global_pipeline_cfg.get("experiments", {}) or {}
+        if global_experiments.get(key):
+            return str(global_experiments[key])
+    except Exception:
+        pass
+    return PIPELINE_EXPERIMENT_DEFAULTS[key]
+
+
+def _with_analysis_experiment(raw_cfg: dict[str, Any], experiment_name: str) -> dict[str, Any]:
+    cfg = copy.deepcopy(raw_cfg)
+    cfg.setdefault("analysis", {})["experiment_name"] = experiment_name
+    return cfg
 
 
 def _materialize_editable_research_config(args: argparse.Namespace) -> str:
@@ -186,15 +217,18 @@ def cmd_pipeline_research(args: argparse.Namespace):
         validation_period_days_override=getattr(stage_args, "validation_period_days", None),
     )
 
+    stage_args.mlflow_experiment_name_override = _pipeline_experiment_name(raw_cfg, "backtest")
     backtest_result = cmd_backtest(stage_args)
+    hpo_cfg = _with_analysis_experiment(raw_cfg, _pipeline_experiment_name(raw_cfg, "hpo_split"))
     hpo_result = run_hpo_split_from_raw_config(
-        raw_cfg,
+        hpo_cfg,
         config_artifact_path=effective_config,
         num_samples_override=getattr(stage_args, "num_samples", None),
         max_concurrent_override=getattr(stage_args, "max_concurrent_trials", None),
         validation_period_days_override=getattr(stage_args, "validation_period_days", None),
         return_details=True,
     )
+    stage_args.mlflow_experiment_name_override = _pipeline_experiment_name(raw_cfg, "walk_forward")
     walk_forward_result = cmd_walk_forward(stage_args)
     gate_report = evaluate_research_gates(raw_cfg, backtest_result, hpo_result, walk_forward_result)
 
@@ -204,7 +238,7 @@ def cmd_pipeline_research(args: argparse.Namespace):
     if gate_report.passed and pipeline_cfg.get("auto_promote_research", True) and hpo_result.get("run_url"):
         bundle = materialize_bundle(hpo_result["run_url"], name=getattr(args, "name", None), paper=True)
         bundle_record = log_registered_bundle(
-            raw_cfg,
+            {**copy.deepcopy(raw_cfg), "pipeline": {**((raw_cfg.get("pipeline") or {})), "experiment_name": _pipeline_experiment_name(raw_cfg, "bundle_registry")}},
             bundle,
             stage="candidate",
             status="candidate",
@@ -245,7 +279,7 @@ def cmd_pipeline_paper(args: argparse.Namespace):
     bundle = materialize_bundle(args.run_url, name=getattr(args, "name", None), paper=True)
     session_id = getattr(args, "session_id", None) or build_session_id("paper")
     bundle_record = log_registered_bundle(
-        raw_cfg,
+        {**copy.deepcopy(raw_cfg), "pipeline": {**((raw_cfg.get("pipeline") or {})), "experiment_name": _pipeline_experiment_name(raw_cfg, "bundle_registry")}},
         bundle,
         stage="paper",
         status="paper_ready",
@@ -292,7 +326,7 @@ def cmd_pipeline_paper_from_session(args: argparse.Namespace):
     session_id = getattr(args, "session_id", None) or build_session_id("paper")
     raw_cfg = load_raw_config(bundle.config_path)
     bundle_record = log_registered_bundle(
-        raw_cfg,
+        {**copy.deepcopy(raw_cfg), "pipeline": {**((raw_cfg.get("pipeline") or {})), "experiment_name": _pipeline_experiment_name(raw_cfg, "bundle_registry")}},
         bundle,
         stage="paper",
         status="paper_ready",
@@ -328,6 +362,7 @@ def cmd_pipeline_paper_from_session(args: argparse.Namespace):
 
 def cmd_pipeline_review(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
+    args.mlflow_experiment_name_override = _pipeline_experiment_name(raw_cfg, "review")
     review_result = cmd_session_replay(args)
     gate_report = evaluate_review_gates(raw_cfg, review_result)
 
@@ -336,7 +371,7 @@ def cmd_pipeline_review(args: argparse.Namespace):
     if gate_report.passed:
         approved_bundle = materialize_bundle(args.config, name=getattr(args, "name", None), paper=False)
         approval_record = log_registered_bundle(
-            raw_cfg,
+            {**copy.deepcopy(raw_cfg), "pipeline": {**((raw_cfg.get("pipeline") or {})), "experiment_name": _pipeline_experiment_name(raw_cfg, "bundle_registry")}},
             approved_bundle,
             stage="approved",
             status="approved",

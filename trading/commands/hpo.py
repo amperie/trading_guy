@@ -336,10 +336,18 @@ def _normalize_split_objective_metric(objective_metric: str | None) -> str:
         "training_annualized_return": "trn_annualized_return",
     }
     value = aliases.get(value, value)
-    if value not in {"val_annualized_return", "trn_annualized_return"}:
+    if value.startswith("validation_"):
+        value = f"val_{value[len('validation_'):]}"
+    elif value.startswith("training_"):
+        value = f"trn_{value[len('training_'):]}"
+    elif value.startswith("train_"):
+        value = f"trn_{value[len('train_'):]}"
+    elif not value.startswith(("val_", "trn_")):
+        value = f"val_{value}"
+    if len(value) <= 4 or not value.startswith(("val_", "trn_")):
         raise ValueError(
-            "Split HPO objective_metric must be one of "
-            "'val_annualized_return' or 'trn_annualized_return'"
+            "Split HPO objective_metric must be a metric name optionally prefixed with "
+            "'val_' or 'trn_'"
         )
     return value
 
@@ -359,6 +367,7 @@ def _score_split_validation_trial_remote(
     order_manager_class,
     algorithm_param_keys: list[str],
     portfolio_param_keys: list[str],
+    validation_metric: str,
 ) -> dict[str, Any]:
     al_cfg, pf_cfg = _build_trial_configs(
         trial_config,
@@ -386,7 +395,7 @@ def _score_split_validation_trial_remote(
         warmup_dp_cfg=warmup_dp_cfg,
         log_to_mlflow=False,
     )
-    score = float(metric_value(val_results["metrics"], "annualized_return"))
+    score = float(metric_value(val_results["metrics"], validation_metric))
     return {
         "score": score,
         "config": trial_config,
@@ -409,6 +418,7 @@ def _score_split_validation_trials(
     order_manager_class,
     algorithm_param_keys: list[str],
     portfolio_param_keys: list[str],
+    validation_metric: str,
     max_concurrent_trials: int,
 ) -> list[tuple[float, dict[str, Any], dict[str, Any], dict[str, Any]]]:
     scored_trials: list[tuple[float, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
@@ -440,6 +450,7 @@ def _score_split_validation_trials(
             order_manager_class=order_manager_class,
             algorithm_param_keys=algorithm_param_keys,
             portfolio_param_keys=portfolio_param_keys,
+            validation_metric=validation_metric,
         )
 
     try:
@@ -452,13 +463,27 @@ def _score_split_validation_trials(
             ready_refs, _ = ray.wait(list(pending.keys()), num_returns=1)
             ready_ref = ready_refs[0]
             trial = pending.pop(ready_ref)
-            result = ray.get(ready_ref)
             completed += 1
+            try:
+                result = ray.get(ready_ref)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping split-HPO validation trial after worker failure for config %s: %s",
+                    trial.get("config"),
+                    exc,
+                )
+                status.update(completed)
+                if next_idx < len(trial_summaries):
+                    next_trial = trial_summaries[next_idx]
+                    pending[_submit_trial(next_trial)] = next_trial
+                    next_idx += 1
+                continue
 
             score = float(result["score"])
             if not math.isfinite(score):
                 logger.warning(
-                    "Skipping split-HPO trial with non-finite validation annualized_return: %s",
+                    "Skipping split-HPO trial with non-finite validation %s: %s",
+                    validation_metric,
                     score,
                 )
                 status.update(completed)
@@ -500,7 +525,9 @@ def _select_best_split_config(
             "Split HPO produced no completed trial metrics. Check Ray Tune logs for failed trials."
         )
 
-    if objective_metric == "trn_annualized_return":
+    objective_metric = _normalize_split_objective_metric(objective_metric)
+    metric_scope, metric_name = objective_metric.split("_", 1)
+    if metric_scope == "trn":
         finite_training_trials = [
             trial for trial in trial_summaries if math.isfinite(float(trial["metric"]))
         ]
@@ -518,8 +545,6 @@ def _select_best_split_config(
         )
         return best_trial["config"], best_al_cfg, best_pf_cfg, float(best_trial["metric"])
 
-    objective_metric = _normalize_split_objective_metric(objective_metric)
-
     scored_trials = _score_split_validation_trials(
         trial_summaries=trial_summaries,
         base_backtest_cfg=base_backtest_cfg,
@@ -533,6 +558,7 @@ def _select_best_split_config(
         order_manager_class=order_manager_class,
         algorithm_param_keys=algorithm_param_keys,
         portfolio_param_keys=portfolio_param_keys,
+        validation_metric=metric_name,
         max_concurrent_trials=max_concurrent_trials,
     )
 

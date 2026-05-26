@@ -25,6 +25,9 @@ def cmd_walk_forward(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
     apply_session_log_file(raw_cfg, args)
+    experiment_name_override = getattr(args, "mlflow_experiment_name_override", None)
+    if experiment_name_override:
+        raw_cfg.setdefault("analysis", {})["experiment_name"] = experiment_name_override
     validate_session_id(raw_cfg)
     creds = load_account_creds(args.account)
 

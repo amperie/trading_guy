@@ -187,14 +187,56 @@ def test_select_best_split_config_rejects_non_finite_validation_metrics(monkeypa
         )
 
 
+def test_score_split_validation_trials_skips_worker_failures(monkeypatch):
+    remote_calls = []
+
+    class _Remote:
+        def remote(self, **kwargs):
+            remote_calls.append(kwargs["trial_config"])
+            return f"ref-{kwargs['trial_config']['alpha']}"
+
+    monkeypatch.setattr(hpo_cmd, "_score_split_validation_trial_remote", _Remote())
+    monkeypatch.setattr(hpo_cmd.ray, "is_initialized", lambda: True)
+    monkeypatch.setattr(hpo_cmd.ray, "wait", lambda refs, num_returns=1: ([refs[0]], refs[1:]))
+
+    def fake_get(ref):
+        if ref == "ref-1":
+            raise ConnectionError("network reset")
+        return {"score": 2.5, "config": {"alpha": 2}, "alg_cfg": {"alpha": 2}, "pf_cfg": {"symbol": "SPY"}}
+
+    monkeypatch.setattr(hpo_cmd.ray, "get", fake_get)
+
+    scored = hpo_cmd._score_split_validation_trials(
+        trial_summaries=[{"config": {"alpha": 1}}, {"config": {"alpha": 2}}],
+        base_backtest_cfg={},
+        base_al_cfg={},
+        base_pf_cfg={},
+        train_dp_cfg={},
+        val_dp_cfg={},
+        algorithm_class=object,
+        portfolio_class=object,
+        data_provider_class=object,
+        order_manager_class=object,
+        algorithm_param_keys=["alpha"],
+        portfolio_param_keys=[],
+        validation_metric="sharpe_ratio",
+        max_concurrent_trials=2,
+    )
+
+    assert remote_calls == [{"alpha": 1}, {"alpha": 2}]
+    assert scored == [(2.5, {"alpha": 2}, {"alpha": 2}, {"symbol": "SPY"})]
+
+
 def test_select_best_split_config_uses_parallel_validation_scores(monkeypatch):
+    captured = {}
     monkeypatch.setattr(
         hpo_cmd,
         "_score_split_validation_trials",
-        lambda **kwargs: [
+        lambda **kwargs: (
+            captured.setdefault("validation_metric", kwargs["validation_metric"]),
             (1.5, {"alpha": 3}, {"alpha": 3}, {"symbol": "SPY"}),
             (2.5, {"alpha": 4}, {"alpha": 4}, {"symbol": "SPY"}),
-        ],
+        )[1:],
     )
 
     best_config, best_al_cfg, best_pf_cfg, best_score = hpo_cmd._select_best_split_config(
@@ -217,6 +259,7 @@ def test_select_best_split_config_uses_parallel_validation_scores(monkeypatch):
         max_concurrent_trials=4,
     )
 
+    assert captured["validation_metric"] == "annualized_return"
     assert best_config == {"alpha": 4}
     assert best_al_cfg == {"alpha": 4}
     assert best_pf_cfg == {"symbol": "SPY"}
@@ -226,16 +269,45 @@ def test_select_best_split_config_uses_parallel_validation_scores(monkeypatch):
 def test_normalize_split_objective_metric_accepts_legacy_aliases():
     assert hpo_cmd._normalize_split_objective_metric("annualized_return") == "val_annualized_return"
     assert hpo_cmd._normalize_split_objective_metric("train_annualized_return") == "trn_annualized_return"
+    assert hpo_cmd._normalize_split_objective_metric("sharpe_ratio") == "val_sharpe_ratio"
+    assert hpo_cmd._normalize_split_objective_metric("train_sharpe_ratio") == "trn_sharpe_ratio"
+    assert hpo_cmd._normalize_split_objective_metric("validation_sharpe_ratio") == "val_sharpe_ratio"
 
 
 def test_normalize_split_objective_metric_rejects_unknown_value():
-    with pytest.raises(ValueError, match="Split HPO objective_metric must be one of"):
-        hpo_cmd._normalize_split_objective_metric("wf_annualized_return")
+    with pytest.raises(ValueError, match="Split HPO objective_metric must be a metric name"):
+        hpo_cmd._normalize_split_objective_metric("val_")
 
 
 def test_normalize_split_objective_metric_defaults_to_validation_metric():
     assert hpo_cmd._normalize_split_objective_metric(None) == "val_annualized_return"
     assert hpo_cmd._normalize_split_objective_metric("") == "val_annualized_return"
+
+
+def test_select_best_split_config_uses_training_metric_prefix_for_non_annualized_metric():
+    best_config, best_al_cfg, best_pf_cfg, best_score = hpo_cmd._select_best_split_config(
+        trial_summaries=[
+            {"config": {"alpha": 3}, "metric": 1.0},
+            {"config": {"alpha": 4}, "metric": 2.0},
+        ],
+        objective_metric="trn_sharpe_ratio",
+        base_backtest_cfg={},
+        base_al_cfg={},
+        base_pf_cfg={},
+        train_dp_cfg={},
+        val_dp_cfg={},
+        algorithm_class=object,
+        portfolio_class=object,
+        data_provider_class=object,
+        order_manager_class=object,
+        algorithm_param_keys=["alpha"],
+        portfolio_param_keys=[],
+    )
+
+    assert best_config == {"alpha": 4}
+    assert best_al_cfg == {"alpha": 4}
+    assert best_pf_cfg == {}
+    assert best_score == pytest.approx(2.0)
 
 
 def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):

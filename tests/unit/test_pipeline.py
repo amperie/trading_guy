@@ -351,6 +351,72 @@ def test_pipeline_research_passes_cli_validation_period_days_to_preflight(monkey
     assert calls["validation_period_days_override"] == 30
 
 
+def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
+    calls = {}
+
+    monkeypatch.setattr(pipeline_cmd, "_materialize_editable_research_config", lambda args: args.config)
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "load_raw_config",
+        lambda path: {
+            "analysis": {"experiment_name": "Base Experiment"},
+            "pipeline": {
+                "auto_promote_research": False,
+                "experiments": {
+                    "backtest": "Pipeline HPO",
+                    "hpo_split": "Pipeline HPO Split",
+                    "walk_forward": "Pipeline Walk-Forward",
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(pipeline_cmd, "apply_cli_overrides", lambda raw_cfg, args: raw_cfg)
+    monkeypatch.setattr(pipeline_cmd, "apply_session_log_file", lambda raw_cfg, args: None)
+    monkeypatch.setattr(pipeline_cmd, "_preflight_pipeline_research", lambda raw_cfg, **kwargs: None)
+
+    def fake_cmd_backtest(args):
+        calls["backtest_experiment"] = args.mlflow_experiment_name_override
+        return {"analysis": {}}
+
+    def fake_hpo(raw_cfg, **kwargs):
+        calls["hpo_experiment"] = raw_cfg["analysis"]["experiment_name"]
+        return {"val_results": {"metrics": _Metrics(annualized_return=0, max_drawdown_pct=0, total_trades=0)}}
+
+    def fake_cmd_walk_forward(args):
+        calls["walk_forward_experiment"] = args.mlflow_experiment_name_override
+        return {"aggregate": {}}
+
+    monkeypatch.setattr(pipeline_cmd, "cmd_backtest", fake_cmd_backtest)
+    monkeypatch.setattr(pipeline_cmd, "run_hpo_split_from_raw_config", fake_hpo)
+    monkeypatch.setattr(pipeline_cmd, "cmd_walk_forward", fake_cmd_walk_forward)
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "evaluate_research_gates",
+        lambda raw_cfg, backtest_result, hpo_result, walk_forward_result: SimpleNamespace(
+            passed=False,
+            checks=[],
+            to_dict=lambda: {"passed": False},
+        ),
+    )
+
+    pipeline_cmd.cmd_pipeline_research(
+        SimpleNamespace(
+            config="configs/example_hpo_split.yaml",
+            account="paper3",
+            num_samples=None,
+            max_concurrent_trials=None,
+            validation_period_days=None,
+            name=None,
+        )
+    )
+
+    assert calls == {
+        "backtest_experiment": "Pipeline HPO",
+        "hpo_experiment": "Pipeline HPO Split",
+        "walk_forward_experiment": "Pipeline Walk-Forward",
+    }
+
+
 def test_pipeline_research_preflight_rejects_invalid_split_objective_metric(monkeypatch):
     monkeypatch.setattr(
         pipeline_cmd,
@@ -359,8 +425,8 @@ def test_pipeline_research_preflight_rejects_invalid_split_objective_metric(monk
     )
     monkeypatch.setattr(pipeline_cmd, "_resolve_hpo_split_dates", lambda cfg, validation_period_days: ("a", "b", "c", "d"))
 
-    with pytest.raises(ValueError, match="Split HPO objective_metric must be one of"):
+    with pytest.raises(ValueError, match="Split HPO objective_metric must be a metric name"):
         pipeline_cmd._preflight_pipeline_research(
-            {"hpo": {"objective_metric": "wf_annualized_return"}},
+            {"hpo": {"objective_metric": "val_"}},
             validation_period_days_override=30,
         )

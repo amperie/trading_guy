@@ -22,6 +22,12 @@ mlflow:
 
 pipeline:
   experiment_name: "Trading Pipeline Bundle Registry"
+  experiments:
+    backtest: "Pipeline HPO"
+    hpo_split: "Pipeline HPO Split"
+    walk_forward: "Pipeline Walk-Forward"
+    review: "Pipeline - Review"
+    bundle_registry: "Pipeline - Bundle Registry"
   auto_promote_research: true
   gates:
     research:
