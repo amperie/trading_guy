@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from trading.commands.common import (
     apply_cli_overrides,
@@ -17,6 +19,28 @@ from trading.engines.alpaca_engine import AlpacaRealTimeEngine
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+
+
+def _infer_source_run_url(config_ref: str, explicit_source_run_url: str | None = None) -> str | None:
+    if explicit_source_run_url:
+        return explicit_source_run_url
+    if config_ref.startswith(("http://", "https://")) and "/runs/" in config_ref:
+        return config_ref
+    config_path = Path(config_ref)
+    if not config_path.is_file():
+        return None
+    manifest_candidates = [config_path.parent / "promotion_manifest.json", *config_path.parent.glob("pipeline_*_manifest.json")]
+    for manifest_path in manifest_candidates:
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        source_run_url = manifest.get("source_run_url")
+        if source_run_url:
+            return str(source_run_url)
+    return None
 
 
 def cmd_live(args: argparse.Namespace):
@@ -58,10 +82,27 @@ def cmd_live(args: argparse.Namespace):
 
     experiment = build_experiment_config(raw_cfg)
     built = ExperimentService.build(experiment)
+    config_hash = ExperimentService.describe(experiment).config_hash
+    source_run_url = _infer_source_run_url(
+        args.config,
+        explicit_source_run_url=getattr(args, "source_run_url", None),
+    )
+    state_store_meta = raw_cfg.setdefault("state_store", {}).setdefault("metadata", {})
+    state_store_meta.update(
+        {
+            "launch_config_ref": args.config,
+            "config_hash": config_hash,
+        }
+    )
+    if source_run_url:
+        state_store_meta["source_run_url"] = source_run_url
+    source_session_id = getattr(args, "source_session_id", None)
+    if source_session_id:
+        state_store_meta["source_session_id"] = source_session_id
 
     logger.info(
         f"Starting live trading with profile: {args.config} "
-        f"(hash={ExperimentService.describe(experiment).config_hash})"
+        f"(hash={config_hash})"
     )
 
     alpaca_cfg["state_store"] = raw_cfg.get("state_store", {})
@@ -114,6 +155,8 @@ def cmd_live(args: argparse.Namespace):
     return {
         "session_id": raw_cfg.get("state_store", {}).get("session_id"),
         "config_path": args.config,
-        "config_hash": ExperimentService.describe(experiment).config_hash,
+        "config_hash": config_hash,
+        "source_run_url": source_run_url,
+        "source_session_id": source_session_id,
         "symbols": alpaca_cfg.get("symbols_to_subscribe", []),
     }

@@ -65,6 +65,7 @@ Output:
 PIPELINE_EPILOG = """Stages:
   research   Run backtest, split HPO, walk-forward, and candidate registration
   paper      Promote a source run into a paper bundle and launch paper trading
+  paper-from-session  Relaunch paper trading from a stored MongoDB session's trace metadata
   review     Replay a paper/live session and register an approved bundle
   live       Launch real-money trading from a local or MLflow bundle config
 
@@ -72,6 +73,7 @@ Examples:
   python run.py pipeline research --config configs/example_hpo_split.yaml --account paper
   python run.py pipeline research --config http://localhost:5000/#/experiments/1/runs/<run_id> --account paper --editor vim
   python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --account paper
+  python run.py pipeline paper-from-session --source-session-id live-20260525-a --account paper
   python run.py pipeline review --config trading/promoted/my_bundle/my_bundle.yaml --account paper --session-id paper-20260523
   python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_run_id> --account live
 """
@@ -104,6 +106,15 @@ PIPELINE_PAPER_EPILOG = """Example:
 
 The command materializes a promoted bundle, logs it to the pipeline experiment,
 and starts a paper-trading live session from that bundle.
+"""
+
+PIPELINE_PAPER_FROM_SESSION_EPILOG = """Examples:
+  python run.py pipeline paper-from-session --source-session-id live-20260525-a --account paper
+  python run.py pipeline paper-from-session --source-session-id paper-20260525-a --account paper --session-id paper-rerun-1
+
+The command loads the stored MongoDB session, reads metadata.source_run_url or
+metadata.launch_config_ref, materializes the referenced bundle/config, and
+starts a fresh paper-trading session with a new session ID.
 """
 
 PIPELINE_REVIEW_EPILOG = """Example:

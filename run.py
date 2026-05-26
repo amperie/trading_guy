@@ -13,6 +13,8 @@ without shelling out.
 from __future__ import annotations
 
 import argparse
+import os
+import re
 import signal
 import sys
 
@@ -30,6 +32,7 @@ from trading.commands import (
 from trading.commands.pipeline import (
     cmd_pipeline_live,
     cmd_pipeline_paper,
+    cmd_pipeline_paper_from_session,
     cmd_pipeline_research,
     cmd_pipeline_review,
 )
@@ -42,12 +45,73 @@ from trading.cli_help import (
     PIPELINE_EPILOG,
     PIPELINE_LIVE_EPILOG,
     PIPELINE_PAPER_EPILOG,
+    PIPELINE_PAPER_FROM_SESSION_EPILOG,
     PIPELINE_RESEARCH_EPILOG,
     PIPELINE_REVIEW_EPILOG,
     PROMOTE_EPILOG,
     SESSION_REPLAY_DESCRIPTION,
     SESSION_REPLAY_EPILOG,
 )
+
+_ANSI_RESET = "\033[0m"
+_ANSI_BOLD = "\033[1m"
+_ANSI_DIM = "\033[2m"
+_ANSI_CYAN = "\033[36m"
+_ANSI_GREEN = "\033[32m"
+_ANSI_YELLOW = "\033[33m"
+_ANSI_MAGENTA = "\033[35m"
+
+
+def _ansi(text: str, *codes: str) -> str:
+    return "".join(codes) + text + _ANSI_RESET
+
+
+def _supports_color(file) -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    isatty = getattr(file, "isatty", None)
+    if not callable(isatty) or not isatty():
+        return False
+    return os.environ.get("TERM", "").lower() != "dumb"
+
+
+def _colorize_help_text(text: str) -> str:
+    def _style_flags(line: str) -> str:
+        return re.sub(r"--[a-zA-Z0-9][a-zA-Z0-9-]*", lambda m: _ansi(m.group(0), _ANSI_YELLOW), line)
+
+    styled_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            styled_lines.append(line)
+            continue
+        if stripped.startswith("usage:"):
+            styled_lines.append(_ansi(_style_flags(line), _ANSI_BOLD, _ANSI_CYAN))
+            continue
+        if stripped.startswith("Example:"):
+            styled_lines.append(line.replace("Example:", _ansi("Example:", _ANSI_MAGENTA, _ANSI_BOLD), 1))
+            styled_lines[-1] = _style_flags(styled_lines[-1])
+            continue
+        if stripped.endswith(":") and not line.startswith(" "):
+            styled_lines.append(_ansi(line, _ANSI_BOLD, _ANSI_CYAN))
+            continue
+        if stripped.endswith(":") and line.startswith("  "):
+            styled_lines.append(_ansi(line, _ANSI_BOLD, _ANSI_GREEN))
+            continue
+        styled_lines.append(_style_flags(line))
+    return "\n".join(styled_lines) + ("\n" if text.endswith("\n") else "")
+
+
+class ColorArgumentParser(argparse.ArgumentParser):
+    def format_help(self) -> str:
+        return super().format_help()
+
+    def print_help(self, file=None) -> None:
+        target = file or sys.stdout
+        text = super().format_help()
+        target.write(_colorize_help_text(text) if _supports_color(target) else text)
 
 
 def _install_interrupt_handlers():
@@ -76,7 +140,7 @@ def _install_interrupt_handlers():
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = ColorArgumentParser(
         description=(
             "Trading framework CLI. Commands share a typed config normalization layer "
             "so internal runs and external experiment runners use the same interface. "
@@ -154,6 +218,10 @@ def build_parser() -> argparse.ArgumentParser:
             "    Materialize a paper bundle from a source MLflow run, log it to the pipeline experiment, and start paper trading.\n"
             "    The bundle can later be launched from the local filesystem or directly from the pipeline MLflow run URL.\n"
             "    Example: python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --account paper\n"
+            "  pipeline paper-from-session:\n"
+            "    Reconstruct a fresh paper launch from a stored MongoDB session by reading its session metadata,\n"
+            "    recovering the source MLflow run URL or launch config reference, and materializing the bundle automatically.\n"
+            "    Example: python run.py pipeline paper-from-session --source-session-id live-20260525-a --account paper\n"
             "  pipeline review:\n"
             "    Replay a paper/live session, evaluate review gates, and register an approved live bundle when the session passes.\n"
             "    Prints replay MLflow links plus the approved bundle location and MLflow registration URL.\n"
@@ -173,6 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  End-to-end pipeline:\n"
             "    python run.py pipeline research --config configs/example_hpo_split.yaml --account paper\n"
             "    python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<candidate_run_id> --account paper\n"
+            "    python run.py pipeline paper-from-session --source-session-id <prior_session_id> --account paper\n"
             "    python run.py pipeline review --config trading/promoted/<paper_bundle>/<paper_bundle>.yaml --account paper --session-id <paper_session_id>\n"
             "    python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account live --session-id <live_session_id>\n"
             "  Derived-run fallback:\n"
@@ -183,7 +252,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True, parser_class=ColorArgumentParser)
 
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument(
@@ -444,8 +513,9 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Higher-level release workflow. `research` evaluates a strategy and can register a candidate bundle, "
-            "`paper` launches a paper-trading bundle from MLflow, `review` replays the session and can register "
-            "an approved live bundle, and `live` launches from either a local bundle YAML or an MLflow bundle URL."
+            "`paper` launches a paper-trading bundle from MLflow, `paper-from-session` relaunches paper trading "
+            "from stored MongoDB session metadata, `review` replays the session and can register an approved "
+            "live bundle, and `live` launches from either a local bundle YAML or an MLflow bundle URL."
         ),
     )
     pipeline_sub = pipeline_p.add_subparsers(dest="pipeline_stage", required=True)
@@ -516,6 +586,35 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline_paper_p.add_argument("--portfolio-url", dest="portfolio_url", help="Load portfolio class code from an HTTP(S) URL")
     pipeline_paper_p.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging for the live paper run")
     pipeline_paper_p.set_defaults(func=cmd_pipeline_paper)
+
+    pipeline_paper_session_p = pipeline_sub.add_parser(
+        "paper-from-session",
+        parents=[shared_account],
+        help="Relaunch paper trading from MongoDB session metadata",
+        epilog=PIPELINE_PAPER_FROM_SESSION_EPILOG,
+        formatter_class=argparse.RawTextHelpFormatter,
+        description=(
+            "Loads a prior MongoDB session, reads metadata.source_run_url or metadata.launch_config_ref, "
+            "materializes the referenced bundle/config, and starts a new paper-trading session."
+        ),
+    )
+    pipeline_paper_session_p.add_argument("--source-session-id", required=True, help="Existing MongoDB session ID to relaunch from")
+    pipeline_paper_session_p.add_argument("--session-id", dest="session_id", help="Optional new paper session ID")
+    pipeline_paper_session_p.add_argument("--name", help="Optional local bundle name")
+    pipeline_paper_session_p.add_argument("--run-name", dest="run_name", help="Override MLflow run name for the relaunched paper session")
+    pipeline_paper_session_p.add_argument("--agg-period", dest="agg_period", type=int, help="Override aggregation period")
+    pipeline_paper_session_p.add_argument("--alpaca-override-url", dest="alpaca_override_url", help="Override Alpaca websocket URL")
+    pipeline_paper_session_p.add_argument("--symbol", help="Override portfolio symbol")
+    pipeline_paper_session_p.add_argument("--cash", type=float, help="Override starting cash")
+    pipeline_paper_session_p.add_argument("--algorithm", help="Override algorithm implementation path")
+    pipeline_paper_session_p.add_argument("--algorithm-url", dest="algorithm_url", help="Load algorithm class code from an HTTP(S) URL")
+    pipeline_paper_session_p.add_argument("--portfolio", help="Override portfolio implementation path")
+    pipeline_paper_session_p.add_argument("--portfolio-url", dest="portfolio_url", help="Load portfolio class code from an HTTP(S) URL")
+    pipeline_paper_session_p.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging for the relaunched paper session")
+    pipeline_paper_session_p.add_argument("--tracking-uri", dest="tracking_uri", help="Optional MLflow tracking URI override when downloading the source bundle")
+    pipeline_paper_session_p.add_argument("--connection-uri", dest="connection_uri", help="Optional MongoDB connection URI override for reading the source session")
+    pipeline_paper_session_p.add_argument("--database", dest="database", help="Optional MongoDB database override for reading the source session")
+    pipeline_paper_session_p.set_defaults(func=cmd_pipeline_paper_from_session)
 
     pipeline_review_p = pipeline_sub.add_parser(
         "review",

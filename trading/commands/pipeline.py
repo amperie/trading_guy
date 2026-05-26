@@ -55,7 +55,34 @@ def _print_gate_report(report) -> None:
         print(f"{status} {check.name}: actual={actual} {check.comparator} threshold={threshold}")
 
 
+def _resolve_session_store(connection_uri: str | None = None, database: str | None = None):
+    from utils.config_manager import ConfigManager
+    from utils.trading_state_store import TradingStateStore
+
+    cfg = ConfigManager().get("state_store") or {}
+    return TradingStateStore(
+        connection_uri=connection_uri or cfg.get("connection_uri", "mongodb://localhost:27017"),
+        database=database or cfg.get("database", "trading"),
+    )
+
+
+def _resolve_session_launch_source(metadata: dict[str, Any]) -> str | None:
+    source_run_url = metadata.get("source_run_url")
+    if isinstance(source_run_url, str) and source_run_url:
+        return source_run_url
+    launch_config_ref = metadata.get("launch_config_ref")
+    if isinstance(launch_config_ref, str) and launch_config_ref:
+        return launch_config_ref
+    return None
+
+
 def _as_live_args(args: argparse.Namespace, config_path: str, session_id: str) -> argparse.Namespace:
+    source_run_url = None
+    config_ref = str(config_path)
+    if config_ref.startswith(("http://", "https://")) and "/runs/" in config_ref:
+        source_run_url = config_ref
+    elif str(getattr(args, "config", "")).startswith(("http://", "https://")) and "/runs/" in str(getattr(args, "config", "")):
+        source_run_url = str(getattr(args, "config"))
     return SimpleNamespace(
         config=config_path,
         account=args.account,
@@ -68,6 +95,8 @@ def _as_live_args(args: argparse.Namespace, config_path: str, session_id: str) -
         no_mlflow=getattr(args, "no_mlflow", False),
         run_name=getattr(args, "run_name", None),
         session_id=session_id,
+        source_run_url=source_run_url,
+        source_session_id=getattr(args, "source_session_id", None),
         agg_period=getattr(args, "agg_period", None),
         alpaca_override_url=getattr(args, "alpaca_override_url", None),
     )
@@ -235,6 +264,66 @@ def cmd_pipeline_paper(args: argparse.Namespace):
         ]
     )
     return {"bundle": bundle_record, "live": live_result}
+
+
+def cmd_pipeline_paper_from_session(args: argparse.Namespace):
+    store = _resolve_session_store(
+        connection_uri=getattr(args, "connection_uri", None),
+        database=getattr(args, "database", None),
+    )
+    session_doc = store.get_session(args.source_session_id)
+    if session_doc is None:
+        raise ValueError(f"Session '{args.source_session_id}' not found in MongoDB")
+
+    metadata = session_doc.get("metadata") or {}
+    launch_source = _resolve_session_launch_source(metadata)
+    if not launch_source:
+        raise ValueError(
+            f"Session '{args.source_session_id}' is missing metadata.source_run_url and "
+            "metadata.launch_config_ref; cannot reconstruct a runnable paper bundle."
+        )
+
+    bundle = materialize_bundle(
+        launch_source,
+        name=getattr(args, "name", None),
+        paper=True,
+        tracking_uri=getattr(args, "tracking_uri", None),
+    )
+    session_id = getattr(args, "session_id", None) or build_session_id("paper")
+    raw_cfg = load_raw_config(bundle.config_path)
+    bundle_record = log_registered_bundle(
+        raw_cfg,
+        bundle,
+        stage="paper",
+        status="paper_ready",
+        source_run_url=metadata.get("source_run_url"),
+        metadata={"session_id": session_id, "source_session_id": args.source_session_id},
+    )
+    live_args = _as_live_args(args, bundle.config_path, session_id)
+    live_args.source_run_url = metadata.get("source_run_url") or live_args.source_run_url
+    live_args.source_session_id = args.source_session_id
+    live_result = cmd_live(live_args)
+
+    _print_header("PIPELINE PAPER FROM SESSION")
+    _print_pairs(
+        [
+            ("Source Session", args.source_session_id),
+            ("Source MLflow", metadata.get("source_run_url")),
+            ("Launch Source", launch_source),
+            ("Local Bundle", bundle.config_path),
+            ("Bundle Manifest", bundle.manifest_path),
+            ("Pipeline Bundle MLflow", bundle_record.get("run_url")),
+            ("Paper Session", live_result.get("session_id")),
+            ("Config Hash", live_result.get("config_hash")),
+        ]
+    )
+    return {
+        "source_session_id": args.source_session_id,
+        "launch_source": launch_source,
+        "bundle": bundle_record,
+        "bundle_config": bundle.config_path,
+        "live": live_result,
+    }
 
 
 def cmd_pipeline_review(args: argparse.Namespace):

@@ -222,23 +222,23 @@ class BaseEngine(ABC):
             "portfolio_class": f"{type(self.pf).__module__}.{type(self.pf).__name__}" if self.pf else None,
             "portfolio_config": self.pf.cfg if self.pf else None,
         }
+        session_metadata = dict(ss_cfg.get("metadata", {}) or {})
+        session_metadata.update(algo_portfolio_meta)
 
         # Create or resume session
         session_id = ss_cfg.get("session_id")
         if session_id and self.state_store.get_session(session_id):
             self.session_id = session_id
             self.state_store.update_session(session_id, {
-                f"metadata.{k}": v for k, v in algo_portfolio_meta.items()
+                f"metadata.{k}": v for k, v in session_metadata.items()
             })
             logger.info(f"Resumed state_store session {session_id[:8]}...")
         else:
-            metadata = ss_cfg.get("metadata", {})
-            metadata.update(algo_portfolio_meta)
             self.session_id = self.state_store.create_session(
                 session_id=session_id,
                 name=ss_cfg.get("session_name", ""),
                 account_id=ss_cfg.get("account_id", ""),
-                metadata=metadata,
+                metadata=session_metadata,
             )
             logger.info(f"Created state_store session {self.session_id[:8]}...")
 

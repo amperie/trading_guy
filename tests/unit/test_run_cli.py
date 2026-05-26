@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import pytest
 
 import run
@@ -131,6 +132,22 @@ def test_main_exits_130_on_keyboard_interrupt(monkeypatch, capsys):
 
     assert exc.value.code == 130
     assert "Cancelled by user." in capsys.readouterr().err
+
+
+def test_print_help_uses_color_for_tty(monkeypatch):
+    class TtyBuffer(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    parser = build_parser()
+    buf = TtyBuffer()
+    parser.print_help(file=buf)
+    help_text = buf.getvalue()
+
+    assert "\x1b[" in help_text
+    assert "usage:" in help_text
+    assert "--config" in help_text
 
 
 def test_build_parser_promote_args():
