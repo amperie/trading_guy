@@ -1,5 +1,6 @@
 import math
 import os
+import signal
 import time
 from pathlib import Path
 from typing import Type
@@ -23,6 +24,27 @@ from ray import tune
 from ray.tune.search.optuna import OptunaSearch
 
 logger = Logger().get_logger(__name__)
+
+
+def _set_interrupt_handlers(handler) -> dict[int, object]:
+    previous: dict[int, object] = {}
+    for sig in (signal.SIGINT, getattr(signal, "SIGBREAK", None)):
+        if sig is None:
+            continue
+        try:
+            previous[sig] = signal.getsignal(sig)
+            signal.signal(sig, handler)
+        except Exception:
+            continue
+    return previous
+
+
+def _restore_interrupt_handlers(previous: dict[int, object]) -> None:
+    for sig, handler in previous.items():
+        try:
+            signal.signal(sig, handler)
+        except Exception:
+            continue
 
 
 class _TuneStatusCallback(tune.Callback):
@@ -566,58 +588,56 @@ def tune_backtest_hyperparameters(
         algorithm_param_keys = ["fast_window", "slow_window"]
         portfolio_param_keys = ["tx_cost"]
     """
-    # Initialize Ray with dashboard accessible remotely
-    ray.init(
-        ignore_reinit_error=True,
-        dashboard_host="0.0.0.0",
-        dashboard_port=8265,
-        log_to_driver=log_ray_worker_output,
-    )
-
-    # Bind all parameters to the objective function
-    trainable_with_params = tune.with_parameters(
-        backtest_objective_fn,
-        symbol=symbol,
-        algorithm_class=algorithm_class,
-        portfolio_class=portfolio_class,
-        data_provider_class=data_provider_class,
-        order_manager_class=order_manager_class,
-        base_algorithm_config=base_algorithm_config,
-        base_portfolio_config=base_portfolio_config,
-        base_data_provider_config=base_data_provider_config,
-        base_backtest_config=base_backtest_config,
-        algorithm_param_keys=algorithm_param_keys,
-        portfolio_param_keys=portfolio_param_keys,
-        log_to_mlflow=log_to_mlflow,
-    )
-
-    # Configure Bayesian Optimization with Optuna
-    optuna_search = OptunaSearch(
-        metric="_metric",
-        mode="max",
-    )
-
+    previous_sigint_setting = os.environ.get("TUNE_DISABLE_SIGINT_HANDLER")
+    previous_signal_handlers = _set_interrupt_handlers(signal.default_int_handler)
+    os.environ["TUNE_DISABLE_SIGINT_HANDLER"] = "1"
     status_callback = _TuneStatusCallback(num_samples)
 
-    tuner = tune.Tuner(
-        trainable_with_params,
-        param_space=search_space,
-        run_config=air.RunConfig(
-            name="hpo",
-            callbacks=[status_callback],
-        ),
-        tune_config=tune.TuneConfig(
+    try:
+        ray.init(
+            ignore_reinit_error=True,
+            dashboard_host="0.0.0.0",
+            dashboard_port=8265,
+            log_to_driver=log_ray_worker_output,
+        )
+
+        trainable_with_params = tune.with_parameters(
+            backtest_objective_fn,
+            symbol=symbol,
+            algorithm_class=algorithm_class,
+            portfolio_class=portfolio_class,
+            data_provider_class=data_provider_class,
+            order_manager_class=order_manager_class,
+            base_algorithm_config=base_algorithm_config,
+            base_portfolio_config=base_portfolio_config,
+            base_data_provider_config=base_data_provider_config,
+            base_backtest_config=base_backtest_config,
+            algorithm_param_keys=algorithm_param_keys,
+            portfolio_param_keys=portfolio_param_keys,
+            log_to_mlflow=log_to_mlflow,
+        )
+
+        optuna_search = OptunaSearch(
             metric="_metric",
             mode="max",
-            num_samples=num_samples,
-            max_concurrent_trials=max_concurrent_trials,
-            search_alg=optuna_search,
-            trial_dirname_creator=_short_trial_dirname_creator,
         )
-    )
-    previous_sigint_setting = os.environ.get("TUNE_DISABLE_SIGINT_HANDLER")
-    os.environ["TUNE_DISABLE_SIGINT_HANDLER"] = "1"
-    try:
+
+        tuner = tune.Tuner(
+            trainable_with_params,
+            param_space=search_space,
+            run_config=air.RunConfig(
+                name="hpo",
+                callbacks=[status_callback],
+            ),
+            tune_config=tune.TuneConfig(
+                metric="_metric",
+                mode="max",
+                num_samples=num_samples,
+                max_concurrent_trials=max_concurrent_trials,
+                search_alg=optuna_search,
+                trial_dirname_creator=_short_trial_dirname_creator,
+            )
+        )
         results = tuner.fit()
         trial_summaries = []
         for result in results:
@@ -645,6 +665,7 @@ def tune_backtest_hyperparameters(
         raise
     finally:
         status_callback.close()
+        _restore_interrupt_handlers(previous_signal_handlers)
         _restore_env_var("TUNE_DISABLE_SIGINT_HANDLER", previous_sigint_setting)
         if ray.is_initialized():
             ray.shutdown()

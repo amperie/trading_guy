@@ -28,6 +28,7 @@ class AnalyzerReportTarget:
     log_trades: bool = True
     log_signals: bool = True
     log_report: bool = True
+    heavy_artifact_trade_limit: int | None = None
 
 
 @dataclass(slots=True)

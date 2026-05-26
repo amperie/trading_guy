@@ -154,6 +154,58 @@ def _normalized_path_string(raw_path: str) -> str:
     return raw_path.replace("\\", "/").strip()
 
 
+def _algorithm_identifiers(cfg: dict[str, Any]) -> set[str]:
+    algorithm = cfg.get("algorithm")
+    if not isinstance(algorithm, dict):
+        return set()
+    values = (
+        algorithm.get("implementation"),
+        algorithm.get("class_name"),
+        algorithm.get("generated_algorithm"),
+    )
+    return {str(value).lower() for value in values if value}
+
+
+def normalize_hpo_search_space(raw_cfg: dict[str, Any]) -> dict[str, Any]:
+    cfg = copy.deepcopy(raw_cfg)
+    hpo_cfg = cfg.get("hpo")
+    algorithm_cfg = cfg.get("algorithm")
+    if not isinstance(hpo_cfg, dict) or not isinstance(algorithm_cfg, dict):
+        return cfg
+
+    search_space = hpo_cfg.get("search_space")
+    params = algorithm_cfg.get("params")
+    if not isinstance(search_space, dict) or not isinstance(params, dict):
+        return cfg
+
+    identifiers = _algorithm_identifiers(cfg)
+    if "bollingerbandspercentalgorithm" not in identifiers:
+        return cfg
+
+    bb_period_space = search_space.get("bb_period")
+    history_length = params.get("history_length")
+    if not isinstance(bb_period_space, dict) or not isinstance(history_length, int) or history_length < 1:
+        return cfg
+
+    if str(bb_period_space.get("type")).lower() != "randint":
+        return cfg
+
+    low = int(bb_period_space.get("low", 1))
+    high = int(bb_period_space.get("high", low + 1))
+    capped_high = history_length + 1
+    if high <= capped_high:
+        return cfg
+
+    bb_period_space["high"] = max(low + 1, capped_high)
+    logger.warning(
+        "Clamped hpo.search_space.bb_period high from %s to %s to respect algorithm.params.history_length=%s",
+        high,
+        bb_period_space["high"],
+        history_length,
+    )
+    return cfg
+
+
 def sanitize_source_config(raw_cfg: dict[str, Any]) -> dict[str, Any]:
     cfg = copy.deepcopy(raw_cfg)
 
@@ -164,7 +216,7 @@ def sanitize_source_config(raw_cfg: dict[str, Any]) -> dict[str, Any]:
     _normalize_generated_component(cfg, "portfolio", "generated_portfolio")
 
     sanitized = {key: value for key, value in cfg.items() if key in RUNTIME_CONFIG_KEYS}
-    return sanitized
+    return normalize_hpo_search_space(sanitized)
 
 
 def _list_artifacts_recursive(client, run_id: str, path: str = "") -> list[Any]:
@@ -433,7 +485,7 @@ def prepare_hpo_config_from_source(
     *,
     split_validation: bool = False,
 ) -> dict[str, Any]:
-    raw_cfg = copy.deepcopy(source_context.raw_config)
+    raw_cfg = normalize_hpo_search_space(source_context.raw_config)
     raw_cfg["mode"] = "hpo"
 
     analysis_cfg = raw_cfg.setdefault("analysis", {})
@@ -451,7 +503,7 @@ def prepare_hpo_config_from_source(
     mlflow_cfg["tracking_uri"] = source_context.tracking_uri
 
     raw_cfg.setdefault("hpo", {})
-    return raw_cfg
+    return normalize_hpo_search_space(raw_cfg)
 
 
 def _editor_command(editor: str | None = None) -> list[str]:
@@ -593,6 +645,7 @@ def run_launcher(
 
     edited_cfg = edit_hpo_config(prepared_cfg, editor=editor)
     edited_cfg = sanitize_source_config(edited_cfg) if "execution_config" in edited_cfg else edited_cfg
+    edited_cfg = normalize_hpo_search_space(edited_cfg)
     edited_config_path = persist_edited_hpo_config(source_context, edited_cfg)
 
     creds = load_account_creds(account)

@@ -14,6 +14,8 @@ from trading.reporting.models import (
 )
 from utils.mlflow_client import MLflowClient
 
+DEFAULT_HEAVY_ARTIFACT_TRADE_LIMIT = 500
+
 
 def summarize_analyzer(analyzer, benchmark_paths: dict[str, str] | None = None) -> AnalysisSummary:
     if benchmark_paths:
@@ -149,6 +151,13 @@ class ExperimentReporter:
         client.log_metrics(metrics_dict)
 
         analyzer = target.analyzer
+        total_trades = int(getattr(target.summary.metrics, "total_trades", 0) or 0)
+        trade_limit = (
+            DEFAULT_HEAVY_ARTIFACT_TRADE_LIMIT
+            if target.heavy_artifact_trade_limit is None
+            else int(target.heavy_artifact_trade_limit)
+        )
+        skip_heavy = trade_limit > 0 and total_trades > trade_limit
         session_metadata = getattr(analyzer, "_session_metadata", {}) or {}
         if session_metadata:
             from trading.commands.common import flatten_config
@@ -160,7 +169,7 @@ class ExperimentReporter:
 
         if target.log_report:
             client.log_text(target.summary.report, f"{target.artifact_prefix}performance_report.txt")
-            if hasattr(analyzer, "generate_all_orders_report"):
+            if not skip_heavy and hasattr(analyzer, "generate_all_orders_report"):
                 try:
                     all_orders = analyzer.generate_all_orders_report()
                     if all_orders:
@@ -170,9 +179,15 @@ class ExperimentReporter:
 
         if target.log_charts:
             tmp = _workspace_temp_dir()
-            ExperimentReporter._log_chart_artifacts(client, analyzer, tmp, target.artifact_prefix)
+            ExperimentReporter._log_chart_artifacts(
+                client,
+                analyzer,
+                tmp,
+                target.artifact_prefix,
+                include_heavy=not skip_heavy,
+            )
 
-        if target.log_signals:
+        if target.log_signals and not skip_heavy:
             tmp = _workspace_temp_dir()
             fpath = os.path.join(tmp, f"{target.artifact_prefix}signals_orders.csv")
             try:
@@ -191,7 +206,14 @@ class ExperimentReporter:
                 pass
 
     @staticmethod
-    def _log_chart_artifacts(client: MLflowClient, analyzer, tmp: str, artifact_prefix: str) -> None:
+    def _log_chart_artifacts(
+        client: MLflowClient,
+        analyzer,
+        tmp: str,
+        artifact_prefix: str,
+        *,
+        include_heavy: bool,
+    ) -> None:
         save_artifacts = {
             "equity_curve.png": "save_equity_curve",
             "technical_analysis.png": "save_technical_chart",
@@ -200,7 +222,15 @@ class ExperimentReporter:
             "lifecycle.png": "save_lifecycle_chart",
             "lifecycle_interactive.html": "save_lifecycle_chart_interactive",
         }
+        heavy_save_artifacts = {
+            "technical_analysis.png",
+            "orders_chart.png",
+            "lifecycle.png",
+            "lifecycle_interactive.html",
+        }
         for fname, method_name in save_artifacts.items():
+            if not include_heavy and fname in heavy_save_artifacts:
+                continue
             method = getattr(analyzer, method_name, None)
             if callable(method):
                 fpath = os.path.join(tmp, f"{artifact_prefix}{fname}")
@@ -219,7 +249,16 @@ class ExperimentReporter:
             ("orders_timeline.png", "plot_orders_timeline"),
             ("interactive_portfolio.html", "plot_interactive_portfolio"),
         )
+        heavy_plot_artifacts = {
+            "portfolio_with_trades.png",
+            "trade_pnl.png",
+            "dashboard.png",
+            "orders_timeline.png",
+            "interactive_portfolio.html",
+        }
         for fname, method_name in plot_artifacts:
+            if not include_heavy and fname in heavy_plot_artifacts:
+                continue
             method = getattr(analyzer, method_name, None)
             if callable(method):
                 fpath = os.path.join(tmp, f"{artifact_prefix}{fname}")

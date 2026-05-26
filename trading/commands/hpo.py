@@ -327,6 +327,23 @@ def _build_minimal_warmup_dp_cfg(
     return warmup_cfg
 
 
+def _normalize_split_objective_metric(objective_metric: str | None) -> str:
+    value = str(objective_metric or "val_annualized_return").strip()
+    aliases = {
+        "annualized_return": "val_annualized_return",
+        "validation_annualized_return": "val_annualized_return",
+        "train_annualized_return": "trn_annualized_return",
+        "training_annualized_return": "trn_annualized_return",
+    }
+    value = aliases.get(value, value)
+    if value not in {"val_annualized_return", "trn_annualized_return"}:
+        raise ValueError(
+            "Split HPO objective_metric must be one of "
+            "'val_annualized_return' or 'trn_annualized_return'"
+        )
+    return value
+
+
 @ray.remote
 def _score_split_validation_trial_remote(
     *,
@@ -501,11 +518,7 @@ def _select_best_split_config(
         )
         return best_trial["config"], best_al_cfg, best_pf_cfg, float(best_trial["metric"])
 
-    if objective_metric != "val_annualized_return":
-        raise ValueError(
-            "Split HPO objective_metric must be one of "
-            "'val_annualized_return' or 'trn_annualized_return'"
-        )
+    objective_metric = _normalize_split_objective_metric(objective_metric)
 
     scored_trials = _score_split_validation_trials(
         trial_summaries=trial_summaries,
@@ -551,7 +564,8 @@ def run_hpo_split_from_raw_config(
     validation_period_days = int(hpo_cfg.get("validation_period_days", 0))
     if validation_period_days <= 0:
         raise ValueError("Split HPO requires hpo.validation_period_days > 0")
-    objective_metric = str(hpo_cfg.get("objective_metric", "val_annualized_return"))
+    objective_metric = _normalize_split_objective_metric(hpo_cfg.get("objective_metric"))
+    hpo_cfg["objective_metric"] = objective_metric
 
     experiment = build_experiment_config(raw_cfg)
     config_dict = experiment.model_dump(exclude_none=True)

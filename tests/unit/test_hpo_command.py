@@ -223,6 +223,21 @@ def test_select_best_split_config_uses_parallel_validation_scores(monkeypatch):
     assert best_score == pytest.approx(2.5)
 
 
+def test_normalize_split_objective_metric_accepts_legacy_aliases():
+    assert hpo_cmd._normalize_split_objective_metric("annualized_return") == "val_annualized_return"
+    assert hpo_cmd._normalize_split_objective_metric("train_annualized_return") == "trn_annualized_return"
+
+
+def test_normalize_split_objective_metric_rejects_unknown_value():
+    with pytest.raises(ValueError, match="Split HPO objective_metric must be one of"):
+        hpo_cmd._normalize_split_objective_metric("wf_annualized_return")
+
+
+def test_normalize_split_objective_metric_defaults_to_validation_metric():
+    assert hpo_cmd._normalize_split_objective_metric(None) == "val_annualized_return"
+    assert hpo_cmd._normalize_split_objective_metric("") == "val_annualized_return"
+
+
 def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
     raw_cfg = {
         "mode": "hpo",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -835,14 +836,22 @@ def test_tune_backtest_hyperparameters_disables_ray_sigint_handler_and_shuts_dow
     monkeypatch.setenv("TUNE_DISABLE_SIGINT_HANDLER", env_before)
 
     shutdown_calls = []
+    captured_env = {}
+    initial_sigint_handler = signal.getsignal(signal.SIGINT)
+    sigbreak = getattr(signal, "SIGBREAK", None)
+    initial_sigbreak_handler = signal.getsignal(sigbreak) if sigbreak is not None else None
 
-    monkeypatch.setattr(run_backtest_ray.ray, "init", lambda **kwargs: None)
+    def fake_ray_init(**kwargs):
+        captured_env["during_init"] = os.environ.get("TUNE_DISABLE_SIGINT_HANDLER")
+        captured_env["sigint_during_init"] = signal.getsignal(signal.SIGINT)
+        if sigbreak is not None:
+            captured_env["sigbreak_during_init"] = signal.getsignal(sigbreak)
+
+    monkeypatch.setattr(run_backtest_ray.ray, "init", fake_ray_init)
     monkeypatch.setattr(run_backtest_ray.ray, "is_initialized", lambda: True)
     monkeypatch.setattr(run_backtest_ray.ray, "shutdown", lambda: shutdown_calls.append(True))
     monkeypatch.setattr(run_backtest_ray.tune, "with_parameters", lambda fn, **kwargs: fn)
     monkeypatch.setattr(run_backtest_ray, "OptunaSearch", lambda **kwargs: object())
-
-    captured_env = {}
 
     class FakeTuner:
         def __init__(self, *args, **kwargs):
@@ -850,6 +859,9 @@ def test_tune_backtest_hyperparameters_disables_ray_sigint_handler_and_shuts_dow
 
         def fit(self):
             captured_env["during_fit"] = os.environ.get("TUNE_DISABLE_SIGINT_HANDLER")
+            captured_env["sigint_during_fit"] = signal.getsignal(signal.SIGINT)
+            if sigbreak is not None:
+                captured_env["sigbreak_during_fit"] = signal.getsignal(sigbreak)
             raise KeyboardInterrupt()
 
     monkeypatch.setattr(run_backtest_ray.tune, "Tuner", FakeTuner)
@@ -872,6 +884,14 @@ def test_tune_backtest_hyperparameters_disables_ray_sigint_handler_and_shuts_dow
             max_concurrent_trials=1,
         )
 
+    assert captured_env["during_init"] == "1"
     assert captured_env["during_fit"] == "1"
+    assert captured_env["sigint_during_init"] == signal.default_int_handler
+    assert captured_env["sigint_during_fit"] == signal.default_int_handler
+    assert signal.getsignal(signal.SIGINT) == initial_sigint_handler
+    if sigbreak is not None:
+        assert captured_env["sigbreak_during_init"] == signal.default_int_handler
+        assert captured_env["sigbreak_during_fit"] == signal.default_int_handler
+        assert signal.getsignal(sigbreak) == initial_sigbreak_handler
     assert os.environ["TUNE_DISABLE_SIGINT_HANDLER"] == env_before
     assert shutdown_calls == [True]

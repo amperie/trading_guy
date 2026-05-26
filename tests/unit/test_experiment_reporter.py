@@ -53,6 +53,7 @@ class FakeClient:
     enabled = True
 
     def __init__(self):
+        self.run_id = "run-123"
         self.params = []
         self.metrics = []
         self.artifacts = []
@@ -82,6 +83,9 @@ class FakeClient:
     def log_text(self, text, path):
         self.texts.append((path, text))
 
+    def get_run_url(self):
+        return "http://mlflow/runs/run-123"
+
 
 def _summary():
     return AnalysisSummary(
@@ -97,9 +101,18 @@ def _summary():
     )
 
 
-def test_reporter_logs_single_target(monkeypatch):
+def _summary_with_trade_count(total_trades: int):
+    summary = _summary()
+    summary.metrics.total_trades = total_trades
+    return summary
+
+
+def test_reporter_logs_single_target(monkeypatch, tmp_path):
     client = FakeClient()
     monkeypatch.setattr("trading.reporting.service.MLflowClient.from_config", lambda experiment_name=None: client)
+    tmp_root = tmp_path / "reporter_tmp"
+    tmp_root.mkdir()
+    monkeypatch.setattr("trading.reporting.service._workspace_temp_dir", lambda: str(tmp_root))
 
     analyzer = FakeAnalyzer()
     report = ExperimentReport(
@@ -153,11 +166,11 @@ def test_reporter_logs_prefixed_and_combined_artifacts(monkeypatch):
     assert any(name == "combined_equity_curve.png" for name, _ in client.artifacts)
 
 
-def test_reporter_logs_config_artifacts(monkeypatch):
+def test_reporter_logs_config_artifacts(monkeypatch, tmp_path):
     client = FakeClient()
     monkeypatch.setattr("trading.reporting.service.MLflowClient.from_config", lambda experiment_name=None: client)
 
-    cfg_path = Path("scratch") / "reporter_test_config.yaml"
+    cfg_path = tmp_path / "reporter_test_config.yaml"
     cfg_path.write_text("mode: backtest\n", encoding="utf-8")
     try:
         report = ExperimentReport(
@@ -171,3 +184,34 @@ def test_reporter_logs_config_artifacts(monkeypatch):
     finally:
         if cfg_path.exists():
             cfg_path.unlink()
+
+
+def test_reporter_skips_heavy_artifacts_for_large_trade_counts(monkeypatch, tmp_path):
+    client = FakeClient()
+    monkeypatch.setattr("trading.reporting.service.MLflowClient.from_config", lambda experiment_name=None: client)
+    tmp_root = tmp_path / "reporter_tmp_heavy"
+    tmp_root.mkdir()
+    monkeypatch.setattr("trading.reporting.service._workspace_temp_dir", lambda: str(tmp_root))
+
+    analyzer = FakeAnalyzer()
+    report = ExperimentReport(
+        experiment_name="exp",
+        run_name="run-heavy",
+        analyzers=[
+            AnalyzerReportTarget(
+                name="primary",
+                analyzer=analyzer,
+                summary=_summary_with_trade_count(501),
+            )
+        ],
+    )
+
+    ExperimentReporter.log_to_mlflow(report)
+
+    assert any(path == "performance_report.txt" for path, _ in client.texts)
+    assert any(name == "trades.csv" for name, _ in client.artifacts)
+    assert not any(path == "all_orders_report.txt" for path, _ in client.texts)
+    assert not any(name == "signals_orders.csv" for name, _ in client.artifacts)
+    assert not any(name == "orders_chart.png" for name, _ in client.artifacts)
+    assert not any(name == "technical_analysis.png" for name, _ in client.artifacts)
+    assert not any(name == "interactive_portfolio.html" for name, _ in client.artifacts)

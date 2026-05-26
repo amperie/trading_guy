@@ -1,6 +1,7 @@
 from argparse import Namespace
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from trading.commands import pipeline as pipeline_cmd
@@ -348,3 +349,18 @@ def test_pipeline_research_passes_cli_validation_period_days_to_preflight(monkey
 
     pipeline_cmd.cmd_pipeline_research(args)
     assert calls["validation_period_days_override"] == 30
+
+
+def test_pipeline_research_preflight_rejects_invalid_split_objective_metric(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "build_experiment_config",
+        lambda raw_cfg: SimpleNamespace(data_provider=SimpleNamespace(params={"path": "data/test.csv"})),
+    )
+    monkeypatch.setattr(pipeline_cmd, "_resolve_hpo_split_dates", lambda cfg, validation_period_days: ("a", "b", "c", "d"))
+
+    with pytest.raises(ValueError, match="Split HPO objective_metric must be one of"):
+        pipeline_cmd._preflight_pipeline_research(
+            {"hpo": {"objective_metric": "wf_annualized_return"}},
+            validation_period_days_override=30,
+        )

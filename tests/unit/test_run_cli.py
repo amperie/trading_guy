@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import run
 from run import build_parser
 
 
@@ -112,6 +113,24 @@ def test_build_parser_pipeline_research_requires_validation_period_days():
             "--config", "configs/example_hpo_split.yaml",
             "--account", "paper",
         ])
+
+
+def test_main_exits_130_on_keyboard_interrupt(monkeypatch, capsys):
+    class FakeParser:
+        def parse_args(self):
+            class Args:
+                @staticmethod
+                def func(_args):
+                    raise KeyboardInterrupt()
+            return Args()
+
+    monkeypatch.setattr(run, "build_parser", lambda: FakeParser())
+
+    with pytest.raises(SystemExit) as exc:
+        run.main()
+
+    assert exc.value.code == 130
+    assert "Cancelled by user." in capsys.readouterr().err
 
 
 def test_build_parser_promote_args():

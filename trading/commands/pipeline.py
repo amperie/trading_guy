@@ -14,8 +14,7 @@ from trading.commands.common import (
     load_account_creds,
     load_raw_config,
 )
-from trading.commands.hpo import run_hpo_split_from_raw_config
-from trading.commands.hpo import _resolve_hpo_split_dates
+from trading.commands.hpo import _normalize_split_objective_metric, _resolve_hpo_split_dates, run_hpo_split_from_raw_config
 from trading.commands.live import cmd_live
 from trading.commands.session_replay import cmd_session_replay
 from trading.commands.walk_forward import cmd_walk_forward
@@ -81,6 +80,7 @@ def _materialize_editable_research_config(args: argparse.Namespace) -> str:
     from trading.launchers.mlflow_hpo_launcher import (
         edit_config_dict,
         load_source_run_context,
+        normalize_hpo_search_space,
         persist_edited_config,
         sanitize_source_config,
     )
@@ -96,6 +96,7 @@ def _materialize_editable_research_config(args: argparse.Namespace) -> str:
         label="pipeline research config",
     )
     edited_cfg = sanitize_source_config(edited_cfg) if "execution_config" in edited_cfg else edited_cfg
+    edited_cfg = normalize_hpo_search_space(edited_cfg)
     return persist_edited_config(
         source_context,
         edited_cfg,
@@ -119,6 +120,7 @@ def _preflight_pipeline_research(
         else (raw_cfg.get("hpo") or {}).get("validation_period_days", 0)
     )
     _resolve_hpo_split_dates(dict(experiment.data_provider.params), validation_period_days)
+    _normalize_split_objective_metric((raw_cfg.get("hpo") or {}).get("objective_metric"))
 
     dp_class = import_component_class(experiment.data_provider)
     provider_name = f"{dp_class.__module__}.{dp_class.__name__}".lower()

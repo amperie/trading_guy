@@ -13,6 +13,8 @@ without shelling out.
 from __future__ import annotations
 
 import argparse
+import signal
+import sys
 
 from trading.commands import (
     cmd_backtest,
@@ -46,6 +48,31 @@ from trading.cli_help import (
     SESSION_REPLAY_DESCRIPTION,
     SESSION_REPLAY_EPILOG,
 )
+
+
+def _install_interrupt_handlers():
+    previous: dict[int, object] = {}
+
+    def _raise_keyboard_interrupt(sig, frame):
+        raise KeyboardInterrupt()
+
+    for sig in (signal.SIGINT, getattr(signal, "SIGBREAK", None)):
+        if sig is None:
+            continue
+        try:
+            previous[sig] = signal.getsignal(sig)
+            signal.signal(sig, _raise_keyboard_interrupt)
+        except Exception:
+            continue
+
+    def _restore():
+        for sig, handler in previous.items():
+            try:
+                signal.signal(sig, handler)
+            except Exception:
+                continue
+
+    return _restore
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -525,8 +552,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main():
     parser = build_parser()
-    args = parser.parse_args()
-    args.func(args)
+    restore_interrupts = _install_interrupt_handlers()
+    try:
+        args = parser.parse_args()
+        args.func(args)
+    except KeyboardInterrupt:
+        print("\nCancelled by user.", file=sys.stderr, flush=True)
+        raise SystemExit(130)
+    finally:
+        restore_interrupts()
 
 
 if __name__ == "__main__":
