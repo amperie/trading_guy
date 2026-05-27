@@ -8,6 +8,7 @@ from flask import Flask, jsonify, render_template, request
 
 from utils.config_manager import ConfigManager
 from utils.trading_state_store import TradingStateStore
+from trading.data_providers.alpaca_data_provider import AlpacaDataProvider, TIMEFRAME_MAP
 from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
 
 
@@ -62,6 +63,73 @@ def _series_from_history(value_history: dict) -> list[dict]:
     for ts in sorted(value_history.keys()):
         series.append({"x": ts.isoformat(), "y": float(value_history[ts])})
     return series
+
+
+def _trading_days_from_history(value_history: dict) -> int:
+    return len({ts.date() for ts in value_history.keys()})
+
+
+def _fetch_spy_series(value_history: dict, session_metadata: dict) -> tuple[list[dict], str | None]:
+    if not value_history:
+        return [], None
+    cfg = ConfigManager()
+    alpaca_cfg = cfg.get("alpaca", {}) or {}
+    dp_cfg = cfg.get("data_provider", {}) or {}
+    api_key = os.getenv("ALPACA_API_KEY") or alpaca_cfg.get("api_key") or dp_cfg.get("api_key")
+    secret_key = os.getenv("ALPACA_SECRET_KEY") or alpaca_cfg.get("secret_key") or dp_cfg.get("secret_key")
+    if not api_key or not secret_key:
+        return [], "Missing Alpaca credentials for SPY fallback"
+
+    dates = sorted(value_history.keys())
+    timeframe = ((session_metadata or {}).get("timeframe") or "Minute")
+    if timeframe not in TIMEFRAME_MAP:
+        timeframe = "Minute"
+    try:
+        provider = AlpacaDataProvider({
+            "api_key": api_key,
+            "secret_key": secret_key,
+            "symbols": ["SPY"],
+            "timeframe": timeframe,
+            "start_date": dates[0].isoformat(sep=" "),
+            "end_date": dates[-1].isoformat(sep=" "),
+            "market_hours_only": True,
+        })
+        provider.load_data()
+    except Exception as exc:
+        return [], f"Failed to fetch SPY from Alpaca: {exc}"
+    df = provider.get_data()
+    if df is None or df.empty:
+        return [], "Alpaca returned no SPY bars for session range"
+    return [
+        {"x": row.timestamp.isoformat(), "y": float(row.close)}
+        for row in df.sort_values("timestamp").itertuples(index=False)
+    ], None
+
+
+def _spy_comparison(equity: list[dict], spy: list[dict], metrics: dict) -> dict:
+    if not equity or not spy:
+        return {}
+    start = datetime.fromisoformat(equity[0]["x"])
+    end = datetime.fromisoformat(equity[-1]["x"])
+    spy_window = [
+        item for item in spy
+        if start <= datetime.fromisoformat(item["x"]) <= end
+    ]
+    if not spy_window:
+        return {}
+    spy_return = ((spy_window[-1]["y"] - spy_window[0]["y"]) / spy_window[0]["y"]) * 100
+    portfolio_return = metrics.get("total_return_pct")
+    if portfolio_return is None:
+        first, last = equity[0]["y"], equity[-1]["y"]
+        portfolio_return = ((last - first) / first) * 100
+    return {
+        "_comparison": {
+            "portfolio_return_pct": portfolio_return,
+            "benchmark_return_pct": spy_return,
+            "alpha": portfolio_return - spy_return,
+            "outperformance": portfolio_return > spy_return,
+        }
+    }
 
 
 def _symbol_series_from_ticks(tick_history: dict) -> dict:
@@ -283,11 +351,28 @@ def session_data(session_id: str):
             metrics = engine.calculate_metrics()
         except Exception as exc:
             benchmark["_metrics_error"] = str(exc)
+        metrics = _json_safe(metrics) or {}
+        metrics["trading_days"] = _trading_days_from_history(pf_data["value_history"])
+        metrics["bars"] = len(pf_data["value_history"])
 
-        try:
-            benchmark.update(engine.calculate_benchmark_comparison())
-        except Exception as exc:
-            benchmark["_benchmark_error"] = str(exc)
+        symbols = _symbol_series_from_ticks(pf_data["tick_history"])
+        if "SPY" not in symbols:
+            spy_series, spy_error = _fetch_spy_series(
+                pf_data["value_history"],
+                (session or {}).get("metadata") or {},
+            )
+            if spy_series:
+                symbols["SPY"] = spy_series
+            elif spy_error:
+                benchmark["_spy_error"] = spy_error
+
+        equity = _series_from_history(pf_data["value_history"])
+        benchmark.update(_spy_comparison(equity, symbols.get("SPY", []), metrics))
+        if not benchmark.get("_comparison"):
+            try:
+                benchmark.update(engine.calculate_benchmark_comparison())
+            except Exception as exc:
+                benchmark["_benchmark_error"] = str(exc)
 
         filled_orders = list(order_data["filled_orders_by_id"].values())
         canceled_count = 0
@@ -306,16 +391,16 @@ def session_data(session_id: str):
         payload = {
             "session": _json_safe(session),
             "portfolio": {
-                "total_value": _series_from_history(pf_data["value_history"]),
+                "total_value": equity,
                 "cash": _series_from_history(pf_data["cash_history"]),
             },
-            "symbols": _symbol_series_from_ticks(pf_data["tick_history"]),
+            "symbols": symbols,
             "signals": _signal_payload(pf_data["signals_history"], pf_data["tick_history"]),
             "indicators": _reconstruct_indicator_series(
                 pf_data["tick_history"],
                 (session or {}).get("metadata") or {},
             ),
-            "metrics": _json_safe(metrics),
+            "metrics": metrics,
             "benchmark": _json_safe(benchmark),
             "trades": _trades_payload(trades),
             "orders": order_summary,

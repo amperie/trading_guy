@@ -33,6 +33,10 @@ function formatNum(value, digits = 2) {
   return value.toFixed(digits);
 }
 
+function tradingDays(series) {
+  return new Set((series || []).map((pt) => pt.x.slice(0, 10))).size;
+}
+
 function parseSeries(series) {
   return (series || []).map((pt) => ({ x: new Date(pt.x), y: pt.y }));
 }
@@ -125,6 +129,8 @@ function renderMetrics(metrics, benchmark) {
   $("metricProfitFactor").textContent = `Profit Factor ${fmt2(metrics.profit_factor)}`;
   $("metricTrades").textContent = metrics.total_trades != null ? `${metrics.total_trades}` : "--";
   $("metricAvgTrade").textContent = `Avg PnL ${formatMoney(metrics.avg_trade_pnl)}`;
+  $("metricTradingDays").textContent = metrics.trading_days != null ? `${metrics.trading_days}` : "--";
+  $("metricBars").textContent = metrics.bars != null ? `${metrics.bars} bars` : "--";
 
   if (benchmark && benchmark._comparison) {
     const alpha = benchmark._comparison.alpha ?? null;
@@ -268,6 +274,8 @@ function recomputeMetrics(equitySeries, trades) {
     profit_factor: profitFactor,
     total_trades: trades.length,
     avg_trade_pnl: avgTradePnl,
+    trading_days: tradingDays(equitySeries),
+    bars: equitySeries.length,
   };
 }
 
