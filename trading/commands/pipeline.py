@@ -229,6 +229,8 @@ def cmd_pipeline_research(args: argparse.Namespace):
         return_details=True,
     )
     stage_args.mlflow_experiment_name_override = _pipeline_experiment_name(raw_cfg, "walk_forward")
+    stage_args.walk_forward_num_trials_override = getattr(stage_args, "num_samples", None)
+    stage_args.walk_forward_max_concurrent_trials_override = getattr(stage_args, "max_concurrent_trials", None)
     walk_forward_result = cmd_walk_forward(stage_args)
     gate_report = evaluate_research_gates(raw_cfg, backtest_result, hpo_result, walk_forward_result)
 

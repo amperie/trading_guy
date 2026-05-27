@@ -531,6 +531,30 @@ class TradingStateStore:
             "signals_history": signals_history,
         }
 
+    def load_equity_history(
+        self,
+        session_id: str,
+        start: datetime = None,
+        end: datetime = None,
+    ) -> dict:
+        """Load only snapshot-derived equity/cash history for a session."""
+        query = {"session_id": session_id}
+        time_filter = self._time_filter(start, end)
+        if time_filter:
+            query["timestamp"] = time_filter
+
+        value_history = {}
+        cash_history = {}
+        for doc in self._snapshots.find(query).sort("timestamp", ASCENDING):
+            ts = doc["timestamp"]
+            value_history[ts] = doc["total_value"]
+            cash_history[ts] = doc["cash"]
+
+        return {
+            "value_history": value_history,
+            "cash_history": cash_history,
+        }
+
     def load_orders(
         self,
         session_id: str,

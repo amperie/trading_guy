@@ -4,6 +4,9 @@ const state = {
   charts: {},
   symbols: [],
   selectedSymbols: new Set(),
+  currentSessionId: null,
+  detailLoaded: false,
+  indicatorsLoaded: false,
 };
 
 const palette = [
@@ -105,6 +108,22 @@ function buildChart(id, config) {
   state.charts[id] = new Chart(ctx, config);
 }
 
+function mergeSessionData(base, patch) {
+  return {
+    ...base,
+    ...patch,
+    portfolio: { ...(base?.portfolio || {}), ...(patch?.portfolio || {}) },
+    symbols: patch?.symbols ?? base?.symbols ?? {},
+    signals: patch?.signals ?? base?.signals ?? [],
+    indicators: patch?.indicators ?? base?.indicators ?? { _config: {} },
+    trades: patch?.trades ?? base?.trades ?? [],
+    metrics: patch?.metrics ?? base?.metrics ?? {},
+    benchmark: patch?.benchmark ?? base?.benchmark ?? {},
+    orders: patch?.orders ?? base?.orders ?? {},
+    errors: { ...(base?.errors || {}), ...(patch?.errors || {}) },
+  };
+}
+
 function renderMetadata(session, orders) {
   $("metaAccount").textContent = session.account_id || "--";
   $("metaName").textContent = session.name || session._id || "--";
@@ -168,8 +187,12 @@ function renderSymbols(symbols) {
   filters.innerHTML = "";
   const entries = Object.keys(symbols).sort();
   state.symbols = entries;
-  state.selectedSymbols = new Set(entries.slice(0, 3));
-  if (entries.includes("SPY")) state.selectedSymbols.add("SPY");
+  const nextSelected = new Set([...state.selectedSymbols].filter((symbol) => entries.includes(symbol)));
+  if (!nextSelected.size) {
+    entries.slice(0, 3).forEach((symbol) => nextSelected.add(symbol));
+    if (entries.includes("SPY")) nextSelected.add("SPY");
+  }
+  state.selectedSymbols = nextSelected;
 
   entries.forEach((symbol) => {
     const btn = document.createElement("button");
@@ -357,6 +380,9 @@ function tooltipLabel(context) {
 
 function commonChartOptions(yTickCallback = null, yMin = null, yMax = null) {
   return {
+    animation: false,
+    normalized: true,
+    parsing: false,
     interaction: {
       mode: "nearest",
       intersect: false,
@@ -365,6 +391,11 @@ function commonChartOptions(yTickCallback = null, yMin = null, yMax = null) {
       legend: { labels: { color: "#c9d2ef" } },
       tooltip: { callbacks: { label: tooltipLabel } },
       zoom: zoomConfig("x"),
+      decimation: {
+        enabled: true,
+        algorithm: "min-max",
+        samples: 300,
+      },
     },
     scales: {
       x: { type: "time", ticks: { color: "#8d96b3" } },
@@ -674,9 +705,11 @@ function applyAndRender() {
 }
 
 function renderAll(data) {
-  state.raw = data;
-  const firstTs = data.portfolio.total_value[0]?.x;
-  const lastTs = data.portfolio.total_value[data.portfolio.total_value.length - 1]?.x;
+  state.raw = mergeSessionData(state.raw, data);
+  const portfolio = state.raw?.portfolio || {};
+  const totalValue = portfolio.total_value || [];
+  const firstTs = totalValue[0]?.x;
+  const lastTs = totalValue[totalValue.length - 1]?.x;
   if (firstTs) $("dateFrom").value = firstTs.slice(0, 10);
   if (lastTs) $("dateTo").value = lastTs.slice(0, 10);
   applyAndRender();
@@ -712,7 +745,14 @@ async function loadSessionList() {
 async function loadSession() {
   const sessionId = $("sessionId").value.trim();
   if (!sessionId) return;
-  $("status").textContent = "Loading session data...";
+  state.raw = null;
+  state.filtered = null;
+  state.symbols = [];
+  state.selectedSymbols = new Set();
+  state.currentSessionId = sessionId;
+  state.detailLoaded = false;
+  state.indicatorsLoaded = false;
+  $("status").textContent = "Loading session summary...";
   try {
     const db = $("dbName").value.trim();
     const url = db
@@ -725,9 +765,60 @@ async function loadSession() {
     }
     const data = await res.json();
     renderAll(data);
-    $("status").textContent = `Loaded ${sessionId}`;
+    $("status").textContent = `Loaded summary for ${sessionId}. Loading details...`;
+    const detailsUrl = db
+      ? `/api/session/${sessionId}/details?db=${encodeURIComponent(db)}`
+      : `/api/session/${sessionId}/details`;
+    const indicatorsUrl = db
+      ? `/api/session/${sessionId}/indicators?db=${encodeURIComponent(db)}`
+      : `/api/session/${sessionId}/indicators`;
+
+    loadSessionDetails(sessionId, detailsUrl);
+    loadSessionIndicators(sessionId, indicatorsUrl);
   } catch (err) {
     $("status").textContent = `Error: ${err.message}`;
+  }
+}
+
+async function loadSessionDetails(sessionId, url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const msg = await res.json();
+      throw new Error(msg.error || "Failed to load session details");
+    }
+    const data = await res.json();
+    if (state.currentSessionId !== sessionId) return;
+    state.detailLoaded = true;
+    renderAll(data);
+    $("status").textContent = state.indicatorsLoaded
+      ? `Loaded ${sessionId}`
+      : `Loaded charts and trades for ${sessionId}. Loading indicators...`;
+  } catch (err) {
+    if (state.currentSessionId !== sessionId) return;
+    $("status").textContent = `Loaded summary for ${sessionId}. Detail error: ${err.message}`;
+  }
+}
+
+async function loadSessionIndicators(sessionId, url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const msg = await res.json();
+      throw new Error(msg.error || "Failed to load indicators");
+    }
+    const data = await res.json();
+    if (state.currentSessionId !== sessionId) return;
+    state.indicatorsLoaded = true;
+    renderAll(data);
+    $("status").textContent = state.detailLoaded
+      ? `Loaded ${sessionId}`
+      : `Loaded summary for ${sessionId}. Waiting on details...`;
+  } catch (err) {
+    if (state.currentSessionId !== sessionId) return;
+    $("status").textContent = state.detailLoaded
+      ? `Loaded ${sessionId} without indicators: ${err.message}`
+      : `Loaded summary for ${sessionId}. Indicator error: ${err.message}`;
   }
 }
 

@@ -207,6 +207,7 @@ def run_backtest_core(
     portfolio_class: Type[Portfolio],
     data_provider_class: Type[DataProvider],
     order_manager_class: Type[OrderManager],
+    warmup_dp_cfg: dict | None = None,
     log_to_mlflow: bool = True,
 ) -> dict:
     """
@@ -239,6 +240,11 @@ def run_backtest_core(
     om = order_manager_class()
     al = _build_algorithm(algorithm_class, alg_cfg)
     dp = data_provider_class(dp_cfg)
+    if warmup_dp_cfg is not None and al.required_warmup_bars > 0:
+        warmup_dp = data_provider_class(warmup_dp_cfg)
+        warmup_ticks = list(warmup_dp.iterate())
+        if warmup_ticks:
+            al.warm_up(warmup_ticks)
     pf = portfolio_class(pf_cfg, om, starting_cash, {}, True)
 
     sim = BacktestingEngine({"state_store": {"enabled": False}}, dp, al, om, pf)
@@ -291,8 +297,14 @@ def run_backtest(
         Results dictionary from AnalysisEngine.run_full_analysis()
     """
     return run_backtest_core(
-        backtest_cfg, alg_cfg, pf_cfg, dp_cfg,
-        algorithm_class, portfolio_class, data_provider_class, order_manager_class
+        backtest_cfg,
+        alg_cfg,
+        pf_cfg,
+        dp_cfg,
+        algorithm_class,
+        portfolio_class,
+        data_provider_class,
+        order_manager_class,
     )
 
 def run_parallel_backtests(
@@ -358,6 +370,7 @@ def backtest_objective_fn(
     base_backtest_config: dict,
     algorithm_param_keys: list[str],
     portfolio_param_keys: list[str],
+    warmup_data_provider_config: dict | None = None,
     log_to_mlflow: bool = False,
 ) -> dict:
     """
@@ -392,7 +405,7 @@ def backtest_objective_fn(
 
     # Run backtest with merged configurations
     result = run_backtest_local(
-        backtest_cfg, alg_cfg, pf_cfg, dp_cfg,
+        backtest_cfg, alg_cfg, pf_cfg, dp_cfg, warmup_data_provider_config,
         algorithm_class, portfolio_class, data_provider_class, order_manager_class,
         log_to_mlflow=log_to_mlflow,
     )
@@ -405,6 +418,7 @@ def run_backtest_local(
     alg_cfg: dict,
     pf_cfg: dict,
     dp_cfg: dict,
+    warmup_dp_cfg: dict | None = None,
     algorithm_class: Type[Algorithm] = MacdRsiAlgorithm,
     portfolio_class: Type[Portfolio] = SingleSymbolPortfolio,
     data_provider_class: Type[DataProvider] = TestDataProvider,
@@ -428,8 +442,15 @@ def run_backtest_local(
         Results dictionary from AnalysisEngine.run_full_analysis()
     """
     return run_backtest_core(
-        backtest_cfg, alg_cfg, pf_cfg, dp_cfg,
-        algorithm_class, portfolio_class, data_provider_class, order_manager_class,
+        backtest_cfg,
+        alg_cfg,
+        pf_cfg,
+        dp_cfg,
+        algorithm_class,
+        portfolio_class,
+        data_provider_class,
+        order_manager_class,
+        warmup_dp_cfg=warmup_dp_cfg,
         log_to_mlflow=log_to_mlflow,
     )
 
@@ -551,6 +572,7 @@ def tune_backtest_hyperparameters(
     log_to_mlflow: bool = False,
     log_ray_worker_output: bool = True,
     return_trial_summaries: bool = False,
+    warmup_data_provider_config: dict | None = None,
 ) -> dict | tuple[dict, list[dict]]:
     """
     Generic hyperparameter optimization using Ray Tune with Optuna.
@@ -611,6 +633,7 @@ def tune_backtest_hyperparameters(
             base_algorithm_config=base_algorithm_config,
             base_portfolio_config=base_portfolio_config,
             base_data_provider_config=base_data_provider_config,
+            warmup_data_provider_config=warmup_data_provider_config,
             base_backtest_config=base_backtest_config,
             algorithm_param_keys=algorithm_param_keys,
             portfolio_param_keys=portfolio_param_keys,

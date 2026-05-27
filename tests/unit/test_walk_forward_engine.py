@@ -180,7 +180,8 @@ def test_evaluate_period_compares_with_portfolio_params(monkeypatch):
     captured = []
 
     monkeypatch.setattr(engine, "_create_dp_for_range", lambda start, end: f"{start.date()}->{end.date()}")
-    monkeypatch.setattr(engine, "_run_optimization", lambda dp: {"alpha": 2, "risk": 9})
+    monkeypatch.setattr(engine, "_get_date_range", lambda: (datetime(2023, 12, 1), datetime(2024, 3, 1)))
+    monkeypatch.setattr(engine, "_run_optimization", lambda dp, warmup_dp=None: {"alpha": 2, "risk": 9})
 
     def fake_run_backtest(al_cfg, pf_cfg, dp, warmup_dp=None):
         captured.append((dict(al_cfg), dict(pf_cfg), dp, warmup_dp))
@@ -235,7 +236,7 @@ def test_evaluate_period_compares_with_portfolio_params(monkeypatch):
     current_al_cfg = {"alpha": 1}
     current_pf_cfg = {"symbol": "SPY", "cash": 1000.0, "keep_history": True, "risk": 1}
 
-    result = engine._evaluate_period(1, period, current_al_cfg, current_pf_cfg)
+    result = engine._evaluate_period(0, period, current_al_cfg, current_pf_cfg)
 
     assert captured[0][1]["risk"] == 1
     assert captured[1][1]["risk"] == 9
@@ -245,6 +246,26 @@ def test_evaluate_period_compares_with_portfolio_params(monkeypatch):
     assert result["adopted"] is True
     assert result["pf_cfg"]["risk"] == 9
     assert result["decision"]["challenger_metric"] == 25.0
+
+
+def test_run_optimization_passes_warmup_provider_config(monkeypatch):
+    engine = _build_engine()
+    captured = {}
+
+    def fake_tune(**kwargs):
+        captured.update(kwargs)
+        return {"alpha": 2}
+
+    monkeypatch.setattr("trading.launchers.run_backtest_ray.tune_backtest_hyperparameters", fake_tune)
+
+    result = engine._run_optimization(
+        SimpleNamespace(cfg={"path": "opt.csv"}),
+        warmup_dp=SimpleNamespace(cfg={"path": "warmup.csv"}),
+    )
+
+    assert result == {"alpha": 2}
+    assert captured["base_data_provider_config"] == {"path": "opt.csv"}
+    assert captured["warmup_data_provider_config"] == {"path": "warmup.csv"}
 
 
 def test_apply_config_supports_nested_algorithm_keys():
@@ -474,6 +495,9 @@ def test_log_full_run_to_mlflow_uses_full_analysis_logging(monkeypatch):
         def run_id(self):
             return self._run_id
 
+        def get_run_url(self):
+            return None
+
         def __enter__(self):
             return self
 
@@ -507,14 +531,14 @@ def test_log_full_run_to_mlflow_uses_full_analysis_logging(monkeypatch):
     monkeypatch.setattr(engine, "_log_optimization_events_artifacts", lambda client, rows: captured.setdefault("events", rows))
     monkeypatch.setattr(engine, "_plot_equity_with_events", lambda analysis, plans: "wf-events-figure")
 
-    run_id = engine._log_full_run_to_mlflow(
+    run_info = engine._log_full_run_to_mlflow(
         analysis=FakeAnalysis(),
         analysis_results={"metrics": SimpleNamespace(total_return_pct=2.0), "report": "wf report"},
         plans=[],
         aggregate={"num_periods": 1, "wf_annualized_return": 3.0},
     )
 
-    assert run_id == "run-123"
+    assert run_info == {"run_id": "run-123", "run_url": None}
     assert captured["tags"] == {"run_type": "walk_forward_window_winner"}
     assert captured["analysis_log_kwargs"]["start_new_run"] is False
     assert captured["analysis_log_kwargs"]["parameters"]["config.mode"] == "walk-forward"
@@ -524,6 +548,69 @@ def test_log_full_run_to_mlflow_uses_full_analysis_logging(monkeypatch):
     assert captured["metrics"] == [{"num_periods": 1, "wf_annualized_return": 3.0}]
     assert ("window_summary.json", {"best_metric": 1.2}) in captured["json"]
     assert "walk_forward_equity_with_events" in captured["charts"]
+
+
+def test_log_full_run_to_mlflow_keeps_run_when_artifact_logging_fails(monkeypatch):
+    engine = _build_engine({"log_to_mlflow": True})
+    captured = {"warnings": []}
+
+    class FakeClient:
+        enabled = True
+
+        def __init__(self):
+            self._run_id = None
+
+        def start_run(self, run_name=None, description=None):
+            self._run_id = "run-123"
+            return self
+
+        @property
+        def run_id(self):
+            return self._run_id
+
+        def get_run_url(self):
+            return "http://mlflow/run-123"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
+
+        def log_metrics(self, metrics):
+            captured["metrics"] = metrics
+
+        def log_text(self, text, filename):
+            raise RuntimeError("artifact failed")
+
+        def log_chart(self, figure, filename, format="png", dpi=150):
+            captured.setdefault("charts", []).append(filename)
+
+    class FakeAnalysis:
+        def log_to_mlflow(self, **kwargs):
+            captured["analysis"] = True
+
+        def plot_equity_curve(self, show=False):
+            return "equity-figure"
+
+    monkeypatch.setattr(engine, "_create_mlflow_client", lambda: FakeClient())
+    monkeypatch.setattr(engine, "_build_optimization_events_rows", lambda plans: [])
+    monkeypatch.setattr(engine, "_log_optimization_events_artifacts", lambda client, rows: captured.setdefault("events", True))
+    monkeypatch.setattr(engine, "_plot_equity_with_events", lambda analysis, plans: "wf-events-figure")
+    monkeypatch.setattr(wf_module.logger, "warning", lambda message: captured["warnings"].append(message))
+
+    run_info = engine._log_full_run_to_mlflow(
+        analysis=FakeAnalysis(),
+        analysis_results={"metrics": SimpleNamespace(total_return_pct=2.0), "report": "wf report"},
+        plans=[],
+        aggregate={"num_periods": 1},
+    )
+
+    assert run_info == {"run_id": "run-123", "run_url": "http://mlflow/run-123"}
+    assert captured["metrics"] == {"num_periods": 1}
+    assert "equity_curve" in captured["charts"]
+    assert "walk_forward_equity_with_events" in captured["charts"]
+    assert any("report" in warning for warning in captured["warnings"])
 
 
 def test_continuous_backtest_activates_all_plans_with_none_event_ids(monkeypatch):
@@ -797,14 +884,16 @@ def test_backtest_objective_fn_supports_nested_algorithm_keys(monkeypatch):
         alg_cfg,
         pf_cfg,
         dp_cfg,
-        algorithm_class,
-        portfolio_class,
-        data_provider_class,
-        order_manager_class,
+        warmup_dp_cfg=None,
+        algorithm_class=None,
+        portfolio_class=None,
+        data_provider_class=None,
+        order_manager_class=None,
         log_to_mlflow=True,
     ):
         captured["alg_cfg"] = alg_cfg
         captured["pf_cfg"] = pf_cfg
+        captured["warmup_dp_cfg"] = warmup_dp_cfg
         captured["log_to_mlflow"] = log_to_mlflow
         return {"metrics": SimpleNamespace(annualized_return=1.23)}
 
@@ -820,6 +909,7 @@ def test_backtest_objective_fn_supports_nested_algorithm_keys(monkeypatch):
         base_algorithm_config={"regime": {"alpha": 1, "beta": 2}},
         base_portfolio_config={"stop_pct": 1.0, "profit_pct": 4.0},
         base_data_provider_config={"path": "ignored"},
+        warmup_data_provider_config={"path": "warmup"},
         base_backtest_config={"run_name": "wf-run"},
         algorithm_param_keys=["regime.alpha"],
         portfolio_param_keys=["stop_pct"],
@@ -828,6 +918,7 @@ def test_backtest_objective_fn_supports_nested_algorithm_keys(monkeypatch):
     assert result == {"_metric": 1.23}
     assert captured["alg_cfg"] == {"regime": {"alpha": 8, "beta": 2}}
     assert captured["pf_cfg"] == {"stop_pct": 3.5, "profit_pct": 4.0}
+    assert captured["warmup_dp_cfg"] == {"path": "warmup"}
     assert captured["log_to_mlflow"] is False
 
 

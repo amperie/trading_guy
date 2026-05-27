@@ -380,10 +380,14 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
 
     def fake_hpo(raw_cfg, **kwargs):
         calls["hpo_experiment"] = raw_cfg["analysis"]["experiment_name"]
+        calls["hpo_num_samples_override"] = kwargs["num_samples_override"]
+        calls["hpo_max_concurrent_override"] = kwargs["max_concurrent_override"]
         return {"val_results": {"metrics": _Metrics(annualized_return=0, max_drawdown_pct=0, total_trades=0)}}
 
     def fake_cmd_walk_forward(args):
         calls["walk_forward_experiment"] = args.mlflow_experiment_name_override
+        calls["walk_forward_num_trials_override"] = args.walk_forward_num_trials_override
+        calls["walk_forward_max_concurrent_trials_override"] = args.walk_forward_max_concurrent_trials_override
         return {"aggregate": {}}
 
     monkeypatch.setattr(pipeline_cmd, "cmd_backtest", fake_cmd_backtest)
@@ -403,8 +407,8 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
         SimpleNamespace(
             config="configs/example_hpo_split.yaml",
             account="paper3",
-            num_samples=None,
-            max_concurrent_trials=None,
+            num_samples=20,
+            max_concurrent_trials=4,
             validation_period_days=None,
             name=None,
         )
@@ -413,7 +417,11 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
     assert calls == {
         "backtest_experiment": "Pipeline HPO",
         "hpo_experiment": "Pipeline HPO Split",
+        "hpo_num_samples_override": 20,
+        "hpo_max_concurrent_override": 4,
         "walk_forward_experiment": "Pipeline Walk-Forward",
+        "walk_forward_num_trials_override": 20,
+        "walk_forward_max_concurrent_trials_override": 4,
     }
 
 

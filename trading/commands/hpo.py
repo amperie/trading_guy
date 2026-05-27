@@ -352,6 +352,16 @@ def _normalize_split_objective_metric(objective_metric: str | None) -> str:
     return value
 
 
+def _prefixed_metrics_dict(metrics: Any, prefix: str) -> dict[str, float]:
+    payload: dict[str, float] = {}
+    for key, value in vars(metrics).items():
+        if isinstance(value, (int, float)):
+            numeric = float(value)
+            if math.isfinite(numeric):
+                payload[f"{prefix}{key}"] = numeric
+    return payload
+
+
 @ray.remote
 def _score_split_validation_trial_remote(
     *,
@@ -739,6 +749,11 @@ def run_hpo_split_from_raw_config(
                 artifact_prefix="val_",
                 artifact_paths=artifact_paths,
                 warmup_dp_cfg=val_warmup_dp_cfg,
+            )
+            mlflow_client.log_metrics(
+                _prefixed_metrics_dict(train_results["metrics"], "trn_")
+                | _prefixed_metrics_dict(val_results["metrics"], "val_")
+                | {"objective_value": float(selected_objective_value)}
             )
     else:
         train_results = _run_backtest_analysis(

@@ -266,7 +266,7 @@ class WalkForwardEngine(BaseEngine):
             "analysis_engine": analysis,
         }
 
-    def _run_optimization(self, opt_dp: DataProvider) -> dict:
+    def _run_optimization(self, opt_dp: DataProvider, warmup_dp: DataProvider | None = None) -> dict:
         from trading.launchers.run_backtest_ray import tune_backtest_hyperparameters
 
         return tune_backtest_hyperparameters(
@@ -278,6 +278,7 @@ class WalkForwardEngine(BaseEngine):
             base_algorithm_config=copy.deepcopy(self.original_al_cfg),
             base_portfolio_config=copy.deepcopy(self.original_pf_cfg),
             base_data_provider_config=copy.deepcopy(opt_dp.cfg),
+            warmup_data_provider_config=copy.deepcopy(warmup_dp.cfg) if warmup_dp is not None else None,
             base_backtest_config=self._base_backtest_cfg,
             search_space=self._parse_search_space(),
             algorithm_param_keys=self.algorithm_param_keys,
@@ -301,45 +302,46 @@ class WalkForwardEngine(BaseEngine):
         current_pf_cfg: dict,
     ) -> dict[str, Any]:
         opt_dp = self._create_dp_for_range(period.optimization_start, period.optimization_end)
+        data_start, _ = self._get_date_range()
+        optimization_warmup_dp = (
+            self._create_dp_for_range(data_start, period.optimization_start)
+            if data_start < period.optimization_start
+            else None
+        )
+        validation_dp = self._create_dp_for_range(period.validation_start, period.validation_end)
+        validation_warmup_dp = self._create_dp_for_range(period.optimization_start, period.validation_start)
         logger.info("Running HPO optimization...")
-        best_config = self._run_optimization(opt_dp)
+        best_config = self._run_optimization(opt_dp, warmup_dp=optimization_warmup_dp)
         challenger_al_cfg, challenger_pf_cfg = self._apply_config(best_config)
         logger.info(f"HPO best config: {best_config}")
 
-        decision: WalkForwardDecision | None = None
-        incumbent_metrics = None
-        challenger_metrics = None
-        adopted = True
-        if period_idx > 0:
-            incumbent_result = self._run_backtest(
-                current_al_cfg,
-                current_pf_cfg,
-                self._create_dp_for_range(period.validation_start, period.validation_end),
-                warmup_dp=self._create_dp_for_range(period.optimization_start, period.validation_start),
-            )
-            challenger_result = self._run_backtest(
-                challenger_al_cfg,
-                challenger_pf_cfg,
-                self._create_dp_for_range(period.validation_start, period.validation_end),
-                warmup_dp=self._create_dp_for_range(period.optimization_start, period.validation_start),
-            )
-            incumbent_metrics = incumbent_result["metrics"]
-            challenger_metrics = challenger_result["metrics"]
-            decision = decide_walk_forward_adoption(
-                incumbent_metrics,
-                challenger_metrics,
-                objective_metric=self.objective_metric,
-                improvement_threshold_pct=self.improvement_threshold_pct,
-                min_validation_trades=self.min_validation_trades,
-            )
-            adopted = decision.adopted
-            logger.info(
-                f"Validation decision: incumbent={decision.incumbent_metric:.4f}, "
-                f"challenger={decision.challenger_metric:.4f}, "
-                f"improvement={decision.improvement_pct:.2f}% reason={decision.reason}"
-            )
-        else:
-            logger.info("First period - adopting HPO params unconditionally")
+        incumbent_result = self._run_backtest(
+            current_al_cfg,
+            current_pf_cfg,
+            validation_dp,
+            warmup_dp=validation_warmup_dp,
+        )
+        challenger_result = self._run_backtest(
+            challenger_al_cfg,
+            challenger_pf_cfg,
+            validation_dp,
+            warmup_dp=validation_warmup_dp,
+        )
+        incumbent_metrics = incumbent_result["metrics"]
+        challenger_metrics = challenger_result["metrics"]
+        decision = decide_walk_forward_adoption(
+            incumbent_metrics,
+            challenger_metrics,
+            objective_metric=self.objective_metric,
+            improvement_threshold_pct=self.improvement_threshold_pct,
+            min_validation_trades=self.min_validation_trades,
+        )
+        adopted = decision.adopted
+        logger.info(
+            f"Validation decision: incumbent={decision.incumbent_metric:.4f}, "
+            f"challenger={decision.challenger_metric:.4f}, "
+            f"improvement={decision.improvement_pct:.2f}% reason={decision.reason}"
+        )
 
         trade_al_cfg = challenger_al_cfg if adopted else current_al_cfg
         trade_pf_cfg = challenger_pf_cfg if adopted else current_pf_cfg
@@ -667,6 +669,12 @@ class WalkForwardEngine(BaseEngine):
 
         metrics = analysis_results["metrics"]
         event_rows = self._build_optimization_events_rows(plans)
+
+        def _try_log(label: str, fn) -> None:
+            try:
+                fn()
+            except Exception as exc:
+                logger.warning(f"Failed to log walk-forward {label} to MLflow: {exc}")
         try:
             with mlflow_client.start_run(
                 run_name=self.run_name,
@@ -674,7 +682,7 @@ class WalkForwardEngine(BaseEngine):
             ):
                 run_info = {"run_id": mlflow_client.run_id or "", "run_url": mlflow_client.get_run_url()}
                 if self.mlflow_tags:
-                    mlflow_client.set_tags(self.mlflow_tags)
+                    _try_log("tags", lambda: mlflow_client.set_tags(self.mlflow_tags))
                 parameters = {
                     **self.mlflow_parameters,
                     "optimization_window_days": self.optimization_window_days,
@@ -688,40 +696,52 @@ class WalkForwardEngine(BaseEngine):
                 }
                 if self.benchmark_paths:
                     analysis._benchmark_paths = self.benchmark_paths
-                analysis.log_to_mlflow(
-                    run_name=self.run_name,
-                    description=self.description or f"Walk-forward backtest with {len(plans)} periods",
-                    parameters=parameters,
-                    log_charts=True,
-                    log_trades=True,
-                    log_signals=True,
-                    log_report=True,
-                    chart_dpi=150,
-                    artifact_paths=self.mlflow_artifact_paths,
-                    mlflow_client=mlflow_client,
-                    start_new_run=False,
+                _try_log(
+                    "analysis",
+                    lambda: analysis.log_to_mlflow(
+                        run_name=self.run_name,
+                        description=self.description or f"Walk-forward backtest with {len(plans)} periods",
+                        parameters=parameters,
+                        log_charts=True,
+                        log_trades=True,
+                        log_signals=True,
+                        log_report=True,
+                        chart_dpi=150,
+                        artifact_paths=self.mlflow_artifact_paths,
+                        mlflow_client=mlflow_client,
+                        start_new_run=False,
+                    ),
                 )
-                mlflow_client.log_metrics(
-                    {
-                        key: value
-                        for key, value in aggregate.items()
-                        if isinstance(value, (int, float)) and value is not None
-                    }
+                _try_log(
+                    "aggregate metrics",
+                    lambda: mlflow_client.log_metrics(
+                        {
+                            key: value
+                            for key, value in aggregate.items()
+                            if isinstance(value, (int, float)) and value is not None
+                        }
+                    ),
                 )
-                mlflow_client.log_text(analysis_results["report"], "walk_forward_report.txt")
-                mlflow_client.log_chart(analysis.plot_equity_curve(show=False), "equity_curve", format="png", dpi=150)
-                mlflow_client.log_chart(
-                    self._plot_equity_with_events(analysis, plans),
-                    "walk_forward_equity_with_events",
-                    format="png",
-                    dpi=150,
+                _try_log("report", lambda: mlflow_client.log_text(analysis_results["report"], "walk_forward_report.txt"))
+                _try_log(
+                    "equity curve chart",
+                    lambda: mlflow_client.log_chart(analysis.plot_equity_curve(show=False), "equity_curve", format="png", dpi=150),
                 )
-                self._log_optimization_events_artifacts(mlflow_client, event_rows)
+                _try_log(
+                    "equity with events chart",
+                    lambda: mlflow_client.log_chart(
+                        self._plot_equity_with_events(analysis, plans),
+                        "walk_forward_equity_with_events",
+                        format="png",
+                        dpi=150,
+                    ),
+                )
+                _try_log("optimization event artifacts", lambda: self._log_optimization_events_artifacts(mlflow_client, event_rows))
                 for filename, payload in self.extra_mlflow_json_artifacts.items():
-                    mlflow_client.log_json(payload, filename)
+                    _try_log(f"json artifact '{filename}'", lambda filename=filename, payload=payload: mlflow_client.log_json(payload, filename))
                 return run_info
         except Exception as exc:
-            logger.warning(f"Failed to log walk-forward run to MLflow: {exc}")
+            logger.warning(f"Failed to start walk-forward MLflow run: {exc}")
             return None
 
     def run(self):

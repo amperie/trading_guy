@@ -375,6 +375,7 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
         def __init__(self, experiment_name=None, tracking_uri=None):
             self.experiment_name = experiment_name
             self.tracking_uri = tracking_uri
+            self.run_id = "run-123"
 
         def start_run(self, run_name=None, description=None, tags=None):
             mlflow_events.append(("start_run", run_name, description, tags))
@@ -390,6 +391,12 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
 
         def log_json(self, data, filename):
             mlflow_events.append(("log_json", filename, data))
+
+        def log_metrics(self, metrics):
+            mlflow_events.append(("log_metrics", metrics))
+
+        def get_run_url(self):
+            return "http://mlflow.local/#/experiments/1/runs/run-123"
 
     monkeypatch.setattr(
         "trading.launchers.run_backtest_ray.tune_backtest_hyperparameters",
@@ -423,3 +430,7 @@ def test_cmd_hpo_split_logs_train_and_validation_with_prefixes(monkeypatch):
     assert calls[1]["parameters"]["hpo.validation_period_days"] == 15
     assert calls[1]["parameters"]["hpo.objective_metric"] == "val_annualized_return"
     assert any(event[0] == "log_json" and event[1] == "hpo_best_config.json" for event in mlflow_events)
+    metrics_event = next(event for event in mlflow_events if event[0] == "log_metrics")
+    assert metrics_event[1]["trn_annualized_return"] == pytest.approx(1.23)
+    assert metrics_event[1]["val_annualized_return"] == pytest.approx(1.23)
+    assert metrics_event[1]["objective_value"] == pytest.approx(1.23)

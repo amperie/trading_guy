@@ -229,7 +229,13 @@ def test_cmd_walk_forward_passes_mlflow_settings(monkeypatch):
 
     monkeypatch.setattr(walk_forward_cmd, "WalkForwardEngine", fake_engine)
 
-    args = SimpleNamespace(config="cfg.yaml", account="paper", session_id=None)
+    args = SimpleNamespace(
+        config="cfg.yaml",
+        account="paper",
+        session_id=None,
+        walk_forward_num_trials_override=20,
+        walk_forward_max_concurrent_trials_override=4,
+    )
     walk_forward_cmd.cmd_walk_forward(args)
 
     assert captured["engine"].kwargs["cfg"]["log_to_mlflow"] is False
@@ -237,6 +243,8 @@ def test_cmd_walk_forward_passes_mlflow_settings(monkeypatch):
     assert captured["engine"].kwargs["cfg"]["mlflow_parameters"] == {"config.mode": "walk-forward"}
     assert captured["engine"].kwargs["cfg"]["mlflow_artifact_paths"] == ["cfg.yaml", "runtime.yaml"]
     assert captured["engine"].kwargs["cfg"]["mlflow_tags"] == {"git.commit": "abc123"}
+    assert captured["engine"].kwargs["cfg"]["walk_forward"]["num_trials"] == 20
+    assert captured["engine"].kwargs["cfg"]["walk_forward"]["max_concurrent_trials"] == 4
 
 
 def test_cmd_walk_forward_hpo_passes_window_hpo_settings(monkeypatch):

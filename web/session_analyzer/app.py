@@ -3,6 +3,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 import math
 from collections import defaultdict, deque
+from types import SimpleNamespace
 
 from flask import Flask, jsonify, render_template, request
 
@@ -13,6 +14,17 @@ from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
 
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+SUMMARY_MAX_POINTS = 2000
+DETAIL_MAX_POINTS = 1500
+SIGNAL_MAX_POINTS = 2000
+
+
+def _max_points_arg(name: str, default: int) -> int:
+    try:
+        value = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return max(100, min(value, 10000))
 
 
 def _get_mongo_params(db: str = None) -> tuple[str, str]:
@@ -65,8 +77,72 @@ def _series_from_history(value_history: dict) -> list[dict]:
     return series
 
 
+def _downsample_points(points: list[dict], max_points: int) -> list[dict]:
+    if max_points <= 0 or len(points) <= max_points:
+        return points
+    step = max(1, math.ceil((len(points) - 2) / max(1, max_points - 2)))
+    sampled = [points[0], *points[1:-1:step], points[-1]]
+    return sampled[: max_points - 1] + [points[-1]] if len(sampled) > max_points else sampled
+
+
+def _downsample_series_map(series_map: dict[str, list[dict]], max_points: int) -> dict[str, list[dict]]:
+    return {symbol: _downsample_points(series, max_points) for symbol, series in series_map.items()}
+
+
 def _trading_days_from_history(value_history: dict) -> int:
     return len({ts.date() for ts in value_history.keys()})
+
+
+def _metrics_from_equity(equity: list[dict]) -> dict:
+    if not equity:
+        return {}
+    values = [float(pt["y"]) for pt in equity]
+    first = values[0]
+    last = values[-1]
+    total_return = ((last - first) / first) * 100 if first else 0.0
+
+    peak = -math.inf
+    max_dd = 0.0
+    returns = []
+    for idx, value in enumerate(values):
+        peak = max(peak, value)
+        if peak:
+            max_dd = min(max_dd, ((value - peak) / peak) * 100)
+        if idx:
+            prev = values[idx - 1]
+            if prev:
+                returns.append(((value - prev) / prev) * 100)
+
+    mean = sum(returns) / len(returns) if returns else 0.0
+    variance = sum((r - mean) ** 2 for r in returns) / len(returns) if returns else 0.0
+    std = math.sqrt(variance)
+    downside = [r for r in returns if r < 0]
+    downside_std = math.sqrt(sum(r * r for r in downside) / len(downside)) if downside else 0.0
+    sharpe = (mean / std) * math.sqrt(252) if std else None
+    sortino = (mean / downside_std) * math.sqrt(252) if downside_std else None
+
+    start = datetime.fromisoformat(equity[0]["x"])
+    end = datetime.fromisoformat(equity[-1]["x"])
+    years = (end - start).total_seconds() / (365.25 * 24 * 3600) if end > start else 0.0
+    annualized = ((last / first) ** (1 / years) - 1) * 100 if years > 0 and first > 0 and last > 0 else total_return
+    calmar = annualized / abs(max_dd) if max_dd else None
+    trading_days = len({pt["x"][:10] for pt in equity})
+
+    return {
+        "total_return_pct": total_return,
+        "annualized_return": annualized,
+        "sharpe_ratio": sharpe,
+        "sortino_ratio": sortino,
+        "max_drawdown_pct": max_dd,
+        "calmar_ratio": calmar,
+        "volatility": std * math.sqrt(252),
+        "win_rate": None,
+        "profit_factor": None,
+        "total_trades": None,
+        "avg_trade_pnl": None,
+        "trading_days": trading_days,
+        "bars": len(equity),
+    }
 
 
 def _fetch_spy_series(value_history: dict, session_metadata: dict) -> tuple[list[dict], str | None]:
@@ -132,17 +208,17 @@ def _spy_comparison(equity: list[dict], spy: list[dict], metrics: dict) -> dict:
     }
 
 
-def _symbol_series_from_ticks(tick_history: dict) -> dict:
+def _symbol_series_from_ticks(tick_history: dict, max_points: int = DETAIL_MAX_POINTS) -> dict:
     symbol_series = {}
     for ts in sorted(tick_history.keys()):
         for pd in tick_history[ts]:
             symbol_series.setdefault(pd.symbol, []).append(
                 {"x": ts.isoformat(), "y": float(pd.close)}
             )
-    return symbol_series
+    return _downsample_series_map(symbol_series, max_points)
 
 
-def _signal_payload(signals_history: dict, tick_history: dict) -> list[dict]:
+def _signal_payload(signals_history: dict, tick_history: dict, max_points: int = SIGNAL_MAX_POINTS) -> list[dict]:
     price_lookup = {}
     for ts, tick in tick_history.items():
         for pd in tick:
@@ -161,7 +237,7 @@ def _signal_payload(signals_history: dict, tick_history: dict) -> list[dict]:
                     "metadata": _json_safe(sig.metadata or {}),
                 }
             )
-    return payload
+    return _downsample_points(payload, max_points)
 
 
 def _calc_percentile(values: list[float], percentile: float) -> float | None:
@@ -172,7 +248,7 @@ def _calc_percentile(values: list[float], percentile: float) -> float | None:
     return float(sorted_vals[index])
 
 
-def _reconstruct_indicator_series(tick_history: dict, session_metadata: dict) -> dict:
+def _reconstruct_indicator_series(tick_history: dict, session_metadata: dict, max_points: int = DETAIL_MAX_POINTS) -> dict:
     algo_cfg = (session_metadata or {}).get("algorithm_config") or {}
     regime_cfg = algo_cfg.get("regime_detection") or {}
     rsi_cfg = algo_cfg.get("rsi_config") or {}
@@ -272,7 +348,10 @@ def _reconstruct_indicator_series(tick_history: dict, session_metadata: dict) ->
                     if atr_pct is not None:
                         symbol_payload["atr_percentile"].append({"x": x, "y": atr_pct})
 
-        indicators[symbol] = symbol_payload
+        indicators[symbol] = {
+            key: _downsample_points(series, max_points)
+            for key, series in symbol_payload.items()
+        }
 
     return indicators
 
@@ -296,6 +375,42 @@ def _trades_payload(trades: list) -> list[dict]:
             }
         )
     return payload
+
+
+def _build_analyzer_from_data(pf_data: dict, order_data: dict, session_metadata: dict) -> PortfolioAnalyzer:
+    sorted_ts = sorted(pf_data["value_history"]) if pf_data["value_history"] else []
+    pf_shell = SimpleNamespace(
+        keep_history=True,
+        tick_history=pf_data["tick_history"],
+        value_history=pf_data["value_history"],
+        cash_history=pf_data["cash_history"],
+        signals_history=pf_data["signals_history"],
+        total_value=pf_data["value_history"][sorted_ts[-1]] if sorted_ts else 0.0,
+        cash=pf_data["cash_history"][sorted_ts[-1]] if sorted_ts else 0.0,
+        positions={},
+    )
+    om_shell = SimpleNamespace(
+        filled_orders_by_id=order_data["filled_orders_by_id"],
+        pending_orders_by_id=order_data["pending_orders_by_id"],
+    )
+    pf_shell.om = om_shell
+    analyzer = PortfolioAnalyzer(pf_shell)
+    analyzer._session_metadata = session_metadata or {}
+    return analyzer
+
+
+def _order_summary(order_data: dict) -> dict:
+    canceled_count = sum(
+        1
+        for order in order_data["filled_orders_by_id"].values()
+        if getattr(getattr(order, "status", None), "name", str(getattr(order, "status", ""))) == "CANCELED"
+    )
+    return {
+        "total": len(order_data["all_orders"]),
+        "filled": len(order_data["filled_orders_by_id"]),
+        "pending": len(order_data["pending_orders_by_id"]),
+        "canceled": canceled_count,
+    }
 
 
 @app.route("/")
@@ -325,7 +440,44 @@ def list_sessions():
 
 
 @app.route("/api/session/<session_id>")
-def session_data(session_id: str):
+def session_summary(session_id: str):
+    try:
+        db = request.args.get("db") or None
+        store = _get_state_store(db=db)
+        session = store.get_session(session_id)
+        if session is None:
+            return jsonify({"error": f"Session not found: {session_id}"}), 404
+
+        history = store.load_equity_history(session_id)
+        order_data = store.load_orders(session_id)
+        equity_full = _series_from_history(history["value_history"])
+        cash_full = _series_from_history(history["cash_history"])
+        equity = _downsample_points(equity_full, _max_points_arg("points", SUMMARY_MAX_POINTS))
+        cash = _downsample_points(cash_full, _max_points_arg("points", SUMMARY_MAX_POINTS))
+        metrics = _metrics_from_equity(equity_full)
+
+        payload = {
+            "session": _json_safe(session),
+            "portfolio": {
+                "total_value": equity,
+                "cash": cash,
+            },
+            "symbols": {},
+            "signals": [],
+            "indicators": {"_config": {}},
+            "metrics": _json_safe(metrics),
+            "benchmark": {},
+            "trades": [],
+            "orders": _order_summary(order_data),
+            "errors": {},
+        }
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/session/<session_id>/details")
+def session_details(session_id: str):
     try:
         db = request.args.get("db") or None
         store = _get_state_store(db=db)
@@ -335,78 +487,68 @@ def session_data(session_id: str):
 
         pf_data = store.load_portfolio_history(session_id)
         order_data = store.load_orders(session_id)
-        uri, resolved_db = _get_mongo_params(db)
-        engine = PortfolioAnalyzer.from_mongodb(session_id, connection_uri=uri, database=resolved_db)
+        metadata = (session or {}).get("metadata") or {}
+        analyzer = _build_analyzer_from_data(pf_data, order_data, metadata)
+        point_limit = _max_points_arg("points", DETAIL_MAX_POINTS)
+        signal_limit = _max_points_arg("signal_points", SIGNAL_MAX_POINTS)
 
         trades = []
         metrics = {}
-        benchmark = {}
-
+        errors = {}
         try:
-            trades = engine.extract_trades()
+            trades = analyzer.extract_trades()
         except Exception as exc:
-            benchmark["_trades_error"] = str(exc)
-
+            errors["trades"] = str(exc)
         try:
-            metrics = engine.calculate_metrics()
+            metrics = _json_safe(analyzer.calculate_metrics()) or {}
         except Exception as exc:
-            benchmark["_metrics_error"] = str(exc)
-        metrics = _json_safe(metrics) or {}
-        metrics["trading_days"] = _trading_days_from_history(pf_data["value_history"])
-        metrics["bars"] = len(pf_data["value_history"])
+            errors["metrics"] = str(exc)
 
-        symbols = _symbol_series_from_ticks(pf_data["tick_history"])
+        symbols = _symbol_series_from_ticks(pf_data["tick_history"], max_points=point_limit)
         if "SPY" not in symbols:
-            spy_series, spy_error = _fetch_spy_series(
-                pf_data["value_history"],
-                (session or {}).get("metadata") or {},
-            )
+            spy_series, spy_error = _fetch_spy_series(pf_data["value_history"], metadata)
             if spy_series:
-                symbols["SPY"] = spy_series
+                symbols["SPY"] = _downsample_points(spy_series, point_limit)
             elif spy_error:
-                benchmark["_spy_error"] = spy_error
+                errors["spy"] = spy_error
 
         equity = _series_from_history(pf_data["value_history"])
-        benchmark.update(_spy_comparison(equity, symbols.get("SPY", []), metrics))
-        if not benchmark.get("_comparison"):
+        benchmark = _spy_comparison(equity, symbols.get("SPY", []), metrics)
+        if not benchmark:
             try:
-                benchmark.update(engine.calculate_benchmark_comparison())
+                benchmark = analyzer.calculate_benchmark_comparison()
             except Exception as exc:
-                benchmark["_benchmark_error"] = str(exc)
-
-        filled_orders = list(order_data["filled_orders_by_id"].values())
-        canceled_count = 0
-        for order in filled_orders:
-            status_name = getattr(order.status, "name", str(order.status))
-            if status_name == "CANCELED":
-                canceled_count += 1
-
-        order_summary = {
-            "total": len(order_data["all_orders"]),
-            "filled": len(order_data["filled_orders_by_id"]),
-            "pending": len(order_data["pending_orders_by_id"]),
-            "canceled": canceled_count,
-        }
+                errors["benchmark"] = str(exc)
 
         payload = {
-            "session": _json_safe(session),
-            "portfolio": {
-                "total_value": equity,
-                "cash": _series_from_history(pf_data["cash_history"]),
-            },
             "symbols": symbols,
-            "signals": _signal_payload(pf_data["signals_history"], pf_data["tick_history"]),
-            "indicators": _reconstruct_indicator_series(
-                pf_data["tick_history"],
-                (session or {}).get("metadata") or {},
-            ),
+            "signals": _signal_payload(pf_data["signals_history"], pf_data["tick_history"], max_points=signal_limit),
+            "trades": _trades_payload(trades),
             "metrics": metrics,
             "benchmark": _json_safe(benchmark),
-            "trades": _trades_payload(trades),
-            "orders": order_summary,
-            "errors": {k[1:]: v for k, v in benchmark.items() if k.startswith("_")},
+            "errors": errors,
         }
         return jsonify(payload)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/session/<session_id>/indicators")
+def session_indicators(session_id: str):
+    try:
+        db = request.args.get("db") or None
+        store = _get_state_store(db=db)
+        session = store.get_session(session_id)
+        if session is None:
+            return jsonify({"error": f"Session not found: {session_id}"}), 404
+
+        pf_data = store.load_portfolio_history(session_id)
+        indicators = _reconstruct_indicator_series(
+            pf_data["tick_history"],
+            ((session or {}).get("metadata") or {}),
+            max_points=_max_points_arg("points", DETAIL_MAX_POINTS),
+        )
+        return jsonify({"indicators": indicators})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
