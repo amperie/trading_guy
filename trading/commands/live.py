@@ -90,8 +90,8 @@ def cmd_live(args: argparse.Namespace):
 
     om_section = raw_cfg.get("order_manager", {})
     om_target = om_section.setdefault("params", {}) if "implementation" in om_section else om_section
-    om_target.setdefault("api_key", alpaca_cfg["api_key"])
-    om_target.setdefault("secret_key", alpaca_cfg["secret_key"])
+    om_target["api_key"] = alpaca_cfg["api_key"]
+    om_target["secret_key"] = alpaca_cfg["secret_key"]
     raw_cfg["order_manager"] = om_section
 
     warmup = alpaca_cfg.get("warmup")
