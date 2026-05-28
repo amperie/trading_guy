@@ -360,6 +360,11 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
         "load_raw_config",
         lambda path: {
             "analysis": {"experiment_name": "Base Experiment"},
+            "hpo": {
+                "search_space": {"alpha": {"type": "uniform", "low": 0.0, "high": 1.0}},
+                "algorithm_param_keys": ["alpha"],
+                "portfolio_param_keys": ["risk"],
+            },
             "pipeline": {
                 "auto_promote_research": False,
                 "experiments": {
@@ -388,6 +393,9 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
         calls["walk_forward_experiment"] = args.mlflow_experiment_name_override
         calls["walk_forward_num_trials_override"] = args.walk_forward_num_trials_override
         calls["walk_forward_max_concurrent_trials_override"] = args.walk_forward_max_concurrent_trials_override
+        calls["walk_forward_search_space"] = args.walk_forward_raw_cfg_override["walk_forward"]["search_space"]
+        calls["walk_forward_algorithm_param_keys"] = args.walk_forward_raw_cfg_override["walk_forward"]["algorithm_param_keys"]
+        calls["walk_forward_portfolio_param_keys"] = args.walk_forward_raw_cfg_override["walk_forward"]["portfolio_param_keys"]
         return {"aggregate": {}}
 
     monkeypatch.setattr(pipeline_cmd, "cmd_backtest", fake_cmd_backtest)
@@ -422,6 +430,9 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
         "walk_forward_experiment": "Pipeline Walk-Forward",
         "walk_forward_num_trials_override": 20,
         "walk_forward_max_concurrent_trials_override": 4,
+        "walk_forward_search_space": {"alpha": {"type": "uniform", "low": 0.0, "high": 1.0}},
+        "walk_forward_algorithm_param_keys": ["alpha"],
+        "walk_forward_portfolio_param_keys": ["risk"],
     }
 
 

@@ -133,6 +133,32 @@ def _with_analysis_experiment(raw_cfg: dict[str, Any], experiment_name: str) -> 
     return cfg
 
 
+def _with_pipeline_walk_forward_tuning(raw_cfg: dict[str, Any]) -> dict[str, Any]:
+    cfg = copy.deepcopy(raw_cfg)
+    hpo_cfg = cfg.get("hpo") or {}
+    wf_cfg = cfg.setdefault("walk_forward", {})
+    inherited_keys = (
+        "search_space",
+        "algorithm_param_keys",
+        "portfolio_param_keys",
+        "num_trials",
+        "max_concurrent_trials",
+        "log_ray_worker_output",
+    )
+    hpo_key_map = {
+        "num_trials": "num_samples",
+        "max_concurrent_trials": "max_concurrent_trials",
+    }
+    for wf_key in inherited_keys:
+        if wf_cfg.get(wf_key):
+            continue
+        hpo_key = hpo_key_map.get(wf_key, wf_key)
+        value = hpo_cfg.get(hpo_key)
+        if value:
+            wf_cfg[wf_key] = copy.deepcopy(value)
+    return cfg
+
+
 def _materialize_editable_research_config(args: argparse.Namespace) -> str:
     if not _is_mlflow_run_url(args.config):
         return args.config
@@ -170,6 +196,7 @@ def _preflight_pipeline_research(
     *,
     validation_period_days_override: int | None = None,
 ) -> None:
+    raw_cfg = _with_pipeline_walk_forward_tuning(raw_cfg)
     experiment = build_experiment_config(raw_cfg)
     if experiment.data_provider is None:
         raise ValueError("Pipeline research requires a data_provider section.")
@@ -197,7 +224,7 @@ def _preflight_pipeline_research(
         raise RuntimeError(
             "Pipeline research preflight failed while probing Alpaca historical data access. "
             "Check accounts.yaml credentials, provider config, and network access before rerunning."
-        ) from exc
+    ) from exc
 
 
 def cmd_pipeline_research(args: argparse.Namespace):
@@ -208,6 +235,7 @@ def cmd_pipeline_research(args: argparse.Namespace):
     raw_cfg = load_raw_config(effective_config)
     raw_cfg = apply_cli_overrides(raw_cfg, stage_args)
     apply_session_log_file(raw_cfg, stage_args)
+    raw_cfg = _with_pipeline_walk_forward_tuning(raw_cfg)
     dp_section = raw_cfg.get("data_provider", {})
     provider_name = dp_section.get("provider") or dp_section.get("implementation", "")
     if "alpaca" in provider_name.lower():
@@ -231,6 +259,7 @@ def cmd_pipeline_research(args: argparse.Namespace):
     stage_args.mlflow_experiment_name_override = _pipeline_experiment_name(raw_cfg, "walk_forward")
     stage_args.walk_forward_num_trials_override = getattr(stage_args, "num_samples", None)
     stage_args.walk_forward_max_concurrent_trials_override = getattr(stage_args, "max_concurrent_trials", None)
+    stage_args.walk_forward_raw_cfg_override = raw_cfg
     walk_forward_result = cmd_walk_forward(stage_args)
     gate_report = evaluate_research_gates(raw_cfg, backtest_result, hpo_result, walk_forward_result)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import argparse
 
 from trading.commands.analysis import _collect_config_artifact_paths, get_git_info
@@ -22,7 +23,7 @@ logger = Logger().get_logger(__name__)
 
 
 def cmd_walk_forward(args: argparse.Namespace):
-    raw_cfg = load_raw_config(args.config)
+    raw_cfg = copy.deepcopy(getattr(args, "walk_forward_raw_cfg_override", None)) or load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
     apply_session_log_file(raw_cfg, args)
     wf_cfg = raw_cfg.setdefault("walk_forward", {})

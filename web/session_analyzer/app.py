@@ -1,11 +1,12 @@
 import os
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 from collections import defaultdict, deque
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, has_request_context
 
 from utils.config_manager import ConfigManager
 from utils.trading_state_store import TradingStateStore
@@ -93,6 +94,88 @@ def _trading_days_from_history(value_history: dict) -> int:
     return len({ts.date() for ts in value_history.keys()})
 
 
+def _credentials_from_accounts(account_id: str | None = None) -> tuple[str | None, str | None]:
+    try:
+        import yaml
+
+        with open("accounts.yaml", "r", encoding="utf-8") as handle:
+            accounts = yaml.safe_load(handle) or {}
+    except Exception:
+        return None, None
+
+    requested_account = request.args.get("account") if has_request_context() else None
+    candidates = [requested_account, account_id, "paper", "live"]
+    for name in candidates:
+        entry = accounts.get(name) if name else None
+        if entry and entry.get("api_key") and entry.get("secret_key"):
+            return entry["api_key"], entry["secret_key"]
+
+    entries = [entry for entry in accounts.values() if entry.get("api_key") and entry.get("secret_key")]
+    if len(entries) == 1:
+        return entries[0]["api_key"], entries[0]["secret_key"]
+    return None, None
+
+
+def _alpaca_credentials(session: dict | None = None) -> tuple[str | None, str | None]:
+    cfg = ConfigManager()
+    alpaca_cfg = cfg.get("alpaca", {}) or {}
+    dp_cfg = cfg.get("data_provider", {}) or {}
+    dp_params = dp_cfg.get("params", {}) if isinstance(dp_cfg, dict) else {}
+    api_key = (
+        os.getenv("ALPACA_API_KEY")
+        or alpaca_cfg.get("api_key")
+        or dp_cfg.get("api_key")
+        or dp_params.get("api_key")
+    )
+    secret_key = (
+        os.getenv("ALPACA_SECRET_KEY")
+        or alpaca_cfg.get("secret_key")
+        or dp_cfg.get("secret_key")
+        or dp_params.get("secret_key")
+    )
+    if api_key and secret_key:
+        return api_key, secret_key
+    return _credentials_from_accounts((session or {}).get("account_id"))
+
+
+def _alpaca_timeframe(session_metadata: dict) -> str:
+    raw = str((session_metadata or {}).get("timeframe") or "Minute")
+    aliases = {
+        "1Min": "Minute",
+        "1Minute": "Minute",
+        "Min": "Minute",
+        "5Min": "Minute",
+        "15Min": "Minute",
+        "60Min": "Hour",
+        "1Hour": "Hour",
+        "Hour": "Hour",
+        "Day": "Day",
+        "Week": "Week",
+        "Month": "Month",
+    }
+    timeframe = aliases.get(raw, raw)
+    return timeframe if timeframe in TIMEFRAME_MAP else "Minute"
+
+
+def _alpaca_range(value_history: dict, timeframe: str) -> tuple[str, str]:
+    dates = sorted(value_history.keys())
+    eastern = ZoneInfo("America/New_York")
+
+    def eastern_iso(ts: datetime) -> str:
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=eastern)
+        return ts.isoformat()
+
+    start = dates[0]
+    if timeframe == "Day":
+        end = dates[-1] + timedelta(days=1)
+    elif timeframe == "Hour":
+        end = dates[-1] + timedelta(hours=1)
+    else:
+        end = dates[-1] + timedelta(minutes=1)
+    return eastern_iso(start), eastern_iso(end)
+
+
 def _metrics_from_equity(equity: list[dict]) -> dict:
     if not equity:
         return {}
@@ -145,29 +228,27 @@ def _metrics_from_equity(equity: list[dict]) -> dict:
     }
 
 
-def _fetch_spy_series(value_history: dict, session_metadata: dict) -> tuple[list[dict], str | None]:
+def _fetch_spy_series(
+    value_history: dict,
+    session_metadata: dict,
+    session: dict | None = None,
+) -> tuple[list[dict], str | None]:
     if not value_history:
         return [], None
-    cfg = ConfigManager()
-    alpaca_cfg = cfg.get("alpaca", {}) or {}
-    dp_cfg = cfg.get("data_provider", {}) or {}
-    api_key = os.getenv("ALPACA_API_KEY") or alpaca_cfg.get("api_key") or dp_cfg.get("api_key")
-    secret_key = os.getenv("ALPACA_SECRET_KEY") or alpaca_cfg.get("secret_key") or dp_cfg.get("secret_key")
+    api_key, secret_key = _alpaca_credentials(session)
     if not api_key or not secret_key:
-        return [], "Missing Alpaca credentials for SPY fallback"
+        return [], "Missing Alpaca credentials for SPY fallback; set ALPACA_API_KEY/ALPACA_SECRET_KEY, config alpaca keys, or accounts.yaml"
 
-    dates = sorted(value_history.keys())
-    timeframe = ((session_metadata or {}).get("timeframe") or "Minute")
-    if timeframe not in TIMEFRAME_MAP:
-        timeframe = "Minute"
+    timeframe = _alpaca_timeframe(session_metadata)
+    start_date, end_date = _alpaca_range(value_history, timeframe)
     try:
         provider = AlpacaDataProvider({
             "api_key": api_key,
             "secret_key": secret_key,
             "symbols": ["SPY"],
             "timeframe": timeframe,
-            "start_date": dates[0].isoformat(sep=" "),
-            "end_date": dates[-1].isoformat(sep=" "),
+            "start_date": start_date,
+            "end_date": end_date,
             "market_hours_only": True,
         })
         provider.load_data()
@@ -455,6 +536,14 @@ def session_summary(session_id: str):
         equity = _downsample_points(equity_full, _max_points_arg("points", SUMMARY_MAX_POINTS))
         cash = _downsample_points(cash_full, _max_points_arg("points", SUMMARY_MAX_POINTS))
         metrics = _metrics_from_equity(equity_full)
+        metadata = (session or {}).get("metadata") or {}
+        symbols = {}
+        errors = {}
+        spy_series, spy_error = _fetch_spy_series(history["value_history"], metadata, session)
+        if spy_series:
+            symbols["SPY"] = _downsample_points(spy_series, _max_points_arg("points", SUMMARY_MAX_POINTS))
+        elif spy_error:
+            errors["spy"] = spy_error
 
         payload = {
             "session": _json_safe(session),
@@ -462,14 +551,14 @@ def session_summary(session_id: str):
                 "total_value": equity,
                 "cash": cash,
             },
-            "symbols": {},
+            "symbols": symbols,
             "signals": [],
             "indicators": {"_config": {}},
             "metrics": _json_safe(metrics),
-            "benchmark": {},
+            "benchmark": _json_safe(_spy_comparison(equity_full, spy_series, metrics)),
             "trades": [],
             "orders": _order_summary(order_data),
-            "errors": {},
+            "errors": errors,
         }
         return jsonify(payload)
     except Exception as exc:
@@ -505,15 +594,16 @@ def session_details(session_id: str):
             errors["metrics"] = str(exc)
 
         symbols = _symbol_series_from_ticks(pf_data["tick_history"], max_points=point_limit)
+        full_spy_series = symbols.get("SPY", [])
         if "SPY" not in symbols:
-            spy_series, spy_error = _fetch_spy_series(pf_data["value_history"], metadata)
-            if spy_series:
-                symbols["SPY"] = _downsample_points(spy_series, point_limit)
+            full_spy_series, spy_error = _fetch_spy_series(pf_data["value_history"], metadata, session)
+            if full_spy_series:
+                symbols["SPY"] = _downsample_points(full_spy_series, point_limit)
             elif spy_error:
                 errors["spy"] = spy_error
 
         equity = _series_from_history(pf_data["value_history"])
-        benchmark = _spy_comparison(equity, symbols.get("SPY", []), metrics)
+        benchmark = _spy_comparison(equity, full_spy_series, metrics)
         if not benchmark:
             try:
                 benchmark = analyzer.calculate_benchmark_comparison()
