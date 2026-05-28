@@ -191,7 +191,7 @@ class AlpacaOrderManager(OrderManager):
             alpaca_orders = self.client.get_orders(filter=request)
         except Exception as exc:
             logger.error(f"Failed to fetch orders from Alpaca: {exc}")
-            return {"new": 0, "updated": 0, "total": 0}
+            return {"new": 0, "updated": 0, "total": 0, "error": str(exc)}
 
         # Build reverse lookup: remote platform_id -> local order_id.
         # Prefer the explicit map, but also fall back to any already-loaded

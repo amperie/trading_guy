@@ -216,13 +216,18 @@ class AlpacaRealTimeEngine(AsyncEngine):
         # Sync portfolio state from broker before streaming starts
         if self.pf is not None:
             logger.info("Syncing portfolio state from broker...")
-            self.pf._sync_from_broker()
-            logger.info(f"Portfolio sync complete: cash={self.pf.cash:.2f} positions={len(self.pf.positions)}")
+            if self.pf._sync_from_broker():
+                logger.info(f"Portfolio sync complete: cash={self.pf.cash:.2f} positions={len(self.pf.positions)}")
+            else:
+                logger.warning("Portfolio sync skipped or failed; continuing with local portfolio state")
         if self.om is not None and hasattr(self.om, 'sync_orders_from_broker'):
             order_sync_limit = self.pf.cfg.get("order_sync_limit", 0)
             logger.info("Syncing orders from broker...")
-            self.om.sync_orders_from_broker(limit=order_sync_limit)
-            logger.info(f"Order sync complete: {len(self.om.all_orders)} orders loaded")
+            sync_result = self.om.sync_orders_from_broker(limit=order_sync_limit) or {}
+            if sync_result.get("error"):
+                logger.warning(f"Order sync failed; continuing without broker orders: {sync_result['error']}")
+            else:
+                logger.info(f"Order sync complete: {len(self.om.all_orders)} orders loaded")
 
         # Warm up algorithm history from historical data if configured
         warmup_cfg = self.cfg.get("warmup", None)

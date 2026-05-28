@@ -452,10 +452,10 @@ class Portfolio(ABC):
         overwrites local cash and positions with broker values.
         """
         if self.om is None:
-            return
+            return False
         state = self.om.get_broker_account_state()
         if state is None:
-            return
+            return False
 
         old_cash = self.cash
         new_cash = state["cash"]
@@ -485,6 +485,7 @@ class Portfolio(ABC):
             del self.positions[symbol]
 
         logger.info(f"Broker sync complete - Cash: ${old_cash:,.2f} -> ${new_cash:,.2f}, Positions: {len(self.positions)}")
+        return True
 
     @final
     def process_market_signals_for_tick(
