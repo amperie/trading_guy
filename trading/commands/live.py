@@ -54,8 +54,8 @@ def _is_local_bundle_config(config_ref: str) -> bool:
     )
 
 
-def _apply_root_alpaca_endpoint_for_bundle(raw_cfg: dict, args: argparse.Namespace) -> None:
-    if getattr(args, "alpaca_override_url", None) or not _is_local_bundle_config(args.config):
+def _apply_runtime_alpaca_endpoints(raw_cfg: dict, args: argparse.Namespace) -> None:
+    if getattr(args, "alpaca_override_url", None):
         return
     root_alpaca = ConfigManager().get("alpaca") or {}
     alpaca = raw_cfg.setdefault("alpaca", {})
@@ -67,7 +67,7 @@ def _apply_root_alpaca_endpoint_for_bundle(raw_cfg: dict, args: argparse.Namespa
 def cmd_live(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
-    _apply_root_alpaca_endpoint_for_bundle(raw_cfg, args)
+    _apply_runtime_alpaca_endpoints(raw_cfg, args)
     apply_session_log_file(raw_cfg, args)
 
     if not getattr(args, "session_id", None):

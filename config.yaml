@@ -45,3 +45,6 @@ state_store:
   connection_uri: "mongodb://hp.lan:27017"
   database: "trading_test"
   session_id: "live_SPY_UPRO_SPXU"  # null = new UUID each run; paste a UUID to resume a session
+
+alpaca:
+  override_url: "ws://hp.lan:8765"
