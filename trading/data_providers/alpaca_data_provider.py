@@ -24,9 +24,14 @@ Config keys (cfg dict):
     limit (int):            Max bars to return (optional)
     market_hours_only (bool): Drop pre-market and after-hours bars, keeping
                             only 09:30–16:00 Eastern. (default: False)
+    historical_data_url / data_url / data_override_url / override_url (str):
+                            Optional HTTP URL override for historical data.
 """
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
+
+import yaml
 
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
@@ -36,6 +41,7 @@ from trading.data_providers.data_provider import DataProvider
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+DATA_ACCOUNT_NAME = "AlpacaAPIAccount"
 
 
 # Map string names to TimeFrame objects
@@ -50,11 +56,25 @@ TIMEFRAME_MAP = {
 
 class AlpacaDataProvider(DataProvider):
 
+    @staticmethod
+    def _data_account_creds() -> dict | None:
+        path = Path("accounts.yaml")
+        if not path.is_file():
+            return None
+        accounts = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        entry = accounts.get(DATA_ACCOUNT_NAME)
+        if not entry:
+            return None
+        if not entry.get("api_key") or not entry.get("secret_key"):
+            raise ValueError(f"accounts.yaml entry '{DATA_ACCOUNT_NAME}' is missing api_key or secret_key")
+        return {"api_key": entry["api_key"], "secret_key": entry["secret_key"]}
+
     def __init__(self, cfg: dict = None):
         super().__init__(cfg)
 
-        self.api_key = self.cfg["api_key"]
-        self.secret_key = self.cfg["secret_key"]
+        data_creds = self._data_account_creds()
+        self.api_key = (data_creds or self.cfg)["api_key"]
+        self.secret_key = (data_creds or self.cfg)["secret_key"]
         self.symbols = self.cfg["symbols"]
 
         timeframe_str = self.cfg.get("timeframe", "Minute")
@@ -66,7 +86,19 @@ class AlpacaDataProvider(DataProvider):
         self.timeframe = TIMEFRAME_MAP[timeframe_str]
         self.adjustment = self.cfg.get("adjustment", "split")
 
-        self.client = StockHistoricalDataClient(self.api_key, self.secret_key)
+        url_override = (
+            self.cfg.get("historical_data_url")
+            or self.cfg.get("data_url")
+            or self.cfg.get("data_override_url")
+            or self.cfg.get("override_url")
+        )
+        if isinstance(url_override, str) and not url_override.startswith(("http://", "https://")):
+            url_override = None
+        self.client = StockHistoricalDataClient(
+            self.api_key,
+            self.secret_key,
+            url_override=url_override,
+        )
 
     def load_data(self):
         start = self.cfg.get("start_date", None)

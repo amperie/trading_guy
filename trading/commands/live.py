@@ -16,6 +16,7 @@ from trading.commands.common import (
 )
 from trading.config import ExperimentService
 from trading.engines.alpaca_engine import AlpacaRealTimeEngine
+from utils.config_manager import ConfigManager
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
@@ -43,9 +44,30 @@ def _infer_source_run_url(config_ref: str, explicit_source_run_url: str | None =
     return None
 
 
+def _is_local_bundle_config(config_ref: str) -> bool:
+    config_path = Path(config_ref)
+    if not config_path.is_file():
+        return False
+    return any(
+        path.is_file()
+        for path in [config_path.parent / "promotion_manifest.json", *config_path.parent.glob("pipeline_*_manifest.json")]
+    )
+
+
+def _apply_root_alpaca_endpoint_for_bundle(raw_cfg: dict, args: argparse.Namespace) -> None:
+    if getattr(args, "alpaca_override_url", None) or not _is_local_bundle_config(args.config):
+        return
+    root_alpaca = ConfigManager().get("alpaca") or {}
+    alpaca = raw_cfg.setdefault("alpaca", {})
+    for key in ("override_url", "historical_data_url", "data_url", "data_override_url"):
+        if root_alpaca.get(key):
+            alpaca[key] = root_alpaca[key]
+
+
 def cmd_live(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
+    _apply_root_alpaca_endpoint_for_bundle(raw_cfg, args)
     apply_session_log_file(raw_cfg, args)
 
     if not getattr(args, "session_id", None):
@@ -77,6 +99,11 @@ def cmd_live(args: argparse.Namespace):
         warmup.setdefault("api_key", alpaca_cfg["api_key"])
         warmup.setdefault("secret_key", alpaca_cfg["secret_key"])
         warmup.setdefault("symbols", alpaca_cfg.get("symbols_to_subscribe", []))
+        for key in ("historical_data_url", "data_url", "data_override_url"):
+            if alpaca_cfg.get(key):
+                warmup.setdefault(key, alpaca_cfg[key])
+        if str(alpaca_cfg.get("override_url", "")).startswith(("http://", "https://")):
+            warmup.setdefault("override_url", alpaca_cfg["override_url"])
 
     raw_cfg.pop("data_provider", None)
 

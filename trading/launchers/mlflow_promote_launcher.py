@@ -178,11 +178,9 @@ def _minimal_alpaca_section(source_cfg: dict[str, Any], symbols: list[str], refe
             "subscribe_to_trades",
             reference_alpaca.get("subscribe_to_trades", False),
         ),
-        "override_url": source_alpaca.get(
-            "override_url",
-            reference_alpaca.get("override_url"),
-        ),
     }
+    if source_alpaca.get("override_url"):
+        section["override_url"] = source_alpaca["override_url"]
 
     warmup_provider = source_alpaca.get("warmup", {}).get(
         "provider",
