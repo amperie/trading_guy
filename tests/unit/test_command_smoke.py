@@ -165,6 +165,43 @@ def test_cmd_live_overwrites_stale_order_manager_credentials(monkeypatch):
     assert om["secret_key"] == "trade-secret"
 
 
+def test_cmd_live_overwrites_stale_new_style_order_manager_credentials(monkeypatch):
+    raw_cfg = {
+        "mode": "live",
+        "alpaca": {"symbols_to_subscribe": ["SPY"]},
+        "analysis": {"enabled": False},
+        "aggregation": {"enabled": False},
+        "optimization": {"enabled": False},
+        "state_store": {"enabled": True, "session_id": "sess-1"},
+        "order_manager": {
+            "implementation": "dummy.OM",
+            "api_key": "stale-top-key",
+            "secret_key": "stale-top-secret",
+            "params": {"api_key": "stale-param-key", "secret_key": "stale-param-secret"},
+        },
+    }
+    captured = {}
+    built = SimpleNamespace(data_provider=None, algorithm=object(), order_manager=object(), portfolio=object())
+
+    monkeypatch.setattr(live_cmd, "load_raw_config", lambda path: dict(raw_cfg))
+    monkeypatch.setattr(live_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(live_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(live_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(live_cmd, "load_account_creds", lambda account: {"api_key": "trade-key", "secret_key": "trade-secret"})
+    monkeypatch.setattr(live_cmd, "build_experiment_config", lambda cfg: captured.setdefault("cfg", cfg) or "normalized-config")
+    monkeypatch.setattr(live_cmd.ExperimentService, "build", lambda cfg: built)
+    monkeypatch.setattr(live_cmd.ExperimentService, "describe", lambda cfg: SimpleNamespace(config_hash="hash"))
+    monkeypatch.setattr(live_cmd, "AlpacaRealTimeEngine", lambda *args, **kwargs: StubEngine(*args, **kwargs))
+
+    live_cmd.cmd_live(SimpleNamespace(config="cfg.yaml", account="paper", session_id="sess-1", alpaca_override_url=None))
+
+    om = captured["cfg"]["order_manager"]
+    assert om["api_key"] == "trade-key"
+    assert om["secret_key"] == "trade-secret"
+    assert om["params"]["api_key"] == "trade-key"
+    assert om["params"]["secret_key"] == "trade-secret"
+
+
 def test_cmd_live_walk_forward_mode(monkeypatch):
     raw_cfg = {
         "mode": "live",

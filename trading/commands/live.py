@@ -64,6 +64,17 @@ def _apply_runtime_alpaca_endpoints(raw_cfg: dict, args: argparse.Namespace) -> 
             alpaca[key] = root_alpaca[key]
 
 
+def _set_order_manager_credentials(raw_cfg: dict, api_key: str, secret_key: str) -> None:
+    om_section = raw_cfg.get("order_manager", {})
+    om_section["api_key"] = api_key
+    om_section["secret_key"] = secret_key
+    if "implementation" in om_section or "params" in om_section:
+        params = om_section.setdefault("params", {})
+        params["api_key"] = api_key
+        params["secret_key"] = secret_key
+    raw_cfg["order_manager"] = om_section
+
+
 def cmd_live(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
@@ -88,11 +99,7 @@ def cmd_live(args: argparse.Namespace):
         logger.error("Alpaca API credentials required. Set in config or in accounts.yaml.")
         sys.exit(1)
 
-    om_section = raw_cfg.get("order_manager", {})
-    om_target = om_section.setdefault("params", {}) if "implementation" in om_section else om_section
-    om_target["api_key"] = alpaca_cfg["api_key"]
-    om_target["secret_key"] = alpaca_cfg["secret_key"]
-    raw_cfg["order_manager"] = om_section
+    _set_order_manager_credentials(raw_cfg, alpaca_cfg["api_key"], alpaca_cfg["secret_key"])
 
     warmup = alpaca_cfg.get("warmup")
     if warmup:
