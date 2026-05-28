@@ -2,6 +2,7 @@ import math
 import os
 import signal
 import time
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Type
 
@@ -24,6 +25,7 @@ from ray import tune
 from ray.tune.search.optuna import OptunaSearch
 
 logger = Logger().get_logger(__name__)
+_MISSING = object()
 
 
 def _set_interrupt_handlers(handler) -> dict[int, object]:
@@ -116,6 +118,62 @@ class _TuneStatusCallback(tune.Callback):
 def _short_trial_dirname_creator(trial) -> str:
     """Keep Ray trial directory names short enough for Windows path limits."""
     return f"trial_{trial.trial_id}"
+
+
+def _get_nested_value(cfg: dict, dotted_key: str):
+    current = cfg
+    for part in dotted_key.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return _MISSING
+        current = current[part]
+    return current
+
+
+def _validate_seed_value(key: str, value, domain) -> None:
+    if hasattr(domain, "categories"):
+        if value not in domain.categories:
+            raise ValueError(f"Seeded HPO value {key}={value!r} is not in search space choices {list(domain.categories)!r}")
+        return
+
+    lower = getattr(domain, "lower", None)
+    upper = getattr(domain, "upper", None)
+    domain_name = domain.__class__.__name__.lower()
+    if lower is None or upper is None:
+        return
+    if "integer" in domain_name:
+        if isinstance(value, bool) or not isinstance(value, Integral) or int(value) < lower or int(value) >= upper:
+            raise ValueError(f"Seeded HPO value {key}={value!r} is outside randint range [{lower}, {upper})")
+        return
+    if "float" in domain_name:
+        if isinstance(value, bool) or not isinstance(value, Real) or float(value) < lower or float(value) > upper:
+            raise ValueError(f"Seeded HPO value {key}={value!r} is outside float range [{lower}, {upper}]")
+
+
+def _build_seeded_trial_config(
+    search_space: dict,
+    base_algorithm_config: dict,
+    base_portfolio_config: dict,
+    algorithm_param_keys: list[str],
+    portfolio_param_keys: list[str],
+) -> dict[str, object]:
+    seeded: dict[str, object] = {}
+    for key in algorithm_param_keys:
+        if key not in search_space:
+            continue
+        value = _get_nested_value(base_algorithm_config, key)
+        if value is _MISSING:
+            continue
+        _validate_seed_value(key, value, search_space[key])
+        seeded[key] = value
+    for key in portfolio_param_keys:
+        if key not in search_space:
+            continue
+        value = _get_nested_value(base_portfolio_config, key)
+        if value is _MISSING:
+            continue
+        _validate_seed_value(key, value, search_space[key])
+        seeded[key] = value
+    return seeded
 
 
 def _restore_env_var(name: str, previous_value: str | None) -> None:
@@ -614,6 +672,13 @@ def tune_backtest_hyperparameters(
     previous_signal_handlers = _set_interrupt_handlers(signal.default_int_handler)
     os.environ["TUNE_DISABLE_SIGINT_HANDLER"] = "1"
     status_callback = _TuneStatusCallback(num_samples)
+    seeded_trial_config = _build_seeded_trial_config(
+        search_space=search_space,
+        base_algorithm_config=base_algorithm_config,
+        base_portfolio_config=base_portfolio_config,
+        algorithm_param_keys=algorithm_param_keys,
+        portfolio_param_keys=portfolio_param_keys,
+    )
 
     try:
         ray.init(
@@ -640,10 +705,14 @@ def tune_backtest_hyperparameters(
             log_to_mlflow=log_to_mlflow,
         )
 
-        optuna_search = OptunaSearch(
-            metric="_metric",
-            mode="max",
-        )
+        optuna_search_kwargs = {
+            "metric": "_metric",
+            "mode": "max",
+        }
+        if seeded_trial_config:
+            logger.info("Seeding first HPO trial with current config values: %s", seeded_trial_config)
+            optuna_search_kwargs["points_to_evaluate"] = [seeded_trial_config]
+        optuna_search = OptunaSearch(**optuna_search_kwargs)
 
         tuner = tune.Tuner(
             trainable_with_params,
