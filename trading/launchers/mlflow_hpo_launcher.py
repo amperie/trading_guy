@@ -114,6 +114,19 @@ def _assign_nested_value(target: dict[str, Any], dotted_key: str, value: Any) ->
     current[parts[-1]] = value
 
 
+def parse_dotted_overrides(values: list[str] | None) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    for raw in values or []:
+        key, sep, value = raw.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            raise ValueError(
+                f"Invalid override '{raw}'. Expected KEY=VALUE, for example: momentum_lookback=1200"
+            )
+        _assign_nested_value(overrides, key, coerce_string_value(value))
+    return overrides
+
+
 def reconstruct_config_from_params(params: dict[str, str]) -> dict[str, Any]:
     config: dict[str, Any] = {}
     for key, value in params.items():
@@ -484,9 +497,12 @@ def prepare_hpo_config_from_source(
     experiment_name: str,
     *,
     split_validation: bool = False,
+    algorithm_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     raw_cfg = normalize_hpo_search_space(source_context.raw_config)
     raw_cfg["mode"] = "hpo"
+    if algorithm_overrides:
+        raw_cfg.setdefault("algorithm", {}).setdefault("params", {}).update(copy.deepcopy(algorithm_overrides))
 
     analysis_cfg = raw_cfg.setdefault("analysis", {})
     analysis_cfg["log_to_mlflow"] = True
@@ -633,14 +649,17 @@ def run_launcher(
     editor: str | None = None,
     *,
     split_validation: bool = False,
+    algorithm_param_overrides: list[str] | None = None,
 ) -> dict[str, Any]:
     source_context = load_source_run_context(run_url, tracking_uri=tracking_uri)
     experiment_name = prompt_for_hpo_launch(source_context, split_validation=split_validation)
+    parsed_algorithm_overrides = parse_dotted_overrides(algorithm_param_overrides)
 
     prepared_cfg = prepare_hpo_config_from_source(
         source_context=source_context,
         experiment_name=experiment_name,
         split_validation=split_validation,
+        algorithm_overrides=parsed_algorithm_overrides,
     )
 
     edited_cfg = edit_hpo_config(prepared_cfg, editor=editor)

@@ -443,6 +443,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--editor",
         help="Editor executable or command. Defaults to notepad.exe on Windows and vim on Linux when EDITOR/VISUAL is unset",
     )
+    hpo_mlflow_p.add_argument(
+        "--algorithm-param",
+        dest="algorithm_param",
+        action="append",
+        help="Override algorithm.params entries before opening the generated YAML. Repeatable. Example: --algorithm-param momentum_lookback=1200",
+    )
     hpo_mlflow_p.set_defaults(func=cmd_hpo_from_mlflow)
 
     hpo_split_mlflow_p = subparsers.add_parser(
@@ -465,6 +471,12 @@ def build_parser() -> argparse.ArgumentParser:
     hpo_split_mlflow_p.add_argument(
         "--editor",
         help="Editor executable or command. Defaults to notepad.exe on Windows and vim on Linux when EDITOR/VISUAL is unset",
+    )
+    hpo_split_mlflow_p.add_argument(
+        "--algorithm-param",
+        dest="algorithm_param",
+        action="append",
+        help="Override algorithm.params entries before opening the generated YAML. Repeatable. Example: --algorithm-param momentum_lookback=1200",
     )
     hpo_split_mlflow_p.set_defaults(func=cmd_hpo_split_from_mlflow)
 

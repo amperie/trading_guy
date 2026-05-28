@@ -11,6 +11,7 @@ def cmd_hpo_from_mlflow(args: argparse.Namespace):
         args.account,
         tracking_uri=getattr(args, "tracking_uri", None),
         editor=getattr(args, "editor", None),
+        algorithm_param_overrides=getattr(args, "algorithm_param", None),
     )
 
 
@@ -21,4 +22,5 @@ def cmd_hpo_split_from_mlflow(args: argparse.Namespace):
         tracking_uri=getattr(args, "tracking_uri", None),
         editor=getattr(args, "editor", None),
         split_validation=True,
+        algorithm_param_overrides=getattr(args, "algorithm_param", None),
     )

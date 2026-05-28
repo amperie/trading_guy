@@ -62,12 +62,15 @@ def test_build_parser_hpo_from_mlflow_args():
         "--account", "paper",
         "--run-url", "http://localhost:5000/#/experiments/1/runs/abc123",
         "--editor", "vim",
+        "--algorithm-param", "momentum_lookback=1200",
+        "--algorithm-param", "risk.threshold=1.5",
     ])
 
     assert args.command == "hpo-from-mlflow"
     assert args.account == "paper"
     assert args.run_url == "http://localhost:5000/#/experiments/1/runs/abc123"
     assert args.editor == "vim"
+    assert args.algorithm_param == ["momentum_lookback=1200", "risk.threshold=1.5"]
 
 
 def test_build_parser_hpo_split_from_mlflow_args():
