@@ -152,6 +152,7 @@ def test_cmd_live_overwrites_stale_order_manager_credentials(monkeypatch):
     monkeypatch.setattr(live_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
     monkeypatch.setattr(live_cmd, "apply_session_log_file", lambda cfg, args: None)
     monkeypatch.setattr(live_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(live_cmd, "_live_state_store_database", lambda: "configured_live")
     monkeypatch.setattr(live_cmd, "load_account_creds", lambda account: {"api_key": "trade-key", "secret_key": "trade-secret"})
     monkeypatch.setattr(live_cmd, "build_experiment_config", lambda cfg: captured.setdefault("cfg", cfg) or "normalized-config")
     monkeypatch.setattr(live_cmd.ExperimentService, "build", lambda cfg: built)
@@ -163,7 +164,7 @@ def test_cmd_live_overwrites_stale_order_manager_credentials(monkeypatch):
     om = captured["cfg"]["order_manager"]
     assert om["api_key"] == "trade-key"
     assert om["secret_key"] == "trade-secret"
-    assert captured["cfg"]["state_store"]["database"] == "live_trading"
+    assert captured["cfg"]["state_store"]["database"] == "configured_live"
 
 
 def test_cmd_live_overwrites_stale_new_style_order_manager_credentials(monkeypatch):

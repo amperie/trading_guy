@@ -20,7 +20,6 @@ from utils.config_manager import ConfigManager
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
-LIVE_STATE_STORE_DATABASE = "live_trading"
 
 
 def _infer_source_run_url(config_ref: str, explicit_source_run_url: str | None = None) -> str | None:
@@ -76,10 +75,16 @@ def _set_order_manager_credentials(raw_cfg: dict, api_key: str, secret_key: str)
     raw_cfg["order_manager"] = om_section
 
 
+def _live_state_store_database() -> str | None:
+    config = ConfigManager()
+    return config.get("state_store.default_live_database") or config.get("state_store.database")
+
+
 def _force_live_state_store(raw_cfg: dict) -> None:
     state_store = raw_cfg.setdefault("state_store", {})
     state_store["enabled"] = True
-    state_store["database"] = LIVE_STATE_STORE_DATABASE
+    if database := _live_state_store_database():
+        state_store["database"] = database
 
 
 def cmd_live(args: argparse.Namespace):

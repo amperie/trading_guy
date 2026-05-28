@@ -10,7 +10,12 @@ from trading.launchers import mlflow_promote_launcher as launcher
 from trading.launchers.mlflow_hpo_launcher import SourceRunContext
 
 
-def test_minimal_state_store_section_forces_live_database():
+def test_minimal_state_store_section_uses_configured_live_database(monkeypatch):
+    class FakeConfigManager:
+        def get(self, key, default=None):
+            return {"state_store.default_live_database": "configured_live"}.get(key, default)
+
+    monkeypatch.setattr(launcher, "ConfigManager", FakeConfigManager)
     section = launcher._minimal_state_store_section(
         {"state_store": {"connection_uri": "mongodb://localhost:27017", "database": "trading_test"}}
     )
@@ -18,7 +23,7 @@ def test_minimal_state_store_section_forces_live_database():
     assert section == {
         "enabled": True,
         "session_id": "",
-        "database": "live_trading",
+        "database": "configured_live",
         "connection_uri": "mongodb://localhost:27017",
     }
 

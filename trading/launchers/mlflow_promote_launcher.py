@@ -12,11 +12,11 @@ from typing import Any
 import yaml
 
 from trading.launchers.mlflow_hpo_launcher import SourceRunContext, load_source_run_context
+from utils.config_manager import ConfigManager
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
 REFERENCE_LIVE_CONFIG_PATH = Path("configs") / "example_live_spy_trend_macd.yaml"
-LIVE_STATE_STORE_DATABASE = "live_trading"
 
 
 @dataclass(slots=True)
@@ -131,7 +131,10 @@ def _legacy_component_section(component: dict[str, Any], role: str) -> dict[str,
 
 def _minimal_state_store_section(source_cfg: dict[str, Any]) -> dict[str, Any]:
     source_state = source_cfg.get("state_store", {})
-    section = {"enabled": True, "session_id": "", "database": LIVE_STATE_STORE_DATABASE}
+    section = {"enabled": True, "session_id": ""}
+    database = ConfigManager().get("state_store.default_live_database") or ConfigManager().get("state_store.database")
+    if database:
+        section["database"] = database
     if source_state.get("connection_uri"):
         section["connection_uri"] = source_state["connection_uri"]
     return section
