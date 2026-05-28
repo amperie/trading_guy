@@ -163,6 +163,7 @@ def test_cmd_live_overwrites_stale_order_manager_credentials(monkeypatch):
     om = captured["cfg"]["order_manager"]
     assert om["api_key"] == "trade-key"
     assert om["secret_key"] == "trade-secret"
+    assert captured["cfg"]["state_store"]["database"] == "live_trading"
 
 
 def test_cmd_live_overwrites_stale_new_style_order_manager_credentials(monkeypatch):

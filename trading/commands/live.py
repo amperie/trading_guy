@@ -20,6 +20,7 @@ from utils.config_manager import ConfigManager
 from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
+LIVE_STATE_STORE_DATABASE = "live_trading"
 
 
 def _infer_source_run_url(config_ref: str, explicit_source_run_url: str | None = None) -> str | None:
@@ -75,6 +76,12 @@ def _set_order_manager_credentials(raw_cfg: dict, api_key: str, secret_key: str)
     raw_cfg["order_manager"] = om_section
 
 
+def _force_live_state_store(raw_cfg: dict) -> None:
+    state_store = raw_cfg.setdefault("state_store", {})
+    state_store["enabled"] = True
+    state_store["database"] = LIVE_STATE_STORE_DATABASE
+
+
 def cmd_live(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
@@ -88,7 +95,7 @@ def cmd_live(args: argparse.Namespace):
         )
         sys.exit(1)
 
-    raw_cfg.setdefault("state_store", {})["enabled"] = True
+    _force_live_state_store(raw_cfg)
     validate_session_id(raw_cfg)
 
     creds = load_account_creds(args.account)
@@ -188,6 +195,7 @@ def cmd_live(args: argparse.Namespace):
     engine.run()
     return {
         "session_id": raw_cfg.get("state_store", {}).get("session_id"),
+        "state_store_database": raw_cfg.get("state_store", {}).get("database"),
         "config_path": args.config,
         "config_hash": config_hash,
         "source_run_url": source_run_url,

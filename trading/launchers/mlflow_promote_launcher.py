@@ -16,6 +16,7 @@ from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
 REFERENCE_LIVE_CONFIG_PATH = Path("configs") / "example_live_spy_trend_macd.yaml"
+LIVE_STATE_STORE_DATABASE = "live_trading"
 
 
 @dataclass(slots=True)
@@ -130,11 +131,9 @@ def _legacy_component_section(component: dict[str, Any], role: str) -> dict[str,
 
 def _minimal_state_store_section(source_cfg: dict[str, Any]) -> dict[str, Any]:
     source_state = source_cfg.get("state_store", {})
-    section = {"enabled": True, "session_id": ""}
-    for key in ("connection_uri", "database"):
-        value = source_state.get(key)
-        if value:
-            section[key] = value
+    section = {"enabled": True, "session_id": "", "database": LIVE_STATE_STORE_DATABASE}
+    if source_state.get("connection_uri"):
+        section["connection_uri"] = source_state["connection_uri"]
     return section
 
 

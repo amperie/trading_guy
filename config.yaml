@@ -43,7 +43,7 @@ pipeline:
 state_store:
   enabled: true
   connection_uri: "mongodb://hp.lan:27017"
-  database: "trading_test"
+  database: "live_trading"
   session_id: "live_SPY_UPRO_SPXU"  # null = new UUID each run; paste a UUID to resume a session
 
 alpaca:

@@ -10,6 +10,19 @@ from trading.launchers import mlflow_promote_launcher as launcher
 from trading.launchers.mlflow_hpo_launcher import SourceRunContext
 
 
+def test_minimal_state_store_section_forces_live_database():
+    section = launcher._minimal_state_store_section(
+        {"state_store": {"connection_uri": "mongodb://localhost:27017", "database": "trading_test"}}
+    )
+
+    assert section == {
+        "enabled": True,
+        "session_id": "",
+        "database": "live_trading",
+        "connection_uri": "mongodb://localhost:27017",
+    }
+
+
 def test_promote_run_writes_live_bundle(monkeypatch):
     tmp_dir = Path.cwd() / ".tmp" / "test_promote_run_writes_live_bundle"
     if tmp_dir.exists():
@@ -55,7 +68,7 @@ def test_promote_run_writes_live_bundle(monkeypatch):
                 "params": {"paper": False},
             },
             "analysis": {"enabled": True, "log_to_mlflow": True},
-            "state_store": {"enabled": False, "connection_uri": "mongodb://localhost:27017", "database": "live_trading"},
+            "state_store": {"enabled": False, "connection_uri": "mongodb://localhost:27017", "database": "trading_test"},
             "alpaca": {},
             "aggregation": {"enabled": True, "aggregation_period_minutes": 5},
             "optimization": {"enabled": True},
@@ -90,6 +103,7 @@ def test_promote_run_writes_live_bundle(monkeypatch):
         assert cfg["analysis"]["log_to_mlflow"] is True
         assert cfg["state_store"]["enabled"] is True
         assert cfg["state_store"]["session_id"] == ""
+        assert cfg["state_store"]["database"] == "live_trading"
         assert cfg["state_store"]["connection_uri"] == "mongodb://localhost:27017"
         assert cfg["order_manager"]["order_manager"] == "trading.core.om.alpaca_om.AlpacaOrderManager"
         assert cfg["order_manager"]["paper"] is False
