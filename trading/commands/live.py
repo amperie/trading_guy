@@ -87,6 +87,14 @@ def _force_live_state_store(raw_cfg: dict) -> None:
         state_store["database"] = database
 
 
+def _default_live_broker_sync(raw_cfg: dict) -> None:
+    portfolio = raw_cfg.setdefault("portfolio", {})
+    if "implementation" in portfolio or "params" in portfolio:
+        portfolio.setdefault("params", {}).setdefault("sync_with_broker", True)
+    else:
+        portfolio.setdefault("sync_with_broker", True)
+
+
 def cmd_live(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
@@ -101,6 +109,7 @@ def cmd_live(args: argparse.Namespace):
         sys.exit(1)
 
     _force_live_state_store(raw_cfg)
+    _default_live_broker_sync(raw_cfg)
     validate_session_id(raw_cfg)
 
     creds = load_account_creds(args.account)

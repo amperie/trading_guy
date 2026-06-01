@@ -33,6 +33,13 @@ from utils.utils import apply_tunable_config, compute_warmup_start_date, parse_s
 logger = Logger().get_logger(__name__)
 
 
+def _safe_ray_shutdown() -> None:
+    try:
+        ray.shutdown()
+    except Exception:
+        logger.warning("Ray shutdown failed during cleanup; continuing.", exc_info=True)
+
+
 class _SplitValidationStatus:
     def __init__(self, total_trials: int, enabled: bool | None = None):
         self.total_trials = max(0, int(total_trials))
@@ -508,7 +515,7 @@ def _score_split_validation_trials(
     finally:
         status.close()
         if started_ray and ray.is_initialized():
-            ray.shutdown()
+            _safe_ray_shutdown()
 
     return scored_trials
 

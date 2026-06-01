@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import json
 import os
@@ -94,6 +95,13 @@ def coerce_string_value(value: str) -> Any:
         return False
     if lowered in {"none", "null"}:
         return None
+    if text.startswith(("[", "(")) and text.endswith(("]", ")")):
+        try:
+            parsed = ast.literal_eval(text)
+        except (SyntaxError, ValueError):
+            parsed = None
+        if isinstance(parsed, (list, tuple)):
+            return list(parsed)
     try:
         if text.startswith("0") and text != "0" and not text.startswith("0."):
             raise ValueError

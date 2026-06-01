@@ -28,6 +28,13 @@ logger = Logger().get_logger(__name__)
 _MISSING = object()
 
 
+def _safe_ray_shutdown() -> None:
+    try:
+        ray.shutdown()
+    except Exception:
+        logger.warning("Ray shutdown failed during cleanup; continuing.", exc_info=True)
+
+
 def _set_interrupt_handlers(handler) -> dict[int, object]:
     previous: dict[int, object] = {}
     for sig in (signal.SIGINT, getattr(signal, "SIGBREAK", None)):
@@ -760,4 +767,4 @@ def tune_backtest_hyperparameters(
         _restore_interrupt_handlers(previous_signal_handlers)
         _restore_env_var("TUNE_DISABLE_SIGINT_HANDLER", previous_sigint_setting)
         if ray.is_initialized():
-            ray.shutdown()
+            _safe_ray_shutdown()

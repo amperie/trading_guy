@@ -1,8 +1,10 @@
+from trading.config import ExperimentService
 from trading.launchers.mlflow_hpo_launcher import (
     _component_source_unusable,
     _merge_missing_component_sources,
     parse_dotted_overrides,
     prepare_hpo_config_from_source,
+    reconstruct_config_from_params,
     SourceRunContext,
 )
 
@@ -81,3 +83,44 @@ def test_prepare_hpo_config_from_source_applies_algorithm_param_overrides():
     assert prepared["algorithm"]["params"]["lookback"] == 25
     assert prepared["algorithm"]["params"]["history_length"] == 30
     assert prepared["algorithm"]["params"]["nested"]["threshold"] == 1.25
+
+
+def test_reconstruct_config_from_params_restores_logged_empty_tuple_list():
+    raw = reconstruct_config_from_params({
+        "config.mode": "hpo",
+        "config.algorithm.implementation": "tests.fixtures.custom_components.CustomAlgorithm",
+        "config.algorithm.params.lookback": "25",
+        "config.algorithm.params.threshold": "1.5",
+        "config.algorithm.params.history_length": "40",
+        "config.portfolio.implementation": "tests.fixtures.custom_components.CustomPortfolio",
+        "config.order_manager.implementation": "tests.fixtures.custom_components.CustomOrderManager",
+        "config.data_provider.implementation": "tests.fixtures.custom_components.CustomDataProvider",
+        "config.aggregation.enabled": "True",
+        "config.aggregation.expected_symbols": "()",
+        "config.analysis.log_to_mlflow": "False",
+        "config.state_store.enabled": "False",
+        "config.mlflow.enabled": "False",
+    })
+
+    assert raw["aggregation"]["expected_symbols"] == []
+    assert ExperimentService.from_dict(raw).aggregation.expected_symbols == []
+
+
+def test_reconstruct_config_from_params_restores_logged_tuple_list_values():
+    raw = reconstruct_config_from_params({
+        "config.mode": "hpo",
+        "config.algorithm.implementation": "tests.fixtures.custom_components.CustomAlgorithm",
+        "config.algorithm.params.lookback": "25",
+        "config.algorithm.params.threshold": "1.5",
+        "config.algorithm.params.history_length": "40",
+        "config.portfolio.implementation": "tests.fixtures.custom_components.CustomPortfolio",
+        "config.order_manager.implementation": "tests.fixtures.custom_components.CustomOrderManager",
+        "config.data_provider.implementation": "tests.fixtures.custom_components.CustomDataProvider",
+        "config.aggregation.expected_symbols": "('SPY', 'UPRO', 'SPXU')",
+        "config.analysis.log_to_mlflow": "False",
+        "config.state_store.enabled": "False",
+        "config.mlflow.enabled": "False",
+    })
+
+    assert raw["aggregation"]["expected_symbols"] == ["SPY", "UPRO", "SPXU"]
+    assert ExperimentService.from_dict(raw).aggregation.expected_symbols == ["SPY", "UPRO", "SPXU"]

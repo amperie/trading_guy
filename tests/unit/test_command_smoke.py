@@ -165,6 +165,36 @@ def test_cmd_live_overwrites_stale_order_manager_credentials(monkeypatch):
     assert om["api_key"] == "trade-key"
     assert om["secret_key"] == "trade-secret"
     assert captured["cfg"]["state_store"]["database"] == "configured_live"
+    assert captured["cfg"]["portfolio"]["sync_with_broker"] is True
+
+
+def test_cmd_live_preserves_explicit_broker_sync_false(monkeypatch):
+    raw_cfg = {
+        "mode": "live",
+        "alpaca": {"symbols_to_subscribe": ["SPY"]},
+        "analysis": {"enabled": False},
+        "aggregation": {"enabled": False},
+        "optimization": {"enabled": False},
+        "state_store": {"enabled": True, "session_id": "sess-1"},
+        "portfolio": {"portfolio": "dummy.PF", "sync_with_broker": False},
+        "order_manager": {"order_manager": "dummy.OM"},
+    }
+    captured = {}
+    built = SimpleNamespace(data_provider=None, algorithm=object(), order_manager=object(), portfolio=object())
+
+    monkeypatch.setattr(live_cmd, "load_raw_config", lambda path: dict(raw_cfg))
+    monkeypatch.setattr(live_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(live_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(live_cmd, "validate_session_id", lambda cfg: None)
+    monkeypatch.setattr(live_cmd, "load_account_creds", lambda account: {"api_key": "trade-key", "secret_key": "trade-secret"})
+    monkeypatch.setattr(live_cmd, "build_experiment_config", lambda cfg: captured.setdefault("cfg", cfg) or "normalized-config")
+    monkeypatch.setattr(live_cmd.ExperimentService, "build", lambda cfg: built)
+    monkeypatch.setattr(live_cmd.ExperimentService, "describe", lambda cfg: SimpleNamespace(config_hash="hash"))
+    monkeypatch.setattr(live_cmd, "AlpacaRealTimeEngine", lambda *args, **kwargs: StubEngine(*args, **kwargs))
+
+    live_cmd.cmd_live(SimpleNamespace(config="cfg.yaml", account="paper", session_id="sess-1", alpaca_override_url=None))
+
+    assert captured["cfg"]["portfolio"]["sync_with_broker"] is False
 
 
 def test_cmd_live_overwrites_stale_new_style_order_manager_credentials(monkeypatch):
@@ -175,6 +205,7 @@ def test_cmd_live_overwrites_stale_new_style_order_manager_credentials(monkeypat
         "aggregation": {"enabled": False},
         "optimization": {"enabled": False},
         "state_store": {"enabled": True, "session_id": "sess-1"},
+        "portfolio": {"implementation": "dummy.PF", "params": {}},
         "order_manager": {
             "implementation": "dummy.OM",
             "api_key": "stale-top-key",
@@ -202,6 +233,7 @@ def test_cmd_live_overwrites_stale_new_style_order_manager_credentials(monkeypat
     assert om["secret_key"] == "trade-secret"
     assert om["params"]["api_key"] == "trade-key"
     assert om["params"]["secret_key"] == "trade-secret"
+    assert captured["cfg"]["portfolio"]["params"]["sync_with_broker"] is True
 
 
 def test_cmd_live_walk_forward_mode(monkeypatch):
