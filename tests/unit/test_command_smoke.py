@@ -165,6 +165,8 @@ def test_cmd_live_overwrites_stale_order_manager_credentials(monkeypatch):
     assert om["api_key"] == "trade-key"
     assert om["secret_key"] == "trade-secret"
     assert captured["cfg"]["state_store"]["database"] == "configured_live"
+    assert captured["cfg"]["state_store"]["account_id"] == "paper"
+    assert captured["cfg"]["state_store"]["metadata"]["account_name"] == "paper"
     assert captured["cfg"]["portfolio"]["sync_with_broker"] is True
 
 

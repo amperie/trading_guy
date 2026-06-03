@@ -114,6 +114,10 @@ def cmd_live(args: argparse.Namespace):
 
     creds = load_account_creds(args.account)
     raw_cfg = resolve_alpaca_credentials(raw_cfg, creds)
+    state_store_cfg = raw_cfg.setdefault("state_store", {})
+    if not state_store_cfg.get("account_id"):
+        state_store_cfg["account_id"] = args.account
+    state_store_cfg.setdefault("metadata", {})["account_name"] = args.account
 
     alpaca_cfg = raw_cfg.get("alpaca", {})
     if not alpaca_cfg.get("api_key") or not alpaca_cfg.get("secret_key"):

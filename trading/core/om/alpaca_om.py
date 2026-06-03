@@ -533,7 +533,15 @@ class AlpacaOrderManager(OrderManager):
 
         logger.info(f"Local order to Alpaca: {order}")
         logger.info(f"Submitting order request to Alpaca: {req}")
-        alpaca_order = self.client.submit_order(order_data=req)
+        try:
+            alpaca_order = self.client.submit_order(order_data=req)
+        except Exception:
+            logger.exception(f"Alpaca submit_order failed for local order {order.order_id}")
+            raise
+        logger.info(
+            f"Alpaca accepted order: local={order.order_id} remote={alpaca_order.id} "
+            f"status={_enum_val(getattr(alpaca_order, 'status', ''))}"
+        )
         order.platform_id = str(alpaca_order.id)
         self._local_to_remote[order.order_id] = order.platform_id
         if order.type == OrderType.BRACKET and getattr(alpaca_order, "legs", None):

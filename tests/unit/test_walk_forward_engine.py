@@ -1075,21 +1075,43 @@ def test_tune_backtest_hyperparameters_seeds_first_trial_from_base_configs(monke
     assert captured["optuna_kwargs"]["points_to_evaluate"] == [{"regime.alpha": 7, "stop_pct": 3.5}]
 
 
-def test_tune_backtest_hyperparameters_rejects_seed_outside_search_space():
-    with pytest.raises(ValueError, match="outside randint range"):
-        run_backtest_ray.tune_backtest_hyperparameters(
-            symbol="SPY",
-            algorithm_class=DummyAlgorithm,
-            portfolio_class=DummyPortfolio,
-            data_provider_class=DummyDataProvider,
-            order_manager_class=DummyOrderManager,
-            base_algorithm_config={"regime": {"alpha": 10}},
-            base_portfolio_config={},
-            base_data_provider_config={},
-            base_backtest_config={},
-            search_space={"regime.alpha": run_backtest_ray.tune.randint(1, 10)},
-            algorithm_param_keys=["regime.alpha"],
-            portfolio_param_keys=[],
-            num_samples=1,
-            max_concurrent_trials=1,
-        )
+def test_tune_backtest_hyperparameters_skips_seed_outside_search_space(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(run_backtest_ray.ray, "init", lambda **kwargs: None)
+    monkeypatch.setattr(run_backtest_ray.ray, "is_initialized", lambda: True)
+    monkeypatch.setattr(run_backtest_ray.ray, "shutdown", lambda: None)
+    monkeypatch.setattr(run_backtest_ray.tune, "with_parameters", lambda fn, **kwargs: fn)
+    monkeypatch.setattr(run_backtest_ray, "OptunaSearch", lambda **kwargs: captured.setdefault("optuna_kwargs", kwargs) or object())
+
+    class FakeTuner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def fit(self):
+            return [SimpleNamespace(metrics={"_metric": 1.0}, config={"regime.alpha": 7})]
+
+    monkeypatch.setattr(run_backtest_ray.tune, "Tuner", FakeTuner)
+
+    best = run_backtest_ray.tune_backtest_hyperparameters(
+        symbol="SPY",
+        algorithm_class=DummyAlgorithm,
+        portfolio_class=DummyPortfolio,
+        data_provider_class=DummyDataProvider,
+        order_manager_class=DummyOrderManager,
+        base_algorithm_config={"regime": {"alpha": 10}},
+        base_portfolio_config={},
+        base_data_provider_config={},
+        base_backtest_config={},
+        search_space={
+            "regime.alpha": run_backtest_ray.tune.randint(1, 10),
+            "stop_pct": run_backtest_ray.tune.uniform(1.0, 5.0),
+        },
+        algorithm_param_keys=["regime.alpha"],
+        portfolio_param_keys=["stop_pct"],
+        num_samples=1,
+        max_concurrent_trials=1,
+    )
+
+    assert best == {"regime.alpha": 7}
+    assert "points_to_evaluate" not in captured["optuna_kwargs"]

@@ -1,5 +1,5 @@
 #!/bin/bash
 
-export MONGO_DB=trading_hp
+export MONGO_DB=live_trading
 
 python app.py

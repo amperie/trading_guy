@@ -136,24 +136,33 @@ def _get_nested_value(cfg: dict, dotted_key: str):
     return current
 
 
-def _validate_seed_value(key: str, value, domain) -> None:
+def _validate_seed_value(key: str, value, domain) -> str | None:
     if hasattr(domain, "categories"):
         if value not in domain.categories:
-            raise ValueError(f"Seeded HPO value {key}={value!r} is not in search space choices {list(domain.categories)!r}")
-        return
+            return f"not in search space choices {list(domain.categories)!r}"
+        return None
 
     lower = getattr(domain, "lower", None)
     upper = getattr(domain, "upper", None)
     domain_name = domain.__class__.__name__.lower()
     if lower is None or upper is None:
-        return
+        return None
     if "integer" in domain_name:
         if isinstance(value, bool) or not isinstance(value, Integral) or int(value) < lower or int(value) >= upper:
-            raise ValueError(f"Seeded HPO value {key}={value!r} is outside randint range [{lower}, {upper})")
-        return
+            return f"outside randint range [{lower}, {upper})"
+        return None
     if "float" in domain_name:
         if isinstance(value, bool) or not isinstance(value, Real) or float(value) < lower or float(value) > upper:
-            raise ValueError(f"Seeded HPO value {key}={value!r} is outside float range [{lower}, {upper}]")
+            return f"outside float range [{lower}, {upper}]"
+    return None
+
+
+def _add_seed_value(seeded: dict[str, object], key: str, value, domain) -> None:
+    invalid_reason = _validate_seed_value(key, value, domain)
+    if invalid_reason:
+        logger.warning("Skipping seeded HPO value %s=%r because it is %s", key, value, invalid_reason)
+        return
+    seeded[key] = value
 
 
 def _build_seeded_trial_config(
@@ -170,16 +179,21 @@ def _build_seeded_trial_config(
         value = _get_nested_value(base_algorithm_config, key)
         if value is _MISSING:
             continue
-        _validate_seed_value(key, value, search_space[key])
-        seeded[key] = value
+        _add_seed_value(seeded, key, value, search_space[key])
     for key in portfolio_param_keys:
         if key not in search_space:
             continue
         value = _get_nested_value(base_portfolio_config, key)
         if value is _MISSING:
             continue
-        _validate_seed_value(key, value, search_space[key])
-        seeded[key] = value
+        _add_seed_value(seeded, key, value, search_space[key])
+    missing_seed_keys = set(search_space) - set(seeded)
+    if missing_seed_keys:
+        logger.warning(
+            "Skipping HPO warm-start seed because it does not cover all search-space keys: missing=%s",
+            sorted(missing_seed_keys),
+        )
+        return {}
     return seeded
 
 

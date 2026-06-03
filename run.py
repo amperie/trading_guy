@@ -26,6 +26,7 @@ from trading.commands import (
     cmd_mongo_backtest,
     cmd_promote,
     cmd_session_replay,
+    cmd_split_backtest,
     cmd_walk_forward,
     cmd_walk_forward_hpo,
 )
@@ -160,6 +161,10 @@ def build_parser() -> argparse.ArgumentParser:
             "    --config --account --session-id [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
             "    [--no-mlflow] [--run-name] [--agg-period]\n"
             "    Example: python run.py mongo-backtest --config trading/promoted/my_live_bundle/my_live_bundle.yaml --account paper --session-id live-20260513-a\n"
+            "  split-backtest:\n"
+            "    Run fixed-parameter train and validation backtests over explicit date windows; no HPO/search.\n"
+            "    --config --account --train-start --train-end --val-start --val-end [--split-name]\n"
+            "    Example: python run.py split-backtest --config configs/example_backtest.yaml --account paper --train-start 2021-01-01 --train-end 2023-12-31 --val-start 2024-01-01 --val-end 2024-06-30\n"
             "  live:\n"
             "    Start a live trading session using the configured broker, strategy, and portfolio wiring.\n"
             "    Supports plain live execution, background self-optimization, and live walk-forward optimization\n"
@@ -306,6 +311,39 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     mongo_backtest_p.set_defaults(func=cmd_mongo_backtest, mongo_backtest=True)
+
+    split_backtest_p = subparsers.add_parser(
+        "split-backtest",
+        parents=[shared],
+        help="Run fixed-parameter train and validation backtests",
+        formatter_class=argparse.RawTextHelpFormatter,
+        description=(
+            "Run the same config over paired train and validation date windows. "
+            "This does not run HPO; it logs separate regular backtests with _train and _val run-name suffixes."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  python run.py split-backtest --config configs/example_backtest.yaml --account paper "
+            "--train-start 2021-01-01 --train-end 2023-12-31 --val-start 2024-01-01 --val-end 2024-06-30\n"
+            "\n"
+            "Config alternative:\n"
+            "  split_validation:\n"
+            "    splits:\n"
+            "      - {name: 2024_h1, train_start: '2021-01-01', train_end: '2023-12-31', val_start: '2024-01-01', val_end: '2024-06-30'}\n"
+        ),
+    )
+    split_backtest_p.add_argument("--train-start", dest="train_start", help="Training window start date")
+    split_backtest_p.add_argument("--train-end", dest="train_end", help="Training window end date")
+    split_backtest_p.add_argument("--val-start", dest="val_start", help="Validation window start date")
+    split_backtest_p.add_argument("--val-end", dest="val_end", help="Validation window end date")
+    split_backtest_p.add_argument("--split-name", dest="split_name", default="split", help="Name for this split")
+    split_backtest_p.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        default="scratch/generated_split_backtest_configs",
+        help="Directory for generated train/validation YAML configs",
+    )
+    split_backtest_p.set_defaults(func=cmd_split_backtest)
 
     live_p = subparsers.add_parser(
         "live",

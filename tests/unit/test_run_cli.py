@@ -40,6 +40,28 @@ def test_build_parser_mongo_backtest_args():
     assert args.func is not None
 
 
+def test_build_parser_split_backtest_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "split-backtest",
+        "--config", "configs/example_backtest.yaml",
+        "--account", "paper",
+        "--train-start", "2021-01-01",
+        "--train-end", "2023-12-31",
+        "--val-start", "2024-01-01",
+        "--val-end", "2024-06-30",
+        "--split-name", "2024_h1",
+    ])
+
+    assert args.command == "split-backtest"
+    assert args.train_start == "2021-01-01"
+    assert args.train_end == "2023-12-31"
+    assert args.val_start == "2024-01-01"
+    assert args.val_end == "2024-06-30"
+    assert args.split_name == "2024_h1"
+    assert args.func is not None
+
+
 def test_build_parser_session_replay_args():
     parser = build_parser()
     args = parser.parse_args([
@@ -198,6 +220,7 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "promote" in help_text
     assert "trading/promoted/my_live_bundle/my_live_bundle.yaml" in help_text
     assert "mongo-backtest" in help_text
+    assert "split-backtest" in help_text
     assert "configs/example_live_walk_forward.yaml" in help_text
     assert "hpo-split" in help_text
     assert "hpo-split-from-mlflow" in help_text
