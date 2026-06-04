@@ -436,6 +436,181 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
     }
 
 
+def test_pipeline_paper_from_session_reuses_source_session_by_default(monkeypatch):
+    calls = {}
+
+    class FakeStore:
+        def get_session(self, session_id):
+            calls["lookup_session_id"] = session_id
+            return {"metadata": {"source_run_url": "http://mlflow/#/experiments/1/runs/abc"}}
+
+        def update_session(self, session_id, update):
+            calls["source_session_update"] = (session_id, update)
+
+    monkeypatch.setattr(pipeline_cmd, "_resolve_session_store", lambda **kwargs: FakeStore())
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "materialize_bundle",
+        lambda *args, **kwargs: SimpleNamespace(
+            config_path="trading/promoted/bundle/bundle.yaml",
+            manifest_path="trading/promoted/bundle/promotion_manifest.json",
+        ),
+    )
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {}})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "log_registered_bundle",
+        lambda raw_cfg, bundle, **kwargs: (
+            calls.setdefault("bundle_metadata", kwargs["metadata"]) and {"run_url": "bundle-url"}
+        ),
+    )
+
+    def fake_cmd_live(args):
+        calls["live_session_id"] = args.session_id
+        calls["live_source_session_id"] = args.source_session_id
+        return {"session_id": args.session_id, "config_hash": "hash"}
+
+    monkeypatch.setattr(pipeline_cmd, "cmd_live", fake_cmd_live)
+
+    pipeline_cmd.cmd_pipeline_paper_from_session(
+        SimpleNamespace(
+            source_session_id="adx_momentum_filter_ema_crossover",
+            session_id=None,
+            account="paper3",
+            name=None,
+            tracking_uri=None,
+            connection_uri=None,
+            database=None,
+            run_name=None,
+            agg_period=None,
+            alpaca_override_url=None,
+            symbol=None,
+            cash=None,
+            algorithm=None,
+            algorithm_url=None,
+            portfolio=None,
+            portfolio_url=None,
+            no_mlflow=False,
+        )
+    )
+
+    assert calls["lookup_session_id"] == "adx_momentum_filter_ema_crossover"
+    assert calls["live_session_id"] == "adx_momentum_filter_ema_crossover"
+    assert calls["live_source_session_id"] == "adx_momentum_filter_ema_crossover"
+    assert calls["bundle_metadata"]["session_id"] == "adx_momentum_filter_ema_crossover"
+    assert calls["source_session_update"] == (
+        "adx_momentum_filter_ema_crossover",
+        {"metadata.account_name": "paper3"},
+    )
+
+
+def test_pipeline_paper_from_session_allows_explicit_target_session(monkeypatch):
+    calls = {}
+
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "_resolve_session_store",
+        lambda **kwargs: SimpleNamespace(
+            get_session=lambda session_id: {"metadata": {"launch_config_ref": "trading/promoted/bundle/bundle.yaml"}},
+            update_session=lambda session_id, update: calls.setdefault("source_session_update", (session_id, update)),
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "materialize_bundle",
+        lambda *args, **kwargs: SimpleNamespace(
+            config_path="trading/promoted/bundle/bundle.yaml",
+            manifest_path="trading/promoted/bundle/promotion_manifest.json",
+        ),
+    )
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {}})
+    monkeypatch.setattr(pipeline_cmd, "log_registered_bundle", lambda *args, **kwargs: {"run_url": "bundle-url"})
+
+    def fake_cmd_live(args):
+        calls["live_session_id"] = args.session_id
+        return {"session_id": args.session_id}
+
+    monkeypatch.setattr(pipeline_cmd, "cmd_live", fake_cmd_live)
+
+    pipeline_cmd.cmd_pipeline_paper_from_session(
+        SimpleNamespace(
+            source_session_id="source-session",
+            session_id="paper-rerun-1",
+            account="paper3",
+            name=None,
+            tracking_uri=None,
+            connection_uri=None,
+            database=None,
+            run_name=None,
+            agg_period=None,
+            alpaca_override_url=None,
+            symbol=None,
+            cash=None,
+            algorithm=None,
+            algorithm_url=None,
+            portfolio=None,
+            portfolio_url=None,
+            no_mlflow=False,
+        )
+    )
+
+    assert calls["live_session_id"] == "paper-rerun-1"
+    assert calls["source_session_update"] == ("source-session", {"metadata.account_name": "paper3"})
+
+
+def test_pipeline_paper_from_session_keeps_existing_source_account_name(monkeypatch):
+    calls = {}
+
+    class FakeStore:
+        def get_session(self, session_id):
+            return {
+                "metadata": {
+                    "account_name": "paper2",
+                    "launch_config_ref": "trading/promoted/bundle/bundle.yaml",
+                }
+            }
+
+        def update_session(self, session_id, update):
+            calls["source_session_update"] = (session_id, update)
+
+    monkeypatch.setattr(pipeline_cmd, "_resolve_session_store", lambda **kwargs: FakeStore())
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "materialize_bundle",
+        lambda *args, **kwargs: SimpleNamespace(
+            config_path="trading/promoted/bundle/bundle.yaml",
+            manifest_path="trading/promoted/bundle/promotion_manifest.json",
+        ),
+    )
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {}})
+    monkeypatch.setattr(pipeline_cmd, "log_registered_bundle", lambda *args, **kwargs: {"run_url": "bundle-url"})
+    monkeypatch.setattr(pipeline_cmd, "cmd_live", lambda args: {"session_id": args.session_id})
+
+    pipeline_cmd.cmd_pipeline_paper_from_session(
+        SimpleNamespace(
+            source_session_id="source-session",
+            session_id=None,
+            account="paper3",
+            name=None,
+            tracking_uri=None,
+            connection_uri=None,
+            database=None,
+            run_name=None,
+            agg_period=None,
+            alpaca_override_url=None,
+            symbol=None,
+            cash=None,
+            algorithm=None,
+            algorithm_url=None,
+            portfolio=None,
+            portfolio_url=None,
+            no_mlflow=False,
+        )
+    )
+
+    assert "source_session_update" not in calls
+
+
 def test_pipeline_research_preflight_rejects_invalid_split_objective_metric(monkeypatch):
     monkeypatch.setattr(
         pipeline_cmd,

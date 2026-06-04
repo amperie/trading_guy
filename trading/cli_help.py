@@ -114,7 +114,7 @@ PIPELINE_PAPER_FROM_SESSION_EPILOG = """Examples:
 
 The command loads the stored MongoDB session, reads metadata.source_run_url or
 metadata.launch_config_ref, materializes the referenced bundle/config, and
-starts a fresh paper-trading session with a new session ID.
+resumes paper trading in the source session unless --session-id is provided.
 """
 
 PIPELINE_REVIEW_EPILOG = """Example:

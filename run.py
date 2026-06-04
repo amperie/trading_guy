@@ -645,11 +645,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawTextHelpFormatter,
         description=(
             "Loads a prior MongoDB session, reads metadata.source_run_url or metadata.launch_config_ref, "
-            "materializes the referenced bundle/config, and starts a new paper-trading session."
+            "materializes the referenced bundle/config, and resumes paper trading in that session."
         ),
     )
     pipeline_paper_session_p.add_argument("--source-session-id", required=True, help="Existing MongoDB session ID to relaunch from")
-    pipeline_paper_session_p.add_argument("--session-id", dest="session_id", help="Optional new paper session ID")
+    pipeline_paper_session_p.add_argument("--session-id", dest="session_id", help="Optional different paper session ID")
     pipeline_paper_session_p.add_argument("--name", help="Optional local bundle name")
     pipeline_paper_session_p.add_argument("--run-name", dest="run_name", help="Override MLflow run name for the relaunched paper session")
     pipeline_paper_session_p.add_argument("--agg-period", dest="agg_period", type=int, help="Override aggregation period")

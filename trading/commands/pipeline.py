@@ -84,6 +84,13 @@ def _resolve_session_launch_source(metadata: dict[str, Any]) -> str | None:
     return None
 
 
+def _backfill_session_account_name(store, session_id: str, session_doc: dict[str, Any], account_name: str) -> None:
+    metadata = session_doc.get("metadata") or {}
+    if metadata.get("account_name"):
+        return
+    store.update_session(session_id, {"metadata.account_name": account_name})
+
+
 def _as_live_args(args: argparse.Namespace, config_path: str, session_id: str) -> argparse.Namespace:
     source_run_url = None
     config_ref = str(config_path)
@@ -339,6 +346,7 @@ def cmd_pipeline_paper_from_session(args: argparse.Namespace):
     session_doc = store.get_session(args.source_session_id)
     if session_doc is None:
         raise ValueError(f"Session '{args.source_session_id}' not found in MongoDB")
+    _backfill_session_account_name(store, args.source_session_id, session_doc, args.account)
 
     metadata = session_doc.get("metadata") or {}
     launch_source = _resolve_session_launch_source(metadata)
@@ -354,7 +362,7 @@ def cmd_pipeline_paper_from_session(args: argparse.Namespace):
         paper=True,
         tracking_uri=getattr(args, "tracking_uri", None),
     )
-    session_id = getattr(args, "session_id", None) or build_session_id("paper")
+    session_id = getattr(args, "session_id", None) or args.source_session_id
     raw_cfg = load_raw_config(bundle.config_path)
     bundle_record = log_registered_bundle(
         {**copy.deepcopy(raw_cfg), "pipeline": {**((raw_cfg.get("pipeline") or {})), "experiment_name": _pipeline_experiment_name(raw_cfg, "bundle_registry")}},
