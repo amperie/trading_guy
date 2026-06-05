@@ -404,3 +404,77 @@ class TestBracketOrderStatusProgression:
 
         profit_order = updated_order.get_child_order("PROFIT")
         assert profit_order.status == OrderStatus.FILLED
+
+    def test_trailing_bracket_stop_ratchets_and_triggers(self):
+        om = BacktestingOrderManager()
+        symbol = "UPRO"
+        tick_initial = [PriceData(symbol, datetime(2024, 1, 1, 9, 30), 100, 100, 100, 100, 1000)]
+        bracket_order = BracketOrder.create_trailing_bracket_order(
+            symbol=symbol,
+            high_sell_price=120.0,
+            quantity=10,
+            trail_percent=5.0,
+            current_tick=tick_initial,
+        )
+
+        positions = {}
+        bracket_order = om.submit_order(bracket_order, tick_initial, positions, 10000.0)
+        positions[symbol] = Position(symbol, bracket_order.quantity)
+        stop_order = bracket_order.get_child_order("STOP")
+
+        assert stop_order.type == OrderType.TRAILING_STOP
+        assert stop_order.price == 95.0
+
+        om.update_order_status(
+            bracket_order,
+            [PriceData(symbol, datetime(2024, 1, 1, 9, 31), 110, 110, 110, 110, 1000)],
+            positions,
+            0.0,
+        )
+        assert bracket_order.status == OrderStatus.PENDING_SALE
+        assert stop_order.trail_hwm == 110.0
+        assert stop_order.price == 104.5
+
+        om.update_order_status(
+            bracket_order,
+            [PriceData(symbol, datetime(2024, 1, 1, 9, 32), 107, 107, 107, 107, 1000)],
+            positions,
+            0.0,
+        )
+        assert stop_order.price == 104.5, "Trailing stop must not loosen"
+
+        final = om.update_order_status(
+            bracket_order,
+            [PriceData(symbol, datetime(2024, 1, 1, 9, 33), 104, 104, 104, 104, 1000)],
+            positions,
+            0.0,
+        )
+        assert final.status == OrderStatus.FILLED
+        assert final.SOLD_ORDER == stop_order
+        assert stop_order.status == OrderStatus.FILLED
+        assert final.get_child_order("PROFIT").status == OrderStatus.CANCELED
+
+    def test_trailing_bracket_profit_taker_cancels_trailing_stop(self):
+        om = BacktestingOrderManager()
+        symbol = "UPRO"
+        tick_initial = [PriceData(symbol, datetime(2024, 1, 1, 9, 30), 100, 100, 100, 100, 1000)]
+        bracket_order = BracketOrder.create_trailing_bracket_order(
+            symbol=symbol,
+            high_sell_price=110.0,
+            quantity=10,
+            trail_percent=5.0,
+            current_tick=tick_initial,
+        )
+        positions = {}
+        bracket_order = om.submit_order(bracket_order, tick_initial, positions, 10000.0)
+        positions[symbol] = Position(symbol, bracket_order.quantity)
+
+        final = om.update_order_status(
+            bracket_order,
+            [PriceData(symbol, datetime(2024, 1, 1, 9, 31), 111, 111, 111, 111, 1000)],
+            positions,
+            0.0,
+        )
+        assert final.status == OrderStatus.FILLED
+        assert final.SOLD_ORDER.type == OrderType.PROFIT_TAKER
+        assert final.get_child_order("STOP").status == OrderStatus.CANCELED

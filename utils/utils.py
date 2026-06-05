@@ -462,6 +462,9 @@ def serialize_order(order: Order) -> dict:
         "tx_cost": order.tx_cost,
         "parent_id": order.parent_id,
         "platform_id": order.platform_id,
+        "trail_percent": order.trail_percent,
+        "trail_price": order.trail_price,
+        "trail_hwm": order.trail_hwm,
         "processed_by_portfolio": order.processed_by_portfolio,
         "is_bracket": isinstance(order, BracketOrder),
     }
@@ -514,6 +517,9 @@ def deserialize_order(data: dict) -> Union[Order, BracketOrder]:
             tx_cost=data.get("tx_cost", 0.0),
             parent_id=data.get("parent_id"),
             platform_id=data.get("platform_id"),
+            trail_percent=data.get("trail_percent"),
+            trail_price=data.get("trail_price"),
+            trail_hwm=data.get("trail_hwm"),
         )
         order.processed_by_portfolio = data.get("processed_by_portfolio", False)
         order.MANUAL_SALE = data.get("manual_sale", False)
@@ -533,6 +539,9 @@ def deserialize_order(data: dict) -> Union[Order, BracketOrder]:
             tx_cost=data.get("tx_cost", 0.0),
             parent_id=data.get("parent_id"),
             platform_id=data.get("platform_id"),
+            trail_percent=data.get("trail_percent"),
+            trail_price=data.get("trail_price"),
+            trail_hwm=data.get("trail_hwm"),
         )
         order.processed_by_portfolio = data.get("processed_by_portfolio", False)
 

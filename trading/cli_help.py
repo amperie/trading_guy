@@ -52,6 +52,34 @@ Notes:
   --start-date runs an additional extended Alpaca replay from that date to the session end.
 """
 
+SESSION_REPLAY_FROM_MLFLOW_DESCRIPTION = (
+    "Replay a stored live session offline using algorithm and portfolio config recovered "
+    "from a prior MLflow run. This mode runs a clean backtest over the specified "
+    "MongoDB session's bars with starting cash and no restored positions or orders."
+)
+
+SESSION_REPLAY_FROM_MLFLOW_EPILOG = """Examples:
+  python run.py session-replay-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --session-id live-20260512
+  python run.py session-replay-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --session-id live-20260512 --tracking-uri http://localhost:5000
+  python run.py session-replay-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --session-id live-20260512 --start-date 2026-05-01
+  python run.py session-replay-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --session-id live-20260512 --mlflow-experiment-name "Replay Audits"
+
+Inputs:
+  --run-url      MLflow run URL containing a YAML config artifact or logged config.* params.
+  --session-id   MongoDB session whose saved bars, metadata, and opening state are replayed.
+  --database     Optional MongoDB database override for the session lookup.
+  --mlflow-experiment-name  Optional MLflow experiment override for the replay result.
+
+Output:
+  The recovered replay YAML is saved under scratch/generated_session_replay_configs/.
+
+Notes:
+  Without --database, the command uses config.yaml state_store.default_live_database, then state_store.database.
+  The algorithm warms up through its normal on_data() gate as the Mongo bars are replayed.
+  Use plain session-replay when you want to compare against restored session state and live results.
+  Use session-replay-from-mlflow when you want a clean backtest of a specific MLflow run's config/code against a session's bars.
+"""
+
 PROMOTE_EPILOG = """Examples:
   python run.py promote --run-url http://localhost:5000/#/experiments/1/runs/<run_id>
   python run.py promote --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --name my_live_bundle

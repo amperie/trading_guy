@@ -141,6 +141,18 @@ class TestInitialization:
 
         assert om.time_in_force == "gtc"
 
+    def test_init_custom_trailing_replace_increment(self, mock_alpaca_client):
+        """Support custom minimum stop-leg replacement increment."""
+        cfg = {
+            "api_key": "test_key",
+            "secret_key": "test_secret",
+            "paper": True,
+            "trailing_stop_replace_min_increment": 0.05,
+        }
+        om = AlpacaOrderManager(cfg)
+
+        assert om.trailing_stop_replace_min_increment == 0.05
+
 
 # ============================================================================
 # Test Class 2: Market Order Submission
@@ -273,6 +285,69 @@ class TestBracketOrderSubmission:
 
         with pytest.raises(NotImplementedError, match="BUY entries only"):
             alpaca_om.submit_order(bracket, sample_tick, {}, pf_cash=10000.0)
+
+
+    def test_trailing_bracket_submits_regular_bracket_and_replaces_stop_leg(
+            self, alpaca_om, mock_alpaca_client, sample_tick):
+        """Trailing brackets use Alpaca bracket/OCO semantics and replace the stop leg."""
+        def mock_submit_bracket(order_data):
+            main_order = Mock()
+            main_order.id = "main-trailing"
+            main_order.status = "accepted"
+            main_order.filled_avg_price = None
+            main_order.filled_qty = None
+            stop_leg = Mock(id="stop-trailing", order_type="stop", status="held")
+            profit_leg = Mock(id="profit-trailing", order_type="limit", status="held")
+            main_order.legs = [stop_leg, profit_leg]
+            return main_order
+
+        mock_alpaca_client.submit_order.side_effect = mock_submit_bracket
+        bracket = BracketOrder.create_trailing_bracket_order(
+            symbol="SPY",
+            high_sell_price=160.0,
+            quantity=10,
+            trail_percent=5.0,
+            tx_cost=1.0,
+            current_tick=sample_tick,
+        )
+
+        result = alpaca_om.submit_order(bracket, sample_tick, {}, pf_cash=10000.0)
+        stop_order = result.get_child_order("STOP")
+        assert stop_order.type == OrderType.TRAILING_STOP
+        assert stop_order.platform_id == "stop-trailing"
+
+        mock_alpaca_client.get_order_by_id.side_effect = None
+        mock_alpaca_client.get_order_by_id.return_value = Mock(
+            id=result.platform_id,
+            status="filled",
+            filled_avg_price="150.50",
+            filled_qty="10",
+            filled_at=datetime.now(),
+            time_in_force="day",
+            legs=[
+                Mock(id="stop-trailing", status="held", order_type="stop"),
+                Mock(id="profit-trailing", status="held", order_type="limit"),
+            ],
+        )
+
+        tick_higher = [PriceData(
+            symbol="SPY",
+            timestamp=datetime(2024, 1, 15, 10, 1),
+            open=155.0,
+            high=155.0,
+            low=155.0,
+            close=155.0,
+            volume=100000,
+        )]
+        updated = alpaca_om.update_order_status(result, tick_higher, {}, 0.0)
+
+        assert updated.status == OrderStatus.PENDING_SALE
+        assert stop_order.trail_hwm == 155.0
+        assert stop_order.price == 147.25
+        mock_alpaca_client.replace_order_by_id.assert_called_once()
+        args, kwargs = mock_alpaca_client.replace_order_by_id.call_args
+        assert args[0] == "stop-trailing"
+        assert kwargs["order_data"].stop_price == 147.25
 
 
 # ============================================================================

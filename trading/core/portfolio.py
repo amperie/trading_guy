@@ -229,6 +229,56 @@ class Portfolio(ABC):
             return pd.close
         return self.previous_price.get(symbol)
 
+    def get_bracket_config(self, defaults: dict | None = None) -> dict:
+        """Return bracket config with legacy flat keys merged in.
+
+        Preferred config:
+            bracket: {stop_type: fixed|trailing, stop_pct: N, profit_pct: N}
+
+        Legacy flat keys are still supported so existing configs and HPO
+        search spaces keep working.
+        """
+        cfg = dict(defaults or {})
+        for key in ("enabled", "stop_type", "stop_pct", "profit_pct", "trailing_stop_pct", "trailing_stop_price"):
+            if key in self.cfg:
+                cfg[key] = self.cfg[key]
+        bracket_cfg = self.cfg.get("bracket", {})
+        if isinstance(bracket_cfg, dict):
+            cfg.update(bracket_cfg)
+        cfg.setdefault("enabled", True)
+        cfg.setdefault("stop_type", "fixed")
+        return cfg
+
+    def create_configured_bracket_order(
+            self,
+            symbol: str,
+            entry_price: float,
+            quantity: int,
+            tx_cost: float,
+            current_tick: list[PriceData],
+            bracket_cfg: dict | None = None) -> BracketOrder:
+        """Create a fixed or trailing bracket order from portfolio config."""
+        cfg = bracket_cfg or self.get_bracket_config()
+        stop_pct = float(cfg["stop_pct"])
+        profit_pct = float(cfg["profit_pct"])
+        profit_price = entry_price * (1.0 + profit_pct / 100.0)
+        stop_price = entry_price * (1.0 - stop_pct / 100.0)
+
+        if str(cfg.get("stop_type", "fixed")).lower() == "trailing":
+            trail_price = cfg.get("trailing_stop_price")
+            return BracketOrder.create_trailing_bracket_order(
+                symbol=symbol,
+                high_sell_price=profit_price,
+                quantity=quantity,
+                trail_percent=None if trail_price is not None else cfg.get("trailing_stop_pct", stop_pct),
+                trail_price=trail_price,
+                tx_cost=tx_cost,
+                current_tick=current_tick,
+            )
+        return BracketOrder.create_bracket_order(
+            symbol, profit_price, stop_price, quantity, tx_cost, current_tick
+        )
+
     @final
     def _update_pf_value(self, current_tick: list[PriceData]) -> float:
         """
@@ -409,7 +459,12 @@ class Portfolio(ABC):
                 # Sale happened, update from the SOLD_ORDER
                 so = order.SOLD_ORDER
                 self._update_pf_sell(so)
-                exit_type = "STOP-LOSS" if so.type == OrderType.STOP_LOSS else "PROFIT-TAKER" if so.type == OrderType.PROFIT_TAKER else "MANUAL"
+                exit_type = (
+                    "STOP-LOSS" if so.type == OrderType.STOP_LOSS
+                    else "TRAILING-STOP" if so.type == OrderType.TRAILING_STOP
+                    else "PROFIT-TAKER" if so.type == OrderType.PROFIT_TAKER
+                    else "MANUAL"
+                )
                 logger.debug(
                     f"BRACKET order {order.symbol} - Exited via {exit_type} @ ${so.price:.2f}///"
                     f"${(so.price - order.price) * so.quantity:.2f} net "

@@ -77,6 +77,30 @@ def test_build_parser_session_replay_args():
     assert args.start_date == "2026-01-01"
 
 
+def test_build_parser_session_replay_from_mlflow_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "session-replay-from-mlflow",
+        "--account", "paper",
+        "--run-url", "http://localhost:5000/#/experiments/1/runs/abc123",
+        "--session-id", "live-1",
+        "--tracking-uri", "http://localhost:5000",
+        "--database", "live_trading",
+        "--mlflow-experiment-name", "Replay Audits",
+        "--start-date", "2026-01-01",
+    ])
+
+    assert args.command == "session-replay-from-mlflow"
+    assert args.account == "paper"
+    assert args.run_url == "http://localhost:5000/#/experiments/1/runs/abc123"
+    assert args.session_id == "live-1"
+    assert args.tracking_uri == "http://localhost:5000"
+    assert args.database == "live_trading"
+    assert args.mlflow_experiment_name == "Replay Audits"
+    assert args.start_date == "2026-01-01"
+    assert args.func is not None
+
+
 def test_build_parser_hpo_from_mlflow_args():
     parser = build_parser()
     args = parser.parse_args([
@@ -224,6 +248,8 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "configs/example_live_walk_forward.yaml" in help_text
     assert "hpo-split" in help_text
     assert "hpo-split-from-mlflow" in help_text
+    assert "session-replay-from-mlflow" in help_text
+    assert "Recover config and component code from an MLflow run" in help_text
     assert "MLflow configs are opened in an editor" in help_text
 
 
@@ -307,6 +333,22 @@ def test_hpo_split_from_mlflow_help_mentions_validation_period_days(capsys):
     assert "--tracking-uri" in help_text
     assert "--editor" in help_text
     assert "hpo.validation_period_days" in help_text
+
+
+def test_session_replay_from_mlflow_help_mentions_recovered_config(capsys):
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["session-replay-from-mlflow", "-h"])
+    help_text = capsys.readouterr().out
+    assert "--run-url" in help_text
+    assert "--tracking-uri" in help_text
+    assert "--session-id" in help_text
+    assert "--database" in help_text
+    assert "--mlflow-experiment-name" in help_text
+    assert "scratch/generated_session_replay_configs" in help_text
+    assert "specified MongoDB session's bars" in help_text
+    assert "clean backtest" in help_text
+    assert "warms up through its normal on_data() gate" in help_text
 
 
 def test_hpo_split_help_mentions_validation_period_days(capsys):

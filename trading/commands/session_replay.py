@@ -23,9 +23,130 @@ from utils.utils import instantiate_from_string
 logger = Logger().get_logger(__name__)
 
 
+def _resolve_state_store_params(ss_cfg: dict) -> tuple[str, str]:
+    from trading.data_providers.session_replay_data_provider import SessionReplayDataProvider
+
+    return SessionReplayDataProvider._resolve_mongo_params(
+        ss_cfg.get("connection_uri"),
+        ss_cfg.get("database"),
+    )
+
+
+def _build_algorithm_from_config(raw_cfg: dict, fallback_class_path: str, fallback_cfg: dict, fallback_history_length: int):
+    if not raw_cfg.get("_use_config_components_for_replay"):
+        return instantiate_from_string(
+            fallback_class_path,
+            cfg=dict(fallback_cfg),
+            history_length=fallback_history_length,
+        )
+
+    from trading.config.component_loader import instantiate_component
+    from trading.config.service import normalize_config_dict
+
+    component = normalize_config_dict({k: v for k, v in raw_cfg.items() if not k.startswith("_")}).algorithm
+    kwargs = dict(component.params)
+    history_length = kwargs.pop("history_length", 0)
+    return instantiate_component(component, cfg=kwargs, history_length=history_length)
+
+
+def _build_portfolio_from_config(raw_cfg: dict, fallback_class_path: str, fallback_cfg: dict, om, *, keep_history: bool = True):
+    if not raw_cfg.get("_use_config_components_for_replay"):
+        return instantiate_from_string(
+            fallback_class_path,
+            cfg={**fallback_cfg, "keep_history": keep_history},
+            order_manager=om,
+        )
+
+    from trading.config.component_loader import instantiate_component
+    from trading.config.service import normalize_config_dict
+
+    component = normalize_config_dict({k: v for k, v in raw_cfg.items() if not k.startswith("_")}).portfolio
+    kwargs = {**component.params, "keep_history": keep_history}
+    return instantiate_component(component, cfg=kwargs, order_manager=om)
+
+
+def _run_clean_mongo_backtest(
+    *,
+    args: argparse.Namespace,
+    raw_cfg: dict,
+    meta: dict,
+    al_class_path: str | None,
+    al_cfg_raw: dict,
+    pf_class_path: str | None,
+    pf_cfg_raw: dict,
+    history_length: int,
+    connection_uri: str,
+    database: str,
+):
+    from trading.analysis.portfolio_analyzer import PortfolioAnalyzer
+    from trading.commands.common import flatten_config
+    from trading.core.om.backtesting_om import BacktestingOrderManager
+    from trading.data_providers.mongodb_data_provider import MongoDBDataProvider
+    from trading.engines.backtest_engine import BacktestingEngine
+
+    om = BacktestingOrderManager(cfg={"market_hours_only": True})
+    al = _build_algorithm_from_config(raw_cfg, al_class_path, al_cfg_raw, history_length)
+    pf = _build_portfolio_from_config(raw_cfg, pf_class_path, pf_cfg_raw, om)
+
+    mongo_dp = MongoDBDataProvider(cfg={
+        "session_id": args.session_id,
+        "connection_uri": connection_uri,
+        "database": database,
+    })
+    BacktestingEngine(cfg={}, dp=mongo_dp, al=al, om=om, pf=pf).run()
+    logger.info(
+        f"Clean MongoDB backtest complete - Value: ${pf.total_value:,.2f}, "
+        f"Cash: ${pf.cash:,.2f}, Positions: {list(pf.positions.keys())}"
+    )
+
+    analysis_cfg = raw_cfg.get("analysis", {})
+    log_mlflow = analysis_cfg.get("log_to_mlflow", True) and not getattr(args, "no_mlflow", False)
+    experiment_name = analysis_cfg.get("experiment_name", "Session Replay")
+    run_name = getattr(args, "run_name", None) or analysis_cfg.get("run_name") or f"mongo-backtest-{args.session_id[:28]}"
+
+    analyzer = PortfolioAnalyzer(pf)
+    report, summary = ExperimentReporter.build_single_report(
+        analyzer=analyzer,
+        experiment_name=experiment_name,
+        run_name=run_name,
+        description=analysis_cfg.get("description"),
+        tags=get_git_info() or None,
+        parameters={
+            k[:250]: v
+            for k, v in {
+                "session_id": args.session_id,
+                "replay_mode": "clean_mongo_backtest",
+                **flatten_config({"meta": meta}),
+                **({"source_run_url": args.source_run_url} if getattr(args, "source_run_url", None) else {}),
+                **({"source_run_id": args.source_run_id} if getattr(args, "source_run_id", None) else {}),
+            }.items()
+            if isinstance(v, (str, int, float, bool)) or v is None
+        },
+        config_artifact_paths=[args.config] if getattr(args, "config", None) else None,
+    )
+
+    mlflow_info: dict[str, str] = {}
+    if log_mlflow:
+        mlflow_info = ExperimentReporter.log_to_mlflow(report) or {}
+        logger.info("MLflow run complete")
+    else:
+        ExperimentReporter.show_summary(summary)
+
+    metrics = analyzer.get_metrics()
+    return {
+        "session_id": args.session_id,
+        "mode": "clean_mongo_backtest",
+        "mlflow_run_id": mlflow_info.get("run_id"),
+        "mlflow_run_url": mlflow_info.get("run_url"),
+        "final_equity": metrics.final_equity,
+    }
+
+
 def cmd_session_replay(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
+    if getattr(args, "use_config_components", False):
+        raw_cfg["_use_config_components_for_replay"] = True
     apply_session_log_file(raw_cfg, args)
     experiment_name_override = getattr(args, "mlflow_experiment_name_override", None)
     if experiment_name_override:
@@ -47,12 +168,13 @@ def cmd_session_replay(args: argparse.Namespace):
     from utils.trading_state_store import TradingStateStore
 
     ss_cfg = raw_cfg.get("state_store", {})
+    connection_uri, database = _resolve_state_store_params(ss_cfg)
     meta_loader = SessionReplayDataProvider(cfg={
         "session_id": args.session_id,
         "api_key": alpaca_cfg["api_key"],
         "secret_key": alpaca_cfg["secret_key"],
-        "connection_uri": ss_cfg.get("connection_uri"),
-        "database": ss_cfg.get("database"),
+        "connection_uri": connection_uri,
+        "database": database,
         "timeframe": getattr(args, "timeframe", None),
     })
     meta_loader.load_data()
@@ -99,6 +221,12 @@ def cmd_session_replay(args: argparse.Namespace):
                 order.status = OrderStatus.PENDING
             return order
 
+        def _bracket_sold_ts(order: BracketOrder):
+            sold_order = order.SOLD_ORDER
+            if sold_order is None:
+                return None
+            return sold_order.executed_datetime or sold_order.placed_datetime
+
         opening_orders = []
         order_data = store.load_orders(session_id)
         for order in order_data["all_orders"].values():
@@ -112,11 +240,12 @@ def cmd_session_replay(args: argparse.Namespace):
                     opening_orders.append(_reset_order_for_replay(copy.deepcopy(order)))
                     continue
 
-                sold_order = order.SOLD_ORDER
-                sold_ts = None
-                if sold_order is not None:
-                    sold_ts = sold_order.executed_datetime or sold_order.placed_datetime
-                if sold_ts is None or sold_ts > start_dt:
+                sold_ts = _bracket_sold_ts(order)
+                if order.status == OrderStatus.FILLED:
+                    if sold_ts is not None and sold_ts > start_dt:
+                        opening_orders.append(_reset_order_for_replay(copy.deepcopy(order)))
+                    continue
+                if order.status in {OrderStatus.PENDING, OrderStatus.PENDING_SALE}:
                     opening_orders.append(_reset_order_for_replay(copy.deepcopy(order)))
             elif order.status == OrderStatus.PENDING:
                 opening_orders.append(_reset_order_for_replay(copy.deepcopy(order)))
@@ -130,7 +259,7 @@ def cmd_session_replay(args: argparse.Namespace):
     if getattr(args, "cash", None) is not None:
         pf_cfg_raw["cash"] = args.cash
 
-    if not al_class_path or not pf_class_path:
+    if not raw_cfg.get("_use_config_components_for_replay") and (not al_class_path or not pf_class_path):
         logger.error(
             "Session metadata is missing algorithm_class / portfolio_class. "
             "This session was created before replay metadata was stored."
@@ -139,18 +268,33 @@ def cmd_session_replay(args: argparse.Namespace):
 
     warmup_bars = meta.get("warmup_bars", 0)
     history_length = al_cfg_raw.pop("history_length", 0)
-    al = instantiate_from_string(al_class_path, cfg=al_cfg_raw, history_length=history_length)
+
+    if getattr(args, "clean_mongo_backtest", False):
+        return _run_clean_mongo_backtest(
+            args=args,
+            raw_cfg=raw_cfg,
+            meta=meta,
+            al_class_path=al_class_path,
+            al_cfg_raw=al_cfg_raw,
+            pf_class_path=pf_class_path,
+            pf_cfg_raw=pf_cfg_raw,
+            history_length=history_length,
+            connection_uri=connection_uri,
+            database=database,
+        )
+
+    al = _build_algorithm_from_config(raw_cfg, al_class_path, al_cfg_raw, history_length)
 
     from trading.core.om.backtesting_om import BacktestingOrderManager
 
     om = BacktestingOrderManager(cfg={"market_hours_only": True})
-    pf = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om)
+    pf = _build_portfolio_from_config(raw_cfg, pf_class_path, pf_cfg_raw, om)
 
     session_start = pd.to_datetime(meta["session_start"])
     session_end = pd.to_datetime(meta["session_end"])
     store = TradingStateStore(
-        connection_uri=ss_cfg.get("connection_uri") or "mongodb://localhost:27017",
-        database=ss_cfg.get("database") or "trading",
+        connection_uri=connection_uri,
+        database=database,
     )
     opening_cash, opening_positions, opening_orders = _build_opening_state(store, args.session_id, session_start)
     opening_positions_template = copy.deepcopy(opening_positions)
@@ -213,9 +357,9 @@ def cmd_session_replay(args: argparse.Namespace):
     pf_extended = None
     if getattr(args, "start_date", None):
         start_dt = pd.to_datetime(args.start_date).to_pydatetime()
-        al_ext = instantiate_from_string(al_class_path, cfg=dict(al_cfg_raw), history_length=history_length)
+        al_ext = _build_algorithm_from_config(raw_cfg, al_class_path, al_cfg_raw, history_length)
         om_ext = BacktestingOrderManager(cfg={"market_hours_only": True})
-        pf_ext = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om_ext)
+        pf_ext = _build_portfolio_from_config(raw_cfg, pf_class_path, pf_cfg_raw, om_ext)
         if getattr(args, "cash", None) is not None:
             pf_ext.cash = args.cash
         ext_dp = AlpacaDataProvider(cfg={
@@ -236,9 +380,9 @@ def cmd_session_replay(args: argparse.Namespace):
 
     from trading.data_providers.mongodb_data_provider import MongoDBDataProvider
 
-    al_mongo = instantiate_from_string(al_class_path, cfg=dict(al_cfg_raw), history_length=history_length)
+    al_mongo = _build_algorithm_from_config(raw_cfg, al_class_path, al_cfg_raw, history_length)
     om_mongo = BacktestingOrderManager(cfg={"market_hours_only": True})
-    pf_mongo = instantiate_from_string(pf_class_path, cfg={**pf_cfg_raw, "keep_history": True}, order_manager=om_mongo)
+    pf_mongo = _build_portfolio_from_config(raw_cfg, pf_class_path, pf_cfg_raw, om_mongo)
     if getattr(args, "cash", None) is None and opening_cash is not None:
         pf_mongo.cash = float(opening_cash)
     if opening_positions_template:
@@ -258,8 +402,8 @@ def cmd_session_replay(args: argparse.Namespace):
 
     mongo_dp = MongoDBDataProvider(cfg={
         "session_id": args.session_id,
-        "connection_uri": ss_cfg.get("connection_uri"),
-        "database": ss_cfg.get("database"),
+        "connection_uri": connection_uri,
+        "database": database,
     })
     BacktestingEngine(cfg={}, dp=mongo_dp, al=al_mongo, om=om_mongo, pf=pf_mongo).run()
 
@@ -279,8 +423,8 @@ def cmd_session_replay(args: argparse.Namespace):
     mongo_analyzer = PortfolioAnalyzer(pf_mongo)
     live_analyzer = PortfolioAnalyzer.from_mongodb(
         args.session_id,
-        connection_uri=ss_cfg.get("connection_uri"),
-        database=ss_cfg.get("database"),
+        connection_uri=connection_uri,
+        database=database,
     )
     replay_metrics = replay_analyzer.get_metrics()
     mongo_metrics = mongo_analyzer.get_metrics()
@@ -295,6 +439,10 @@ def cmd_session_replay(args: argparse.Namespace):
         from trading.commands.common import flatten_config
 
         params = {"session_id": args.session_id, **flatten_config({"meta": meta})}
+        if getattr(args, "source_run_url", None):
+            params["source_run_url"] = args.source_run_url
+        if getattr(args, "source_run_id", None):
+            params["source_run_id"] = args.source_run_id
         if pf_extended is not None:
             params["extended_start_date"] = str(args.start_date)
 

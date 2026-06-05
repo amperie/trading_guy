@@ -50,8 +50,7 @@ class DualSymbolSwitchPortfolio(Portfolio):
         self.min_signal_strength = self.cfg.get("min_signal_strength", 0)
 
         # Bracket order parameters
-        self.stop_pct = self.cfg.get("stop_pct", 5.0)
-        self.profit_pct = self.cfg.get("profit_pct", 10.0)
+        self._refresh_bracket_config()
 
         # Holding period (in hours)
         self.holding_period_hours = self.cfg.get("holding_period_hours", 2)
@@ -61,11 +60,29 @@ class DualSymbolSwitchPortfolio(Portfolio):
         self._pending_switch_state = None  # None or "SWITCHING"
         self._symbol_entry_time = {}  # symbol -> datetime
 
+    def _refresh_bracket_config(self) -> None:
+        self.bracket_cfg = self.get_bracket_config({
+            "stop_pct": self.cfg.get("stop_pct", 5.0),
+            "profit_pct": self.cfg.get("profit_pct", 10.0),
+        })
+        self.stop_pct = float(self.bracket_cfg["stop_pct"])
+        self.profit_pct = float(self.bracket_cfg["profit_pct"])
+
+    def reconfigure(self, new_params: dict) -> None:
+        super().reconfigure(new_params)
+        self._refresh_bracket_config()
+
     def _current_symbol(self) -> str | None:
         for symbol in (self.upro_symbol, self.spxu_symbol):
             if symbol in self.positions and self.positions[symbol].quantity > 0:
                 return symbol
         return None
+
+    def _entry_fills_now(self, current_timestamp: datetime) -> bool:
+        if not getattr(self.om, "_market_hours_only", False):
+            return True
+        market_time = current_timestamp.time()
+        return datetime.strptime("09:30", "%H:%M").time() <= market_time < datetime.strptime("16:00", "%H:%M").time()
 
     def _holding_period_elapsed(self, symbol: str, current_timestamp: datetime) -> bool:
         """
@@ -172,13 +189,8 @@ class DualSymbolSwitchPortfolio(Portfolio):
                     qty = int(self.cash * 0.99 / entry_price)
 
                     if qty > 0:
-                        bo = BracketOrder.create_bracket_order(
-                            symbol=pending_target,
-                            high_sell_price=entry_price * (1.0 + self.profit_pct / 100.0),
-                            low_sell_price=entry_price * (1.0 - self.stop_pct / 100.0),
-                            quantity=qty,
-                            tx_cost=self.tx_cost,
-                            current_tick=tick
+                        bo = self.create_configured_bracket_order(
+                            pending_target, entry_price, qty, self.tx_cost, tick, self.bracket_cfg
                         )
                         bo.intended_entry_price = entry_price
                         logger.debug(
@@ -190,6 +202,8 @@ class DualSymbolSwitchPortfolio(Portfolio):
                         if target_signal and target_signal.symbol == pending_target:
                             target_signal.metadata['order_id'] = bo.order_id
                             target_signal.metadata['entry_time'] = current_timestamp
+                        if self._entry_fills_now(current_timestamp):
+                            self._symbol_entry_time[pending_target] = current_timestamp
 
                         orders.append(bo)
 
@@ -221,13 +235,8 @@ class DualSymbolSwitchPortfolio(Portfolio):
             qty = int(self.cash * 0.99 / entry_price)
 
             if qty > 0:
-                bo = BracketOrder.create_bracket_order(
-                    symbol=target,
-                    high_sell_price=entry_price * (1.0 + self.profit_pct / 100.0),
-                    low_sell_price=entry_price * (1.0 - self.stop_pct / 100.0),
-                    quantity=qty,
-                    tx_cost=self.tx_cost,
-                    current_tick=tick
+                bo = self.create_configured_bracket_order(
+                    target, entry_price, qty, self.tx_cost, tick, self.bracket_cfg
                 )
                 bo.intended_entry_price = entry_price
 
@@ -239,6 +248,8 @@ class DualSymbolSwitchPortfolio(Portfolio):
                 # Link signal to order for analysis
                 target_signal.metadata['order_id'] = bo.order_id
                 target_signal.metadata['entry_time'] = current_timestamp
+                if self._entry_fills_now(current_timestamp):
+                    self._symbol_entry_time[target] = current_timestamp
 
                 orders.append(bo)
 

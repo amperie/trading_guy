@@ -228,6 +228,8 @@ class PortfolioAnalyzer:
                     if is_bracket:
                         if order.type == OrderType.STOP_LOSS:
                             bracket_exit_type = "STOP"
+                        elif order.type == OrderType.TRAILING_STOP:
+                            bracket_exit_type = "TRAILING_STOP"
                         elif order.type == OrderType.PROFIT_TAKER:
                             bracket_exit_type = "PROFIT"
                         else:
@@ -572,6 +574,7 @@ class PortfolioAnalyzer:
             'Bracket Entry': ('D',  85),   # diamond
             'Market Sell':   ('v', 110),   # triangle down
             'Stop Loss':     ('X', 110),   # filled X
+            'Trailing Stop': ('x', 110),   # x
             'Profit Taker':  ('*', 170),   # star
             'Manual Exit':   ('P',  95),   # filled plus
         }
@@ -581,6 +584,8 @@ class PortfolioAnalyzer:
                 return 'Bracket Entry' if order.type == OrderType.BRACKET else 'Market Buy'
             if order.type == OrderType.STOP_LOSS:
                 return 'Stop Loss'
+            if order.type == OrderType.TRAILING_STOP:
+                return 'Trailing Stop'
             if order.type == OrderType.PROFIT_TAKER:
                 return 'Profit Taker'
             if order.parent_id:

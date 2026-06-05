@@ -26,6 +26,7 @@ from trading.commands import (
     cmd_mongo_backtest,
     cmd_promote,
     cmd_session_replay,
+    cmd_session_replay_from_mlflow,
     cmd_split_backtest,
     cmd_walk_forward,
     cmd_walk_forward_hpo,
@@ -52,6 +53,8 @@ from trading.cli_help import (
     PROMOTE_EPILOG,
     SESSION_REPLAY_DESCRIPTION,
     SESSION_REPLAY_EPILOG,
+    SESSION_REPLAY_FROM_MLFLOW_DESCRIPTION,
+    SESSION_REPLAY_FROM_MLFLOW_EPILOG,
 )
 
 _ANSI_RESET = "\033[0m"
@@ -209,6 +212,10 @@ def build_parser() -> argparse.ArgumentParser:
             "    Re-run a saved live session offline with historical Alpaca bars and MongoDB-backed state.\n"
             "    --config --account --session-id [--timeframe] [--start-date] [--run-name] [--agg-period]\n"
             "    Example: python run.py session-replay --config configs/example_live.yaml --account paper --session-id live-20260512\n"
+            "  session-replay-from-mlflow:\n"
+            "    Recover config and component code from an MLflow run, then replay against bars from a stored session.\n"
+            "    --account --run-url --session-id [--tracking-uri] [--database] [--mlflow-experiment-name] [--run-name]\n"
+            "    Example: python run.py session-replay-from-mlflow --account paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --session-id live-20260512\n"
             "  promote:\n"
             "    Promote a prior MLflow run into a portable live config plus checked-in component source files.\n"
             "    --run-url [--tracking-uri] [--name]\n"
@@ -533,6 +540,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run an additional extended Alpaca replay from this date to the session end",
     )
     sr_p.set_defaults(func=cmd_session_replay)
+
+    sr_mlflow_p = subparsers.add_parser(
+        "session-replay-from-mlflow",
+        parents=[shared_account],
+        help="Replay a stored session using config and code recovered from an MLflow run",
+        formatter_class=argparse.RawTextHelpFormatter,
+        description=SESSION_REPLAY_FROM_MLFLOW_DESCRIPTION,
+        epilog=SESSION_REPLAY_FROM_MLFLOW_EPILOG,
+    )
+    sr_mlflow_p.add_argument("--run-url", required=True, help="MLflow run URL containing the config and component code")
+    sr_mlflow_p.add_argument("--session-id", required=True, dest="session_id", help="MongoDB session ID to replay")
+    sr_mlflow_p.add_argument(
+        "--tracking-uri",
+        dest="tracking_uri",
+        help="Optional MLflow tracking URI override if the URL does not point to the desired tracking server",
+    )
+    sr_mlflow_p.add_argument("--database", help="MongoDB database containing the session; defaults to configured live database")
+    sr_mlflow_p.add_argument("--connection-uri", dest="connection_uri", help="MongoDB connection URI override")
+    sr_mlflow_p.add_argument("--timeframe", help="Override replay timeframe when session metadata is missing it")
+    sr_mlflow_p.add_argument(
+        "--start-date",
+        dest="start_date",
+        help="Run an additional extended Alpaca replay from this date to the session end",
+    )
+    sr_mlflow_p.add_argument("--cash", type=float, help="Override starting cash")
+    sr_mlflow_p.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging")
+    sr_mlflow_p.add_argument("--run-name", dest="run_name", help="Override MLflow run name")
+    sr_mlflow_p.add_argument(
+        "--mlflow-experiment-name",
+        dest="mlflow_experiment_name",
+        help="Override MLflow experiment name for the replay result",
+    )
+    sr_mlflow_p.set_defaults(func=cmd_session_replay_from_mlflow)
 
     promote_p = subparsers.add_parser(
         "promote",

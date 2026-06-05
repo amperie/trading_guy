@@ -49,6 +49,26 @@ def _process_market_order(
     return order
 
 
+def _position_quantity(symbol: str, positions: dict[str, Position] | None) -> int:
+    if positions is None or symbol not in positions:
+        return 0
+    return positions[symbol].quantity
+
+
+def _fill_bracket_exit(order: BracketOrder, exit_order: Order, other_order: Order, pd: PriceData, positions) -> Order:
+    tx_quantity = min(exit_order.quantity, _position_quantity(order.symbol, positions))
+    order.status = OrderStatus.FILLED
+    exit_order.status = OrderStatus.FILLED
+    other_order.status = OrderStatus.CANCELED
+    order.MANUAL_SALE = False
+    exit_order.executed_datetime = pd.timestamp
+    exit_order.price = pd.close
+    exit_order.cash = pd.close * tx_quantity
+    exit_order.quantity = tx_quantity
+    order.SOLD_ORDER = exit_order
+    return order
+
+
 class BacktestingOrderManager(OrderManager):
 
     def __init__(self, cfg: dict = None):
@@ -101,10 +121,18 @@ class BacktestingOrderManager(OrderManager):
                     scale = actual_fill / intended
                     so = order.get_child_order("STOP")
                     po = order.get_child_order("PROFIT")
-                    if so:
+                    if so and so.type == OrderType.TRAILING_STOP:
+                        so.trail_hwm = actual_fill
+                        so.update_trailing_stop(actual_fill)
+                    elif so:
                         so.price = round(so.price * scale, 2)
                     if po:
                         po.price = round(po.price * scale, 2)
+                else:
+                    so = order.get_child_order("STOP")
+                    if so and so.type == OrderType.TRAILING_STOP:
+                        so.trail_hwm = actual_fill
+                        so.update_trailing_stop(actual_fill)
                 return order
             elif order.status == OrderStatus.PENDING_SALE:
                 # Order has been bought but sale hasn't triggered yet
@@ -129,44 +157,15 @@ class BacktestingOrderManager(OrderManager):
                     so.status = OrderStatus.CANCELED
                     po.status = OrderStatus.CANCELED
                     return order
-                elif curr_price <= so.price:
-                    # Trigger stop loss order. Sell
-                    # Make sure to sell the right amount, check what positions we have
-                    if positions is not None and order.symbol not in positions:
-                        position_quantity = 0
-                    else:
-                        position_quantity = positions[order.symbol].quantity
-                    tx_quantity = min(so.quantity, position_quantity)
+                if so.type == OrderType.TRAILING_STOP:
+                    so.update_trailing_stop(curr_price)
 
-                    order.status = OrderStatus.FILLED
-                    so.status = OrderStatus.FILLED
-                    po.status = OrderStatus.CANCELED
-                    order.MANUAL_SALE = False
-                    so.executed_datetime = pd.timestamp
-                    so.price = curr_price
-                    so.cash = curr_price * tx_quantity
-                    so.quantity = tx_quantity
-                    order.SOLD_ORDER = so
-                    return order
+                if curr_price <= so.price:
+                    # Trigger stop loss order. Sell
+                    return _fill_bracket_exit(order, so, po, pd, positions)
                 elif curr_price >= po.price:
                     # Trigger profit taking order. Sell high
-                    # Make sure to sell the right amount, check what positions we have
-                    if positions is not None and order.symbol not in positions:
-                        position_quantity = 0
-                    else:
-                        position_quantity = positions[order.symbol].quantity
-                    tx_quantity = min(po.quantity, position_quantity)
-
-                    order.status = OrderStatus.FILLED
-                    po.status = OrderStatus.FILLED
-                    so.status = OrderStatus.CANCELED
-                    order.MANUAL_SALE = False
-                    po.executed_datetime = pd.timestamp
-                    po.price = curr_price
-                    po.cash = curr_price * tx_quantity
-                    po.quantity = tx_quantity
-                    order.SOLD_ORDER = po
-                    return order
+                    return _fill_bracket_exit(order, po, so, pd, positions)
                 else:
                     # No sale has gotten triggered, nothing to do
                     return order
@@ -229,6 +228,10 @@ class BacktestingOrderManager(OrderManager):
             order.price = pd.close
             order.cash = pd.close * order.quantity
             order.executed_datetime = pd.timestamp
+            stop_order = order.get_child_order("STOP")
+            if stop_order is not None and stop_order.type == OrderType.TRAILING_STOP:
+                stop_order.trail_hwm = pd.close
+                stop_order.update_trailing_stop(pd.close)
 
         else:
             raise ValueError(f"Unknown order type {order.type}")

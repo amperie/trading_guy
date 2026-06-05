@@ -60,6 +60,25 @@ class TestBasicEntry:
         assert order.symbol == "UPRO"
         assert order.quantity == 198  # int(10000 * 0.99 / 50)
 
+    def test_entry_uses_nested_trailing_bracket_config(self):
+        pf = _make_pf(bracket={
+            "stop_type": "trailing",
+            "stop_pct": 2.0,
+            "trailing_stop_pct": 1.25,
+            "profit_pct": 4.0,
+        })
+        result = pf.process_market_signals_for_tick(
+            [_buy_signal("UPRO")],
+            _tick(("UPRO", 50.0), ("SPXU", 20.0)),
+        )
+
+        order = result.orders[0]
+        stop = order.get_child_order("STOP")
+        profit = order.get_child_order("PROFIT")
+        assert stop.type == OrderType.TRAILING_STOP
+        assert stop.trail_percent == 1.25
+        assert profit.price == 52.0
+
     def test_entry_uses_all_cash(self):
         pf = _make_pf(cash=5000.0)
         tick = _tick(("SPXU", 25.0), ("UPRO", 100.0))

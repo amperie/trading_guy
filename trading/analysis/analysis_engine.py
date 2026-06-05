@@ -171,6 +171,8 @@ class AnalysisEngine:
                         # Check which type of exit this was
                         if order.type == OrderType.STOP_LOSS:
                             bracket_exit_type = "STOP"
+                        elif order.type == OrderType.TRAILING_STOP:
+                            bracket_exit_type = "TRAILING_STOP"
                         elif order.type == OrderType.PROFIT_TAKER:
                             bracket_exit_type = "PROFIT"
                         else:
@@ -1627,6 +1629,8 @@ Trading Days:           {self._metrics.trading_days}
                     # Show which exit condition triggered
                     if sold_order.type == OrderType.STOP_LOSS:
                         report_lines.append(f"  Exit Reason:      STOP LOSS triggered")
+                    elif sold_order.type == OrderType.TRAILING_STOP:
+                        report_lines.append(f"  Exit Reason:      TRAILING STOP triggered")
                     elif sold_order.type == OrderType.PROFIT_TAKER:
                         report_lines.append(f"  Exit Reason:      PROFIT TARGET hit")
                     else:
@@ -1860,6 +1864,8 @@ Trading Days:           {self._metrics.trading_days}
                     # Human-readable exit reason
                     if sold_order.type == OrderType.STOP_LOSS:
                         record['exit_reason'] = 'STOP_LOSS'
+                    elif sold_order.type == OrderType.TRAILING_STOP:
+                        record['exit_reason'] = 'TRAILING_STOP'
                     elif sold_order.type == OrderType.PROFIT_TAKER:
                         record['exit_reason'] = 'PROFIT_TARGET'
                     else:

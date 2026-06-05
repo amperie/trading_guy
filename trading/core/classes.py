@@ -18,6 +18,7 @@ class OrderType(Enum):
     BRACKET = 2
     STOP_LOSS = 3
     PROFIT_TAKER = 4
+    TRAILING_STOP = 5
 
 class OrderAction(Enum):
     BUY = 1
@@ -96,6 +97,9 @@ class Order:
     tx_cost: float = 0.0
     parent_id: str = None
     platform_id: str = None
+    trail_percent: float | None = None
+    trail_price: float | None = None
+    trail_hwm: float | None = None
     _child_orders: list[str] = field(default_factory=lambda: [])
     _child_orders_dict: dict[str, Order] = field(default_factory=lambda: {})
     processed_by_portfolio: bool = False
@@ -116,6 +120,20 @@ class Order:
 
     def get_child_order(self, name: str) -> Order:
         return self._child_orders_dict[name]
+
+    def update_trailing_stop(self, current_price: float) -> bool:
+        """Tighten a sell trailing stop from current price. Returns True if stop moved."""
+        if self.type != OrderType.TRAILING_STOP:
+            raise ValueError("update_trailing_stop requires OrderType.TRAILING_STOP")
+        if self.trail_percent is None and self.trail_price is None:
+            raise ValueError("Trailing stop requires trail_percent or trail_price")
+        old_price = self.price
+        self.trail_hwm = max(self.trail_hwm or current_price, current_price)
+        if self.trail_percent is not None:
+            self.price = round(self.trail_hwm * (1.0 - self.trail_percent / 100.0), 2)
+        else:
+            self.price = round(self.trail_hwm - self.trail_price, 2)
+        return self.price > old_price
 
     @staticmethod
     def create_market_order(
@@ -233,4 +251,39 @@ class BracketOrder(Order):
         main_order.add_child_order("PROFIT", profit_order)
         main_order.add_child_order("MANUAL_ORDER", None)
         main_order.MANUAL_SALE = False
+        return main_order
+
+    @staticmethod
+    def create_trailing_bracket_order(
+            symbol: str,
+            high_sell_price: float,
+            quantity: int,
+            trail_percent: float | None = None,
+            trail_price: float | None = None,
+            tx_cost: float=0.0,
+            current_tick:list[PriceData]=None,
+            ) -> BracketOrder:
+        if trail_percent is None and trail_price is None:
+            raise ValueError("Trailing bracket requires trail_percent or trail_price")
+        if trail_percent is not None and trail_price is not None:
+            raise ValueError("Trailing bracket supports trail_percent or trail_price, not both")
+        main_order = BracketOrder.create_bracket_order(
+            symbol=symbol,
+            high_sell_price=high_sell_price,
+            low_sell_price=0.0,
+            quantity=quantity,
+            tx_cost=tx_cost,
+            current_tick=current_tick,
+        )
+        entry_price = 0.0
+        if current_tick is not None:
+            pd = next((x for x in current_tick if x.symbol == symbol), None)
+            entry_price = pd.close if pd else 0.0
+        stop_order = main_order.get_child_order("STOP")
+        stop_order.type = OrderType.TRAILING_STOP
+        stop_order.trail_percent = trail_percent
+        stop_order.trail_price = trail_price
+        stop_order.trail_hwm = entry_price or None
+        if entry_price > 0:
+            stop_order.update_trailing_stop(entry_price)
         return main_order

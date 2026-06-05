@@ -55,8 +55,12 @@ class SingleSymbolPortfolio(Portfolio):
         # Testing buying and selling with bracket orders
 
         symbol = self.cfg['symbol']
-        stop_pct = self.cfg['stop_pct']
-        profit_pct = self.cfg['profit_pct']
+        bracket_cfg = self.get_bracket_config({
+            "stop_pct": self.cfg.get("stop_pct", 5.0),
+            "profit_pct": self.cfg.get("profit_pct", 10.0),
+        })
+        stop_pct = float(bracket_cfg["stop_pct"])
+        profit_pct = float(bracket_cfg["profit_pct"])
 
         signal = find_marketsignal_in_list(symbol, signals)
         pd = find_pricedata_in_list(symbol, tick)
@@ -74,9 +78,8 @@ class SingleSymbolPortfolio(Portfolio):
             quantity = int(available / price)
             stop_price = price * (1.0 - stop_pct / 100.0)
             profit_price = price * (1.0 + profit_pct / 100)
-            bo = BracketOrder.create_bracket_order(
-                symbol, profit_price, stop_price,
-                quantity, 0.0, tick
+            bo = self.create_configured_bracket_order(
+                symbol, price, quantity, self.cfg.get("tx_cost", 0.0), tick, bracket_cfg
             )
             signal.metadata['order_id'] = bo.order_id
             logger.debug(f"BUY BRACKET {symbol} qty={quantity} price={price:.2f} stop={stop_price:.2f} profit={profit_price:.2f} order_id={bo.order_id}")

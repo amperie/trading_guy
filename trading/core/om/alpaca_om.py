@@ -40,7 +40,10 @@ from utils.logger import Logger
 
 try:
     from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest, GetOrdersRequest
+    from alpaca.trading.requests import (
+        MarketOrderRequest, TakeProfitRequest, StopLossRequest, GetOrdersRequest,
+        ReplaceOrderRequest,
+    )
     from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
     ALPACA_AVAILABLE = True
 except ImportError:
@@ -50,6 +53,7 @@ except ImportError:
     TakeProfitRequest = None
     StopLossRequest = None
     GetOrdersRequest = None
+    ReplaceOrderRequest = None
     OrderSide = None
     TimeInForce = None
     OrderClass = None
@@ -156,6 +160,7 @@ class AlpacaOrderManager(OrderManager):
         self.client = TradingClient(api_key=api_key, secret_key=secret_key, paper=paper)
         self._local_to_remote: dict[str, str] = {}
         self._bracket_child_map: dict[str, dict[str, str]] = {}
+        self.trailing_stop_replace_min_increment = float(cfg.get("trailing_stop_replace_min_increment", 0.01))
 
     def get_broker_account_state(self) -> dict | None:
         """Query Alpaca for current account cash and open positions.
@@ -555,10 +560,61 @@ class AlpacaOrderManager(OrderManager):
             profit_order = order.get_child_order("PROFIT")
             if stop_order is not None and stop_id:
                 stop_order.platform_id = str(stop_id)
+                self._local_to_remote[stop_order.order_id] = str(stop_id)
             if profit_order is not None and profit_id:
                 profit_order.platform_id = str(profit_id)
+                self._local_to_remote[profit_order.order_id] = str(profit_id)
         order.status = OrderStatus.PENDING
         return order
+
+    def _refresh_bracket_child_ids(self, order: BracketOrder, legs) -> None:
+        if not legs:
+            return
+        stop_id = _find_leg_id(legs, "stop")
+        profit_id = _find_leg_id(legs, "profit")
+        self._bracket_child_map.setdefault(order.order_id, {})
+        if stop_id:
+            self._bracket_child_map[order.order_id]["STOP"] = str(stop_id)
+            stop_order = order.get_child_order("STOP")
+            if stop_order is not None:
+                stop_order.platform_id = str(stop_id)
+                self._local_to_remote[stop_order.order_id] = str(stop_id)
+        if profit_id:
+            self._bracket_child_map[order.order_id]["PROFIT"] = str(profit_id)
+            profit_order = order.get_child_order("PROFIT")
+            if profit_order is not None:
+                profit_order.platform_id = str(profit_id)
+                self._local_to_remote[profit_order.order_id] = str(profit_id)
+
+    def _maybe_replace_trailing_stop_leg(self, order: BracketOrder, current_tick: list = None) -> None:
+        stop_order = order.get_child_order("STOP")
+        if stop_order is None or stop_order.type != OrderType.TRAILING_STOP:
+            return
+        current_price = self._get_price_from_tick(order.symbol, current_tick) or order.price
+        if current_price is None or current_price <= 0:
+            return
+        old_stop = stop_order.price
+        old_hwm = stop_order.trail_hwm
+        moved = stop_order.update_trailing_stop(current_price)
+        if not moved or stop_order.price - old_stop < self.trailing_stop_replace_min_increment:
+            return
+        remote_stop_id = stop_order.platform_id or self._bracket_child_map.get(order.order_id, {}).get("STOP")
+        if not remote_stop_id:
+            logger.warning(f"Cannot replace trailing stop for {order.symbol}: missing Alpaca stop leg id")
+            return
+        try:
+            self.client.replace_order_by_id(
+                remote_stop_id,
+                order_data=ReplaceOrderRequest(stop_price=stop_order.price),
+            )
+            logger.info(
+                f"Raised trailing stop for {order.symbol}: {old_stop:.2f} -> {stop_order.price:.2f} "
+                f"(hwm={stop_order.trail_hwm:.2f})"
+            )
+        except Exception as exc:
+            stop_order.price = old_stop
+            stop_order.trail_hwm = old_hwm
+            logger.warning(f"Failed to replace Alpaca trailing stop leg {remote_stop_id}: {exc}")
 
     def _update_order_status_from_backend(
             self, order: Union[BracketOrder, Order], current_tick: list = None,
@@ -692,15 +748,25 @@ class AlpacaOrderManager(OrderManager):
                 if filled_qty > 0:
                     order.quantity = filled_qty
                     order.cash = order.price * order.quantity
+                    for name in order.get_child_order_names():
+                        child = order.get_child_order(name)
+                        if child is not None:
+                            child.quantity = filled_qty
                 order.executed_datetime = _parse_alpaca_time(alpaca_order.filled_at) or datetime.now()
+                stop_order = order.get_child_order("STOP")
+                if stop_order is not None and stop_order.type == OrderType.TRAILING_STOP and order.price > 0:
+                    stop_order.trail_hwm = order.price
 
             # Check legs for exit fill.
             legs = getattr(alpaca_order, "legs", None) or []
+            self._refresh_bracket_child_ids(order, legs)
             filled_leg = _find_filled_leg(legs)
             if filled_leg is not None:
                 exit_order = _update_exit_order_from_leg(order, filled_leg)
                 order.SOLD_ORDER = exit_order
                 order.status = OrderStatus.FILLED
+            elif order.status == OrderStatus.PENDING_SALE:
+                self._maybe_replace_trailing_stop_leg(order, current_tick)
             elif status in {"canceled", "rejected", "expired"}:
                 order.status = OrderStatus.CANCELED
         else:
