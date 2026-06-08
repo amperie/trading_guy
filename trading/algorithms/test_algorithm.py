@@ -8,6 +8,12 @@ from utils.logger import Logger
 logger = Logger().get_logger(__name__)
 
 
+class NoOpAlgorithm(Algorithm):
+
+    def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:
+        return []
+
+
 class TestAlgorithm(Algorithm):
 
     def on_data_logic(self, data: list[PriceData]) -> list[MarketSignal]:

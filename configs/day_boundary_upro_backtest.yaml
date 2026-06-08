@@ -1,0 +1,52 @@
+# Backtest DayBoundaryPortfolio on UPRO Alpaca minute data.
+#
+# Default behavior:
+#   - buy UPRO at/after 15:59
+#   - sell UPRO at/after the next 09:30 open
+#
+# Flipped behavior:
+#   set portfolio.flip_behavior: true
+#   - buy UPRO at/after 09:30
+#   - sell UPRO at/after 16:00
+#
+# Usage:
+#   python run.py backtest --config configs/day_boundary_upro_backtest.yaml --account paper --no-mlflow
+
+mode: backtest
+
+data_provider:
+  provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
+  symbols: ["AMD"]
+  timeframe: "Minute"
+  start_date: "2020-01-01"
+  end_date: "2026-03-05"
+  adjustment: "split"
+
+algorithm:
+  algorithm: "trading.algorithms.test_algorithm.NoOpAlgorithm"
+  history_length: 1
+
+portfolio:
+  portfolio: "trading.core.pf.day_boundary_portfolio.DayBoundaryPortfolio"
+  symbol: "AMD"
+  cash: 100000
+  keep_history: true
+  flip_behavior: false
+  market_open_hour: 9
+  market_open_minute: 30
+  market_close_hour: 15
+  market_close_minute: 59
+  tx_cost: 0.0
+
+order_manager:
+  order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
+
+state_store:
+  enabled: false
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: "Day Boundary Backtest"
+  run_name: "AMD close-to-open alpaca"
+  description: "DayBoundaryPortfolio on UPRO Alpaca minute data"

@@ -229,6 +229,6 @@ class AlpacaDataProvider(DataProvider):
             if dropped:
                 logger.info(f"market_hours_only: dropped {dropped} off-hours bars")
 
-        logger.info(f"Fetched {len(df)} bars for {self.symbols}: {df['timestamp'].min()} → {df['timestamp'].max()}")
+        logger.info(f"Fetched {len(df)} bars for {self.symbols}: {df['timestamp'].min()} -> {df['timestamp'].max()}")
         self.data = df
         return df
