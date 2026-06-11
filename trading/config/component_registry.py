@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AllowExtraModel(BaseModel):
@@ -26,6 +26,10 @@ class DualSymbolSwitchPortfolioParams(BaseModel):
     min_signal_strength: int = 0
     stop_pct: float = 5.0
     profit_pct: float = 10.0
+    stop_type: str = "fixed"
+    trailing_stop_pct: float | None = None
+    trailing_stop_price: float | None = None
+    bracket: dict = Field(default_factory=dict)
     holding_period_hours: float = 2.0
     tx_cost: float = 0.0
     sync_with_broker: bool = False
@@ -39,6 +43,10 @@ class SingleSymbolPortfolioParams(BaseModel):
     keep_history: bool = False
     stop_pct: float = 0.0
     profit_pct: float = 0.0
+    stop_type: str = "fixed"
+    trailing_stop_pct: float | None = None
+    trailing_stop_price: float | None = None
+    bracket: dict = Field(default_factory=dict)
     tx_cost: float = 0.0
     sync_with_broker: bool = False
     sync_interval: int = 60
@@ -65,6 +73,8 @@ class AlpacaDataProviderParams(BaseModel):
     secret_key: str = ""
     symbols: list[str]
     timeframe: str = "Minute"
+    adjustment: str = "split"
+    market_hours_only: bool = False
     start_date: str | None = None
     end_date: str | None = None
     limit: int | None = None

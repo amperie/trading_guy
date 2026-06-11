@@ -16,7 +16,7 @@ mode: backtest
 
 data_provider:
   provider: "trading.data_providers.alpaca_data_provider.AlpacaDataProvider"
-  symbols: ["AMD"]
+  symbols: ["SPY"]
   timeframe: "Minute"
   start_date: "2020-01-01"
   end_date: "2026-03-05"
@@ -28,7 +28,7 @@ algorithm:
 
 portfolio:
   portfolio: "trading.core.pf.day_boundary_portfolio.DayBoundaryPortfolio"
-  symbol: "AMD"
+  symbol: "SPY"
   cash: 100000
   keep_history: true
   flip_behavior: false
@@ -48,5 +48,5 @@ analysis:
   enabled: true
   log_to_mlflow: true
   experiment_name: "Day Boundary Backtest"
-  run_name: "AMD close-to-open alpaca"
+  run_name: "SPY close-to-open alpaca"
   description: "DayBoundaryPortfolio on UPRO Alpaca minute data"

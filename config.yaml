@@ -28,6 +28,8 @@ pipeline:
     walk_forward: "Pipeline Walk-Forward"
     review: "Pipeline - Review"
     bundle_registry: "Pipeline - Bundle Registry"
+    paper_bundles: "Pipeline Paper Bundles"
+    live_bundles: "Pipeline Live Bundles"
   auto_promote_research: true
   gates:
     research:

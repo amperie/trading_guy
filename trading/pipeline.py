@@ -267,6 +267,11 @@ def materialize_bundle(
     return bundle
 
 
+def load_local_bundle(config_path: str) -> PromotionBundle:
+    path = Path(config_path).resolve()
+    return _bundle_from_paths(path, path.parent / "promotion_manifest.json")
+
+
 def log_registered_bundle(
     raw_cfg: dict[str, Any],
     bundle: PromotionBundle,

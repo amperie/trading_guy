@@ -23,6 +23,7 @@ from trading.pipeline import (
     build_session_id,
     evaluate_research_gates,
     evaluate_review_gates,
+    load_local_bundle,
     log_registered_bundle,
     materialize_bundle,
 )
@@ -33,6 +34,8 @@ PIPELINE_EXPERIMENT_DEFAULTS = {
     "walk_forward": "Pipeline Walk-Forward",
     "review": "Pipeline - Review",
     "bundle_registry": "Pipeline - Bundle Registry",
+    "paper_bundles": "Pipeline Paper Bundles",
+    "live_bundles": "Pipeline Live Bundles",
 }
 
 
@@ -137,6 +140,12 @@ def _pipeline_experiment_name(raw_cfg: dict[str, Any], key: str) -> str:
 def _with_analysis_experiment(raw_cfg: dict[str, Any], experiment_name: str) -> dict[str, Any]:
     cfg = copy.deepcopy(raw_cfg)
     cfg.setdefault("analysis", {})["experiment_name"] = experiment_name
+    return cfg
+
+
+def _with_bundle_experiment(raw_cfg: dict[str, Any], key: str) -> dict[str, Any]:
+    cfg = copy.deepcopy(raw_cfg)
+    cfg.setdefault("pipeline", {}).setdefault("experiments", {})["bundle_registry"] = _pipeline_experiment_name(raw_cfg, key)
     return cfg
 
 
@@ -317,7 +326,7 @@ def cmd_pipeline_paper(args: argparse.Namespace):
     bundle = materialize_bundle(args.run_url, name=getattr(args, "name", None), paper=True)
     session_id = getattr(args, "session_id", None) or build_session_id("paper")
     bundle_record = log_registered_bundle(
-        {**copy.deepcopy(raw_cfg), "pipeline": {**((raw_cfg.get("pipeline") or {})), "experiment_name": _pipeline_experiment_name(raw_cfg, "bundle_registry")}},
+        _with_bundle_experiment(raw_cfg, "paper_bundles"),
         bundle,
         stage="paper",
         status="paper_ready",
@@ -365,7 +374,7 @@ def cmd_pipeline_paper_from_session(args: argparse.Namespace):
     session_id = getattr(args, "session_id", None) or args.source_session_id
     raw_cfg = load_raw_config(bundle.config_path)
     bundle_record = log_registered_bundle(
-        {**copy.deepcopy(raw_cfg), "pipeline": {**((raw_cfg.get("pipeline") or {})), "experiment_name": _pipeline_experiment_name(raw_cfg, "bundle_registry")}},
+        _with_bundle_experiment(raw_cfg, "paper_bundles"),
         bundle,
         stage="paper",
         status="paper_ready",
@@ -433,13 +442,32 @@ def cmd_pipeline_review(args: argparse.Namespace):
 
 def cmd_pipeline_live(args: argparse.Namespace):
     session_id = getattr(args, "session_id", None) or build_session_id("live")
-    live_result = cmd_live(_as_live_args(args, args.config, session_id))
+    raw_cfg = load_raw_config(args.config)
+    bundle = (
+        materialize_bundle(args.config, paper=False)
+        if _is_mlflow_run_url(args.config)
+        else load_local_bundle(args.config)
+    )
+    source_run_url = args.config if _is_mlflow_run_url(args.config) else bundle.source_run_url
+    bundle_record = log_registered_bundle(
+        _with_bundle_experiment(raw_cfg, "live_bundles"),
+        bundle,
+        stage="live",
+        status="live_ready",
+        source_run_url=source_run_url,
+        metadata={"session_id": session_id},
+    )
+    live_args = _as_live_args(args, bundle.config_path, session_id)
+    live_args.source_run_url = source_run_url
+    live_result = cmd_live(live_args)
     _print_header("PIPELINE LIVE")
     _print_pairs(
         [
-            ("Config", args.config),
+            ("Source", args.config),
+            ("Local Bundle", bundle.config_path),
+            ("Pipeline Bundle MLflow", bundle_record.get("run_url")),
             ("Session", live_result.get("session_id")),
             ("Config Hash", live_result.get("config_hash")),
         ]
     )
-    return live_result
+    return {"bundle": bundle_record, "live": live_result}

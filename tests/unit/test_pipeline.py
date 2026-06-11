@@ -436,6 +436,30 @@ def test_pipeline_research_routes_stage_mlflow_experiments(monkeypatch):
     }
 
 
+def test_pipeline_paper_logs_bundle_to_paper_experiment(monkeypatch):
+    calls = {}
+    bundle = SimpleNamespace(config_path="bundle.yaml", manifest_path="manifest.json")
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {}})
+    monkeypatch.setattr(pipeline_cmd, "materialize_bundle", lambda *args, **kwargs: bundle)
+
+    def fake_log(raw_cfg, bundle_arg, **kwargs):
+        calls["experiment"] = raw_cfg["pipeline"]["experiments"]["bundle_registry"]
+        calls["source_run_url"] = kwargs["source_run_url"]
+        return {"run_url": "paper-bundle-url"}
+
+    monkeypatch.setattr(pipeline_cmd, "log_registered_bundle", fake_log)
+    monkeypatch.setattr(pipeline_cmd, "cmd_live", lambda args: {"session_id": args.session_id})
+
+    pipeline_cmd.cmd_pipeline_paper(
+        SimpleNamespace(run_url="http://mlflow/#/experiments/1/runs/source", session_id="paper-1", account="paper")
+    )
+
+    assert calls == {
+        "experiment": "Pipeline Paper Bundles",
+        "source_run_url": "http://mlflow/#/experiments/1/runs/source",
+    }
+
+
 def test_pipeline_paper_from_session_reuses_source_session_by_default(monkeypatch):
     calls = {}
 
@@ -461,7 +485,11 @@ def test_pipeline_paper_from_session_reuses_source_session_by_default(monkeypatc
         pipeline_cmd,
         "log_registered_bundle",
         lambda raw_cfg, bundle, **kwargs: (
-            calls.setdefault("bundle_metadata", kwargs["metadata"]) and {"run_url": "bundle-url"}
+            calls.update(
+                bundle_metadata=kwargs["metadata"],
+                bundle_experiment=raw_cfg["pipeline"]["experiments"]["bundle_registry"],
+            )
+            or {"run_url": "bundle-url"}
         ),
     )
 
@@ -498,6 +526,7 @@ def test_pipeline_paper_from_session_reuses_source_session_by_default(monkeypatc
     assert calls["live_session_id"] == "adx_momentum_filter_ema_crossover"
     assert calls["live_source_session_id"] == "adx_momentum_filter_ema_crossover"
     assert calls["bundle_metadata"]["session_id"] == "adx_momentum_filter_ema_crossover"
+    assert calls["bundle_experiment"] == "Pipeline Paper Bundles"
     assert calls["source_session_update"] == (
         "adx_momentum_filter_ema_crossover",
         {"metadata.account_name": "paper3"},
@@ -609,6 +638,62 @@ def test_pipeline_paper_from_session_keeps_existing_source_account_name(monkeypa
     )
 
     assert "source_session_update" not in calls
+
+
+@pytest.mark.parametrize(
+    ("config", "loader"),
+    [
+        ("trading/promoted/bundle/bundle.yaml", "local"),
+        ("http://mlflow/#/experiments/1/runs/approved", "mlflow"),
+    ],
+)
+def test_pipeline_live_logs_bundle_to_live_experiment(monkeypatch, config, loader):
+    calls = {}
+    bundle = SimpleNamespace(
+        config_path="trading/promoted/bundle/bundle.yaml",
+        source_run_url="http://mlflow/#/experiments/1/runs/source",
+    )
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {}})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "load_local_bundle",
+        lambda path: calls.setdefault("loader", "local") and bundle,
+    )
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "materialize_bundle",
+        lambda *args, **kwargs: calls.setdefault("loader", "mlflow") and bundle,
+    )
+
+    def fake_log(raw_cfg, bundle_arg, **kwargs):
+        calls["experiment"] = raw_cfg["pipeline"]["experiments"]["bundle_registry"]
+        calls["source_run_url"] = kwargs["source_run_url"]
+        calls["session_id"] = kwargs["metadata"]["session_id"]
+        return {"run_url": "live-bundle-url"}
+
+    def fake_live(args):
+        calls["live_config"] = args.config
+        calls["live_source_run_url"] = args.source_run_url
+        return {"session_id": args.session_id}
+
+    monkeypatch.setattr(pipeline_cmd, "log_registered_bundle", fake_log)
+    monkeypatch.setattr(pipeline_cmd, "cmd_live", fake_live)
+
+    result = pipeline_cmd.cmd_pipeline_live(
+        SimpleNamespace(config=config, session_id="live-1", account="live")
+    )
+
+    expected_source = config if loader == "mlflow" else bundle.source_run_url
+    assert calls == {
+        "loader": loader,
+        "experiment": "Pipeline Live Bundles",
+        "source_run_url": expected_source,
+        "session_id": "live-1",
+        "live_config": bundle.config_path,
+        "live_source_run_url": expected_source,
+    }
+    assert result["bundle"]["run_url"] == "live-bundle-url"
+    assert result["live"]["session_id"] == "live-1"
 
 
 def test_pipeline_research_preflight_rejects_invalid_split_objective_metric(monkeypatch):
