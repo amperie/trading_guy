@@ -212,12 +212,14 @@ class TestSessionManagement:
         store.create_session(name="Run 1", account_id="PA-123")
         store.create_session(name="Run 2", account_id="PA-123")
         store.create_session(name="Run 3", account_id="PA-456")
+        store.update_session(store.list_sessions()[0]["_id"], {"autostart": True})
 
         all_sessions = store.list_sessions()
         assert len(all_sessions) == 3
 
         filtered = store.list_sessions(account_id="PA-123")
         assert len(filtered) == 2
+        assert len(store.list_sessions(autostart=True)) == 1
 
     def test_get_nonexistent_session(self, store):
         assert store.get_session("nonexistent") is None

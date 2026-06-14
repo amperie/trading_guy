@@ -154,6 +154,36 @@ What the pipeline does:
 - `pipeline review` runs `session-replay`, prints replay MLflow links and drift numbers, evaluates `pipeline.gates.review`, and when the session passes, registers an approved live bundle.
 - `pipeline live` launches from either the local filesystem after a git pull or directly from an MLflow run URL containing a reconstructable promoted bundle config.
 
+### Restarting paper sessions after a reboot
+
+MongoDB session documents can opt into automatic restart with an `autostart`
+boolean. This is desired state, not an indication that the process is currently
+running.
+
+```bash
+# Enable or disable restart for a stored session
+python scripts/paper_session_autostart.py enable <session_id>
+python scripts/paper_session_autostart.py disable <session_id>
+
+# Inspect and launch all enabled sessions
+python scripts/paper_session_autostart.py list
+python scripts/paper_session_autostart.py start
+
+# View the separate tiled panes
+tmux attach -t paper-sessions
+```
+
+The launcher reads each session's `metadata.account_name` and launch metadata
+from the `live_trading.sessions` collection. It runs `pipeline
+paper-from-session` once per enabled session in a separate tmux pane and refuses
+to launch when the target tmux session already exists, preventing accidental
+duplicates. Use `start --dry-run` to inspect commands without starting them.
+
+For automatic boot startup, run the `start` command from a systemd oneshot
+service after MongoDB and networking are available. See the
+[detailed `run.py` guide](docs/RUN_PY_GUIDE.md#paper-session-autostart) for an
+example.
+
 The root [config.yaml](/E:/Programming/trading_guy/config.yaml) now includes a dedicated `pipeline` section:
 
 ```yaml
@@ -184,6 +214,10 @@ python run.py backtest --config configs/example_backtest.yaml
 
 # Backtest with tick aggregation (1-min data → 5-min bars)
 python run.py backtest --config configs/example_backtest_agg.yaml
+
+# Backtest topology_promoted_from_space_search parameters with fresh Alpaca
+# bars and a 2% trailing stop; MongoDB session bars are not used
+python run.py backtest --config configs/topology_promoted_from_space_search_trailing_stop_backtest.yaml --account secondary_paper3
 
 # Live trading (Alpaca)
 python run.py live --config configs/example_live_spy_trend_macd.yaml

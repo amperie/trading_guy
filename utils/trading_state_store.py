@@ -326,11 +326,17 @@ class TradingStateStore:
         """Update fields on an existing session document."""
         self._sessions.update_one({"_id": session_id}, {"$set": update})
 
-    def list_sessions(self, account_id: str = None) -> list[dict]:
-        """List sessions, optionally filtered by account_id."""
+    def list_sessions(
+        self,
+        account_id: str = None,
+        autostart: bool = None,
+    ) -> list[dict]:
+        """List sessions, optionally filtered by account_id or autostart."""
         query = {}
         if account_id is not None:
             query["account_id"] = account_id
+        if autostart is not None:
+            query["autostart"] = autostart
         return list(self._sessions.find(query).sort("created_at", -1))
 
     # ------------------------------------------------------------------ #

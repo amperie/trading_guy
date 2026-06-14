@@ -1,0 +1,69 @@
+# Alpaca backtest matching the topology_promoted_from_space_search session.
+#
+# The MongoDB session is used only as the source of the strategy parameters
+# and date range. Backtest bars are fetched from Alpaca.
+#
+# python run.py backtest \
+#   --config configs/topology_promoted_from_space_search_trailing_stop_backtest.yaml \
+#   --account secondary_paper3
+
+mode: backtest
+
+data_provider:
+  implementation: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+  params:
+    symbols: [UPRO]
+    timeframe: Minute
+    adjustment: split
+    market_hours_only: true
+    start_date: "2021-06-03"
+    end_date: "2026-06-11"
+
+algorithm:
+  implementation: TopologyConsensusAlgorithm
+  source_path: trading/promoted/Topology-Based_UPRO_Predictor_Dual_Feature_B0_B1_Consensus_backtest_2a924236/TopologyConsensusAlgorithm.py
+  class_name: TopologyConsensusAlgorithm
+  params:
+    symbol: UPRO
+    symbols: [UPRO]
+    tradable_symbols: [UPRO]
+    macro_symbols: []
+    normalization_window: 60
+    max_position_pct: 5.0
+    history_length: 70
+    filtration_radius: 0.29550075554431576
+    consensus_weight_b1: 0.7858259738277457
+    consensus_weight_b0: 0.21417402617225434
+    b0_stability_threshold: 1.1702303871612272
+    stability_lookback: 4032
+    momentum_lookback: 772
+    b1_momentum_threshold: -0.4554253920995142
+    position_sizing_pct: 3.033083612530989
+
+portfolio:
+  implementation: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
+  params:
+    symbol: UPRO
+    cash: 100000.0
+    keep_history: true
+    tx_cost: 0.0005
+    bracket:
+      stop_type: trailing
+      stop_pct: 3.0
+      trailing_stop_pct: 3.0
+      profit_pct: 6.0
+
+order_manager:
+  implementation: trading.core.om.backtesting_om.BacktestingOrderManager
+  params:
+    market_hours_only: false
+
+state_store:
+  enabled: false
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: Topology Trailing Stop Backtest
+  run_name: topology_promoted_from_space_search trailing stop
+  description: Alpaca-bar backtest of the promoted topology session parameters with a 2% trailing stop

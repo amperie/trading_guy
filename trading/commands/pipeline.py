@@ -355,9 +355,16 @@ def cmd_pipeline_paper_from_session(args: argparse.Namespace):
     session_doc = store.get_session(args.source_session_id)
     if session_doc is None:
         raise ValueError(f"Session '{args.source_session_id}' not found in MongoDB")
-    _backfill_session_account_name(store, args.source_session_id, session_doc, args.account)
 
     metadata = session_doc.get("metadata") or {}
+    account_name = getattr(args, "account", None) or metadata.get("account_name")
+    if not account_name:
+        raise ValueError(
+            f"Session '{args.source_session_id}' is missing metadata.account_name; "
+            "pass --account once to backfill it."
+        )
+    args.account = account_name
+    _backfill_session_account_name(store, args.source_session_id, session_doc, account_name)
     launch_source = _resolve_session_launch_source(metadata)
     if not launch_source:
         raise ValueError(

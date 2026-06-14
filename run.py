@@ -158,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
             "    --config --account [--data] [--symbol] [--cash] [--algorithm] [--algorithm-url] [--portfolio] [--portfolio-url]\n"
             "    [--no-mlflow] [--run-name] [--session-id] [--agg-period]\n"
             "    Example: python run.py backtest --config configs/example_backtest.yaml --account paper\n"
+            "    Example: python run.py backtest --config configs/topology_promoted_from_space_search_trailing_stop_backtest.yaml --account secondary_paper3\n"
             "    Example: python run.py backtest --config trading/promoted/my_live_bundle/my_live_bundle.yaml --account paper --session-id live-20260513-a\n"
             "  mongo-backtest:\n"
             "    Run a simulation against bars already stored in MongoDB for a prior session.\n"
@@ -233,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  pipeline paper-from-session:\n"
             "    Reconstruct a fresh paper launch from a stored MongoDB session by reading its session metadata,\n"
             "    recovering the source MLflow run URL or launch config reference, and materializing the bundle automatically.\n"
-            "    Example: python run.py pipeline paper-from-session --source-session-id live-20260525-a --account paper\n"
+            "    Example: python run.py pipeline paper-from-session --source-session-id live-20260525-a\n"
             "  pipeline review:\n"
             "    Replay a paper/live session, evaluate review gates, and register an approved live bundle when the session passes.\n"
             "    Prints replay MLflow links plus the approved bundle location and MLflow registration URL.\n"
@@ -253,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  End-to-end pipeline:\n"
             "    python run.py pipeline research --config configs/example_hpo_split.yaml --account paper\n"
             "    python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<candidate_run_id> --account paper\n"
-            "    python run.py pipeline paper-from-session --source-session-id <prior_session_id> --account paper\n"
+            "    python run.py pipeline paper-from-session --source-session-id <prior_session_id>\n"
             "    python run.py pipeline review --config trading/promoted/<paper_bundle>/<paper_bundle>.yaml --account paper --session-id <paper_session_id>\n"
             "    python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_bundle_run_id> --account live --session-id <live_session_id>\n"
             "  Derived-run fallback:\n"
@@ -679,7 +680,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     pipeline_paper_session_p = pipeline_sub.add_parser(
         "paper-from-session",
-        parents=[shared_account],
         help="Relaunch paper trading from MongoDB session metadata",
         epilog=PIPELINE_PAPER_FROM_SESSION_EPILOG,
         formatter_class=argparse.RawTextHelpFormatter,
@@ -687,6 +687,10 @@ def build_parser() -> argparse.ArgumentParser:
             "Loads a prior MongoDB session, reads metadata.source_run_url or metadata.launch_config_ref, "
             "materializes the referenced bundle/config, and resumes paper trading in that session."
         ),
+    )
+    pipeline_paper_session_p.add_argument(
+        "--account",
+        help="Account override; defaults to the session's metadata.account_name",
     )
     pipeline_paper_session_p.add_argument("--source-session-id", required=True, help="Existing MongoDB session ID to relaunch from")
     pipeline_paper_session_p.add_argument("--session-id", dest="session_id", help="Optional different paper session ID")

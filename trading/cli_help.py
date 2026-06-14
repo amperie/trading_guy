@@ -9,6 +9,7 @@ BACKTEST_DESCRIPTION = (
 BACKTEST_EPILOG = """Examples:
   python run.py backtest --config configs/example_backtest.yaml --account paper
   python run.py backtest --config configs/example_backtest.yaml --account paper --data data/test_data.csv
+  python run.py backtest --config configs/topology_promoted_from_space_search_trailing_stop_backtest.yaml --account secondary_paper3
   python run.py backtest --config trading/promoted/my_live_bundle/my_live_bundle.yaml --account paper --session-id live-20260513-a
 
 Common overrides:
@@ -18,6 +19,11 @@ Common overrides:
   --algorithm PATH        Override algorithm dotted path
   --portfolio PATH        Override portfolio dotted path
   --agg-period N          Enable aggregation and set the bar period in minutes
+
+Promoted-session Alpaca backtests:
+  Copy the session's algorithm and portfolio parameters into a normal backtest
+  YAML with AlpacaDataProvider. No --session-id is needed.
+  The bars come from Alpaca, not MongoDB. The topology example uses a 2% trailing stop.
 """
 
 HPO_DESCRIPTION = (
@@ -101,7 +107,7 @@ Examples:
   python run.py pipeline research --config configs/example_hpo_split.yaml --account paper
   python run.py pipeline research --config http://localhost:5000/#/experiments/1/runs/<run_id> --account paper --editor vim
   python run.py pipeline paper --run-url http://localhost:5000/#/experiments/1/runs/<run_id> --account paper
-  python run.py pipeline paper-from-session --source-session-id live-20260525-a --account paper
+  python run.py pipeline paper-from-session --source-session-id live-20260525-a
   python run.py pipeline review --config trading/promoted/my_bundle/my_bundle.yaml --account paper --session-id paper-20260523
   python run.py pipeline live --config http://localhost:5000/#/experiments/1/runs/<approved_run_id> --account live
 """
@@ -137,12 +143,12 @@ and starts a paper-trading live session from that bundle.
 """
 
 PIPELINE_PAPER_FROM_SESSION_EPILOG = """Examples:
-  python run.py pipeline paper-from-session --source-session-id live-20260525-a --account paper
-  python run.py pipeline paper-from-session --source-session-id paper-20260525-a --account paper --session-id paper-rerun-1
+  python run.py pipeline paper-from-session --source-session-id live-20260525-a
+  python run.py pipeline paper-from-session --source-session-id paper-20260525-a --session-id paper-rerun-1
 
 The command loads the stored MongoDB session, reads metadata.source_run_url or
-metadata.launch_config_ref, materializes the referenced bundle/config, and
-resumes paper trading in the source session unless --session-id is provided.
+metadata.launch_config_ref and metadata.account_name, materializes the referenced
+bundle/config, and resumes the source session unless --session-id is provided.
 """
 
 PIPELINE_REVIEW_EPILOG = """Example:

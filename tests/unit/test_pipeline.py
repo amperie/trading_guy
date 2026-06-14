@@ -640,6 +640,53 @@ def test_pipeline_paper_from_session_keeps_existing_source_account_name(monkeypa
     assert "source_session_update" not in calls
 
 
+def test_pipeline_paper_from_session_reads_account_name_from_mongo(monkeypatch):
+    calls = {}
+
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "_resolve_session_store",
+        lambda **kwargs: SimpleNamespace(
+            get_session=lambda session_id: {
+                "metadata": {
+                    "account_name": "paper2",
+                    "launch_config_ref": "trading/promoted/bundle/bundle.yaml",
+                }
+            },
+            update_session=lambda *args: None,
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "materialize_bundle",
+        lambda *args, **kwargs: SimpleNamespace(
+            config_path="trading/promoted/bundle/bundle.yaml",
+            manifest_path="trading/promoted/bundle/promotion_manifest.json",
+        ),
+    )
+    monkeypatch.setattr(pipeline_cmd, "load_raw_config", lambda path: {"pipeline": {}})
+    monkeypatch.setattr(pipeline_cmd, "log_registered_bundle", lambda *args, **kwargs: {"run_url": "bundle-url"})
+    monkeypatch.setattr(
+        pipeline_cmd,
+        "cmd_live",
+        lambda args: calls.update(account=args.account) or {"session_id": args.session_id},
+    )
+
+    pipeline_cmd.cmd_pipeline_paper_from_session(
+        SimpleNamespace(
+            source_session_id="source-session",
+            session_id=None,
+            account=None,
+            name=None,
+            tracking_uri=None,
+            connection_uri=None,
+            database=None,
+        )
+    )
+
+    assert calls["account"] == "paper2"
+
+
 @pytest.mark.parametrize(
     ("config", "loader"),
     [

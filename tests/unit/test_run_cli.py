@@ -260,6 +260,8 @@ def test_backtest_help_mentions_remote_component_options(capsys):
     help_text = capsys.readouterr().out
     assert "--algorithm-url" in help_text
     assert "--portfolio-url" in help_text
+    assert "topology_promoted_from_space_search_trailing_stop_backtest.yaml" in help_text
+    assert "bars come from Alpaca, not MongoDB" in help_text
 
 
 def test_live_help_mentions_walk_forward_live_mode(capsys):

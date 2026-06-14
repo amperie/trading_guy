@@ -132,6 +132,102 @@ What it does:
 4. Prints both the local bundle paths and the pipeline MLflow run URL
 5. Starts paper trading with a generated or explicit session id
 
+### `pipeline paper-from-session`
+
+Relaunch a stored paper session using its MongoDB metadata:
+
+```bash
+python run.py pipeline paper-from-session --source-session-id <session_id>
+```
+
+The command reads `metadata.account_name`, `metadata.source_run_url`, and/or
+`metadata.launch_config_ref` from the session document. `--account` is optional
+and only needed to override or backfill an older session without
+`metadata.account_name`.
+
+## Paper Session Autostart
+
+The helper [paper_session_autostart.py](/E:/Programming/trading_guy/scripts/paper_session_autostart.py)
+restarts selected paper sessions in separate tmux panes. Session documents use
+`autostart: true` as desired state; the field does not claim that a process is
+currently healthy or running.
+
+The helper uses the MongoDB URI and live database from `config.yaml`. Override
+them with `--connection-uri` or `--database` when necessary.
+
+```bash
+# Mark sessions for restart
+python scripts/paper_session_autostart.py enable paper-session-a
+python scripts/paper_session_autostart.py enable paper-session-b
+
+# Remove a session from the restart set
+python scripts/paper_session_autostart.py disable paper-session-b
+
+# List enabled sessions and their stored account names
+python scripts/paper_session_autostart.py list
+
+# Preview commands, then launch one tmux pane per enabled session
+python scripts/paper_session_autostart.py start --dry-run
+python scripts/paper_session_autostart.py start
+
+# Inspect output
+tmux attach -t paper-sessions
+```
+
+Use `Ctrl-b` followed by an arrow key to move between panes. Detach without
+stopping the sessions using `Ctrl-b d`.
+
+The default tmux session is `paper-sessions`. Override it with:
+
+```bash
+python scripts/paper_session_autostart.py start --tmux-session trading-paper
+```
+
+The launcher refuses to start if that tmux session already exists. This is a
+deliberate duplicate-process guard. Stop the existing processes or kill the
+tmux session before relaunching:
+
+```bash
+tmux kill-session -t paper-sessions
+```
+
+### Start on boot with systemd
+
+Create `/etc/systemd/system/trading-paper-autostart.service`, replacing the user
+and repository paths:
+
+```ini
+[Unit]
+Description=Trading paper session autostart
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trading
+WorkingDirectory=/opt/trading_guy
+ExecStart=/opt/trading_guy/.venv/bin/python scripts/paper_session_autostart.py start
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now trading-paper-autostart.service
+systemctl status trading-paper-autostart.service
+```
+
+Requirements:
+
+- `tmux` must be installed and available to the service user.
+- The service user must be able to read the repository and account credentials.
+- MongoDB, MLflow, and the broker/network endpoints must be reachable.
+- Enabled session documents need `metadata.account_name` and a launch source.
+
 ### `pipeline review`
 
 Example:
@@ -231,6 +327,23 @@ Run a remote algorithm implementation by URL:
 ```bash
 python run.py backtest --config configs/example_backtest.yaml --account paper --algorithm-url https://example.com/my_algo.py
 ```
+
+### Backtest a promoted session with fresh Alpaca bars
+
+Use a normal backtest YAML when you want strategy parameters from a prior live
+session but do not want to replay its stored MongoDB bars or opening state.
+
+The `topology_promoted_from_space_search` profile copies the session's exact
+topology parameters into a regular Alpaca backtest and enables a 2% trailing
+stop with the original 5% profit target:
+
+```bash
+python run.py backtest --config configs/topology_promoted_from_space_search_trailing_stop_backtest.yaml --account secondary_paper3
+```
+
+The profile requests split-adjusted, market-hours-only UPRO minute bars from
+June 3 through June 10, 2026. Its configured `end_date` is June 11 so the full
+June 10 session is included. MongoDB is not accessed when this command runs.
 
 What `backtest` does:
 - builds the configured data provider, algorithm, portfolio, and order manager
