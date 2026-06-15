@@ -5,6 +5,7 @@ const state = {
   symbols: [],
   selectedSymbols: new Set(),
   currentSessionId: null,
+  benchmarkSymbol: "SPY",
   detailLoaded: false,
   indicatorsLoaded: false,
 };
@@ -119,9 +120,19 @@ function mergeSessionData(base, patch) {
     trades: patch?.trades ?? base?.trades ?? [],
     metrics: patch?.metrics ?? base?.metrics ?? {},
     benchmark: patch?.benchmark ?? base?.benchmark ?? {},
+    benchmark_symbol: patch?.benchmark_symbol ?? base?.benchmark_symbol ?? state.benchmarkSymbol,
     orders: patch?.orders ?? base?.orders ?? {},
     errors: { ...(base?.errors || {}), ...(patch?.errors || {}) },
   };
+}
+
+function benchmarkSymbol() {
+  const input = $("benchmarkSymbol");
+  const raw = input ? input.value : state.benchmarkSymbol;
+  const symbol = raw.toUpperCase().replace(/[^A-Z0-9.-]/g, "").trim() || "SPY";
+  if (input) input.value = symbol;
+  state.benchmarkSymbol = symbol;
+  return symbol;
 }
 
 function renderMetadata(session, orders) {
@@ -138,6 +149,7 @@ function fmt2(value) {
 }
 
 function renderMetrics(metrics, benchmark) {
+  const symbol = benchmark?._comparison?.benchmark_symbol || state.raw?.benchmark_symbol || state.benchmarkSymbol;
   $("metricReturn").textContent = formatPct(metrics.total_return_pct);
   $("metricAnnualized").textContent = formatPct(metrics.annualized_return);
   $("metricSharpe").textContent = `${fmt2(metrics.sharpe_ratio)} / ${fmt2(metrics.sortino_ratio)}`;
@@ -153,12 +165,13 @@ function renderMetrics(metrics, benchmark) {
 
   if (benchmark && benchmark._comparison) {
     const alpha = benchmark._comparison.alpha ?? null;
-    const out = benchmark._comparison.outperformance ? "Outperformed SPY" : "Underperformed SPY";
-    $("metricAlpha").textContent = `Alpha vs SPY: ${formatPct(alpha)}`;
-    $("metricOutperformance").textContent = out;
+    const benchmarkReturn = benchmark._comparison.benchmark_return_pct ?? null;
+    const out = benchmark._comparison.outperformance ? `Outperformed ${symbol}` : `Underperformed ${symbol}`;
+    $("metricAlpha").textContent = `Alpha vs ${symbol}: ${formatPct(alpha)}`;
+    $("metricOutperformance").textContent = `${symbol} ${formatPct(benchmarkReturn)} | ${out}`;
   } else {
-    $("metricAlpha").textContent = "Alpha vs SPY: --";
-    $("metricOutperformance").textContent = "SPY data not available";
+    $("metricAlpha").textContent = `Alpha vs ${symbol}: --`;
+    $("metricOutperformance").textContent = `${symbol} data not available`;
   }
 }
 
@@ -190,7 +203,7 @@ function renderSymbols(symbols) {
   const nextSelected = new Set([...state.selectedSymbols].filter((symbol) => entries.includes(symbol)));
   if (!nextSelected.size) {
     entries.slice(0, 3).forEach((symbol) => nextSelected.add(symbol));
-    if (entries.includes("SPY")) nextSelected.add("SPY");
+    if (entries.includes(state.benchmarkSymbol)) nextSelected.add(state.benchmarkSymbol);
   }
   state.selectedSymbols = nextSelected;
 
@@ -302,18 +315,26 @@ function recomputeMetrics(equitySeries, trades) {
   };
 }
 
-function recomputeBenchmark(equitySeries, spySeries) {
-  if (!spySeries || !spySeries.length || !equitySeries.length) return {};
+function recomputeBenchmark(equitySeries, benchmarkSeries, symbol) {
+  if (!benchmarkSeries || !benchmarkSeries.length || !equitySeries.length) return {};
   const startDate = new Date(equitySeries[0].x);
   const endDate = new Date(equitySeries[equitySeries.length - 1].x);
-  const filteredSpy = spySeries.filter((pt) => {
+  const filteredBenchmark = benchmarkSeries.filter((pt) => {
     const t = new Date(pt.x);
     return t >= startDate && t <= endDate;
   });
-  if (!filteredSpy.length) return {};
-  const spyReturn = ((filteredSpy[filteredSpy.length - 1].y - filteredSpy[0].y) / filteredSpy[0].y) * 100;
+  if (!filteredBenchmark.length) return {};
+  const benchmarkReturn = ((filteredBenchmark[filteredBenchmark.length - 1].y - filteredBenchmark[0].y) / filteredBenchmark[0].y) * 100;
   const portfolioReturn = ((equitySeries[equitySeries.length - 1].y - equitySeries[0].y) / equitySeries[0].y) * 100;
-  return { _comparison: { alpha: portfolioReturn - spyReturn, outperformance: portfolioReturn > spyReturn } };
+  return {
+    _comparison: {
+      benchmark_symbol: symbol,
+      portfolio_return_pct: portfolioReturn,
+      benchmark_return_pct: benchmarkReturn,
+      alpha: portfolioReturn - benchmarkReturn,
+      outperformance: portfolioReturn > benchmarkReturn,
+    },
+  };
 }
 
 function applyDateFilter(raw, start, end) {
@@ -329,6 +350,7 @@ function applyDateFilter(raw, start, end) {
     return (!start || entry >= start) && (!end || entry <= end);
   });
   const filteredSignals = filterSignals(raw.signals, start, end);
+  const symbol = raw.benchmark_symbol || state.benchmarkSymbol;
 
   return {
     ...raw,
@@ -338,7 +360,7 @@ function applyDateFilter(raw, start, end) {
     indicators: filterIndicators(raw.indicators, start, end),
     trades: filteredTrades,
     metrics: recomputeMetrics(filteredValue, filteredTrades),
-    benchmark: recomputeBenchmark(filteredValue, filteredSymbols.SPY),
+    benchmark: recomputeBenchmark(filteredValue, filteredSymbols[symbol], symbol),
   };
 }
 
@@ -447,6 +469,8 @@ function signalPointsForSymbol(symbol, valueFn) {
 function renderEquityChart() {
   const equityRaw = state.filtered.portfolio.total_value;
   const equitySeries = parseSeries(equityRaw);
+  const symbol = state.filtered.benchmark_symbol || state.benchmarkSymbol;
+  $("equityTitle").textContent = `Equity Curve vs ${symbol}`;
   const datasets = [
     datasetBase(palette[0], "Portfolio", equitySeries, {
       backgroundColor: "rgba(255, 107, 61, 0.15)",
@@ -455,12 +479,12 @@ function renderEquityChart() {
     }),
   ];
 
-  const spySeriesRaw = state.filtered.symbols.SPY;
-  if (spySeriesRaw?.length) {
-    const spySeries = parseSeries(spySeriesRaw);
-    const scale = equitySeries.length ? equitySeries[0].y / spySeries[0].y : 1;
+  const benchmarkSeriesRaw = state.filtered.symbols[symbol];
+  if (benchmarkSeriesRaw?.length) {
+    const benchmarkSeries = parseSeries(benchmarkSeriesRaw);
+    const scale = equitySeries.length ? equitySeries[0].y / benchmarkSeries[0].y : 1;
     datasets.push(
-      datasetBase(palette[1], "SPY (buy & hold)", spySeries.map((pt) => ({ x: pt.x, y: pt.y * scale })), {
+      datasetBase(palette[1], `${symbol} (buy & hold)`, benchmarkSeries.map((pt) => ({ x: pt.x, y: pt.y * scale })), {
         borderDash: [6, 4],
       })
     );
@@ -744,20 +768,22 @@ async function loadSessionList() {
 
 async function loadSession() {
   const sessionId = $("sessionId").value.trim();
+  const symbol = benchmarkSymbol();
   if (!sessionId) return;
   state.raw = null;
   state.filtered = null;
   state.symbols = [];
   state.selectedSymbols = new Set();
   state.currentSessionId = sessionId;
+  state.benchmarkSymbol = symbol;
   state.detailLoaded = false;
   state.indicatorsLoaded = false;
   $("status").textContent = "Loading session summary...";
   try {
     const db = $("dbName").value.trim();
-    const url = db
-      ? `/api/session/${sessionId}?db=${encodeURIComponent(db)}`
-      : `/api/session/${sessionId}`;
+    const params = new URLSearchParams({ benchmark: symbol });
+    if (db) params.set("db", db);
+    const url = `/api/session/${sessionId}?${params.toString()}`;
     const res = await fetch(url);
     if (!res.ok) {
       const msg = await res.json();
@@ -766,9 +792,7 @@ async function loadSession() {
     const data = await res.json();
     renderAll(data);
     $("status").textContent = `Loaded summary for ${sessionId}. Loading details...`;
-    const detailsUrl = db
-      ? `/api/session/${sessionId}/details?db=${encodeURIComponent(db)}`
-      : `/api/session/${sessionId}/details`;
+    const detailsUrl = `/api/session/${sessionId}/details?${params.toString()}`;
     const indicatorsUrl = db
       ? `/api/session/${sessionId}/indicators?db=${encodeURIComponent(db)}`
       : `/api/session/${sessionId}/indicators`;
@@ -778,6 +802,11 @@ async function loadSession() {
   } catch (err) {
     $("status").textContent = `Error: ${err.message}`;
   }
+}
+
+function updateBenchmark() {
+  benchmarkSymbol();
+  return loadSession();
 }
 
 async function loadSessionDetails(sessionId, url) {
@@ -860,6 +889,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   $("loadBtn").addEventListener("click", loadSession);
+  $("benchmarkBtn").addEventListener("click", updateBenchmark);
+  $("benchmarkSymbol").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") updateBenchmark();
+  });
   $("dbName").addEventListener("keydown", (event) => {
     if (event.key === "Enter") loadSessionList();
   });
@@ -879,7 +912,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const params = new URLSearchParams(window.location.search);
   const sessionId = params.get("session_id");
   const db = params.get("db");
+  const benchmark = params.get("benchmark");
   if (db) $("dbName").value = db;
+  if (benchmark) $("benchmarkSymbol").value = benchmark;
 
   loadSessionList().then(() => {
     if (sessionId) {

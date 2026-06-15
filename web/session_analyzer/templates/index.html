@@ -36,6 +36,11 @@
               <option value="">-- loading sessions --</option>
             </select>
             <button id="loadBtn">Analyze</button>
+            <label for="benchmarkSymbol">Benchmark</label>
+            <div class="benchmark-row">
+              <input id="benchmarkSymbol" type="text" value="SPY" />
+              <button id="benchmarkBtn" type="button">Update</button>
+            </div>
             <label>Date Range</label>
             <div class="date-range">
               <input id="dateFrom" type="date" />
@@ -106,7 +111,7 @@
       <section class="grid charts" data-animate>
         <div class="panel wide">
           <div class="panel-header">
-            <h2>Equity Curve vs SPY</h2>
+            <h2 id="equityTitle">Equity Curve vs SPY</h2>
             <div class="panel-actions">
               <button id="exportEquity">Export Equity CSV</button>
               <button id="exportJson">Export JSON</button>

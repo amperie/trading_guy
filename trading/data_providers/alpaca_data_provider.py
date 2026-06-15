@@ -36,6 +36,7 @@ import yaml
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
+from alpaca.common.enums import Sort
 
 from trading.data_providers.data_provider import DataProvider
 from utils.logger import Logger
@@ -85,6 +86,8 @@ class AlpacaDataProvider(DataProvider):
             )
         self.timeframe = TIMEFRAME_MAP[timeframe_str]
         self.adjustment = self.cfg.get("adjustment", "split")
+        sort = self.cfg.get("sort")
+        self.sort = Sort(sort) if isinstance(sort, str) else sort
 
         url_override = (
             self.cfg.get("historical_data_url")
@@ -148,6 +151,7 @@ class AlpacaDataProvider(DataProvider):
                     start=start,
                     end=end,
                     limit=limit,
+                    sort=self.sort,
                     adjustment=self.adjustment,
                 )
                 sym_bars = self.client.get_stock_bars(req)
@@ -167,6 +171,7 @@ class AlpacaDataProvider(DataProvider):
                 start=start,
                 end=end,
                 limit=limit,
+                sort=self.sort,
                 adjustment=self.adjustment,
             )
             bars = self.client.get_stock_bars(request_params)

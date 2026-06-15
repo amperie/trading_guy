@@ -18,6 +18,7 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 SUMMARY_MAX_POINTS = 2000
 DETAIL_MAX_POINTS = 1500
 SIGNAL_MAX_POINTS = 2000
+DEFAULT_BENCHMARK_SYMBOL = "SPY"
 
 
 def _max_points_arg(name: str, default: int) -> int:
@@ -26,6 +27,12 @@ def _max_points_arg(name: str, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(100, min(value, 10000))
+
+
+def _benchmark_symbol_arg() -> str:
+    raw = request.args.get("benchmark", DEFAULT_BENCHMARK_SYMBOL) if has_request_context() else DEFAULT_BENCHMARK_SYMBOL
+    symbol = "".join(ch for ch in str(raw).upper().strip() if ch.isalnum() or ch in ".-")
+    return symbol or DEFAULT_BENCHMARK_SYMBOL
 
 
 def _get_mongo_params(db: str = None) -> tuple[str, str]:
@@ -162,9 +169,7 @@ def _alpaca_range(value_history: dict, timeframe: str) -> tuple[str, str]:
     eastern = ZoneInfo("America/New_York")
 
     def eastern_iso(ts: datetime) -> str:
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=eastern)
-        return ts.isoformat()
+        return _to_eastern_naive(ts).replace(tzinfo=eastern).isoformat()
 
     start = dates[0]
     if timeframe == "Day":
@@ -174,6 +179,13 @@ def _alpaca_range(value_history: dict, timeframe: str) -> tuple[str, str]:
     else:
         end = dates[-1] + timedelta(minutes=1)
     return eastern_iso(start), eastern_iso(end)
+
+
+def _to_eastern_naive(ts: datetime) -> datetime:
+    eastern = ZoneInfo("America/New_York")
+    if ts.tzinfo is not None:
+        return ts.astimezone(eastern).replace(tzinfo=None)
+    return ts
 
 
 def _metrics_from_equity(equity: list[dict]) -> dict:
@@ -228,65 +240,89 @@ def _metrics_from_equity(equity: list[dict]) -> dict:
     }
 
 
-def _fetch_spy_series(
+def _fetch_benchmark_series(
     value_history: dict,
     session_metadata: dict,
     session: dict | None = None,
+    symbol: str = DEFAULT_BENCHMARK_SYMBOL,
 ) -> tuple[list[dict], str | None]:
     if not value_history:
         return [], None
     api_key, secret_key = _alpaca_credentials(session)
     if not api_key or not secret_key:
-        return [], "Missing Alpaca credentials for SPY fallback; set ALPACA_API_KEY/ALPACA_SECRET_KEY, config alpaca keys, or accounts.yaml"
+        return [], f"Missing Alpaca credentials for {symbol} fallback; set ALPACA_API_KEY/ALPACA_SECRET_KEY, config alpaca keys, or accounts.yaml"
 
     timeframe = _alpaca_timeframe(session_metadata)
     start_date, end_date = _alpaca_range(value_history, timeframe)
-    try:
+
+    def fetch_endpoint(sort: str):
         provider = AlpacaDataProvider({
             "api_key": api_key,
             "secret_key": secret_key,
-            "symbols": ["SPY"],
+            "symbols": [symbol],
             "timeframe": timeframe,
             "start_date": start_date,
             "end_date": end_date,
+            "limit": 1,
+            "sort": sort,
             "market_hours_only": True,
         })
         provider.load_data()
+        df = provider.get_data()
+        return df if df is not None else None
+
+    try:
+        start_df = fetch_endpoint("asc")
+        end_df = fetch_endpoint("desc")
     except Exception as exc:
-        return [], f"Failed to fetch SPY from Alpaca: {exc}"
-    df = provider.get_data()
-    if df is None or df.empty:
-        return [], "Alpaca returned no SPY bars for session range"
-    return [
-        {"x": row.timestamp.isoformat(), "y": float(row.close)}
-        for row in df.sort_values("timestamp").itertuples(index=False)
-    ], None
+        return [], f"Failed to fetch {symbol} from Alpaca: {exc}"
+    if start_df is None or end_df is None or start_df.empty or end_df.empty:
+        return [], f"Alpaca returned no {symbol} bars for session range"
 
-
-def _spy_comparison(equity: list[dict], spy: list[dict], metrics: dict) -> dict:
-    if not equity or not spy:
-        return {}
-    start = datetime.fromisoformat(equity[0]["x"])
-    end = datetime.fromisoformat(equity[-1]["x"])
-    spy_window = [
-        item for item in spy
-        if start <= datetime.fromisoformat(item["x"]) <= end
+    points = [
+        {"x": start_df.iloc[0]["timestamp"].isoformat(), "y": float(start_df.iloc[0]["close"])},
+        {"x": end_df.iloc[0]["timestamp"].isoformat(), "y": float(end_df.iloc[0]["close"])},
     ]
-    if not spy_window:
+    if points[0]["x"] == points[1]["x"]:
+        points.pop()
+    return sorted(points, key=lambda item: item["x"]), None
+
+
+def _benchmark_comparison(equity: list[dict], benchmark: list[dict], metrics: dict, symbol: str) -> dict:
+    if not equity or not benchmark:
         return {}
-    spy_return = ((spy_window[-1]["y"] - spy_window[0]["y"]) / spy_window[0]["y"]) * 100
+    start = _to_eastern_naive(datetime.fromisoformat(equity[0]["x"]))
+    end = _to_eastern_naive(datetime.fromisoformat(equity[-1]["x"]))
+    benchmark_window = [
+        item for item in benchmark
+        if start <= _to_eastern_naive(datetime.fromisoformat(item["x"])) <= end
+    ]
+    if not benchmark_window:
+        benchmark_window = benchmark
+    first_benchmark = float(benchmark_window[0]["y"])
+    last_benchmark = float(benchmark_window[-1]["y"])
+    benchmark_return = ((last_benchmark - first_benchmark) / first_benchmark) * 100 if first_benchmark else 0.0
     portfolio_return = metrics.get("total_return_pct")
     if portfolio_return is None:
         first, last = equity[0]["y"], equity[-1]["y"]
-        portfolio_return = ((last - first) / first) * 100
+        portfolio_return = ((last - first) / first) * 100 if first else 0.0
     return {
         "_comparison": {
+            "benchmark_symbol": symbol,
             "portfolio_return_pct": portfolio_return,
-            "benchmark_return_pct": spy_return,
-            "alpha": portfolio_return - spy_return,
-            "outperformance": portfolio_return > spy_return,
+            "benchmark_return_pct": benchmark_return,
+            "alpha": portfolio_return - benchmark_return,
+            "outperformance": portfolio_return > benchmark_return,
         }
     }
+
+
+def _fetch_spy_series(value_history: dict, session_metadata: dict, session: dict | None = None):
+    return _fetch_benchmark_series(value_history, session_metadata, session, DEFAULT_BENCHMARK_SYMBOL)
+
+
+def _spy_comparison(equity: list[dict], spy: list[dict], metrics: dict) -> dict:
+    return _benchmark_comparison(equity, spy, metrics, DEFAULT_BENCHMARK_SYMBOL)
 
 
 def _symbol_series_from_ticks(tick_history: dict, max_points: int = DETAIL_MAX_POINTS) -> dict:
@@ -537,13 +573,16 @@ def session_summary(session_id: str):
         cash = _downsample_points(cash_full, _max_points_arg("points", SUMMARY_MAX_POINTS))
         metrics = _metrics_from_equity(equity_full)
         metadata = (session or {}).get("metadata") or {}
+        benchmark_symbol = _benchmark_symbol_arg()
         symbols = {}
         errors = {}
-        spy_series, spy_error = _fetch_spy_series(history["value_history"], metadata, session)
-        if spy_series:
-            symbols["SPY"] = _downsample_points(spy_series, _max_points_arg("points", SUMMARY_MAX_POINTS))
-        elif spy_error:
-            errors["spy"] = spy_error
+        benchmark_series, benchmark_error = _fetch_benchmark_series(
+            history["value_history"], metadata, session, benchmark_symbol
+        )
+        if benchmark_series:
+            symbols[benchmark_symbol] = _downsample_points(benchmark_series, _max_points_arg("points", SUMMARY_MAX_POINTS))
+        elif benchmark_error:
+            errors["benchmark"] = benchmark_error
 
         payload = {
             "session": _json_safe(session),
@@ -555,7 +594,8 @@ def session_summary(session_id: str):
             "signals": [],
             "indicators": {"_config": {}},
             "metrics": _json_safe(metrics),
-            "benchmark": _json_safe(_spy_comparison(equity_full, spy_series, metrics)),
+            "benchmark": _json_safe(_benchmark_comparison(equity_full, benchmark_series, metrics, benchmark_symbol)),
+            "benchmark_symbol": benchmark_symbol,
             "trades": [],
             "orders": _order_summary(order_data),
             "errors": errors,
@@ -577,6 +617,7 @@ def session_details(session_id: str):
         pf_data = store.load_portfolio_history(session_id)
         order_data = store.load_orders(session_id)
         metadata = (session or {}).get("metadata") or {}
+        benchmark_symbol = _benchmark_symbol_arg()
         analyzer = _build_analyzer_from_data(pf_data, order_data, metadata)
         point_limit = _max_points_arg("points", DETAIL_MAX_POINTS)
         signal_limit = _max_points_arg("signal_points", SIGNAL_MAX_POINTS)
@@ -594,16 +635,18 @@ def session_details(session_id: str):
             errors["metrics"] = str(exc)
 
         symbols = _symbol_series_from_ticks(pf_data["tick_history"], max_points=point_limit)
-        full_spy_series = symbols.get("SPY", [])
-        if "SPY" not in symbols:
-            full_spy_series, spy_error = _fetch_spy_series(pf_data["value_history"], metadata, session)
-            if full_spy_series:
-                symbols["SPY"] = _downsample_points(full_spy_series, point_limit)
-            elif spy_error:
-                errors["spy"] = spy_error
+        full_benchmark_series = symbols.get(benchmark_symbol, [])
+        if benchmark_symbol not in symbols:
+            full_benchmark_series, benchmark_error = _fetch_benchmark_series(
+                pf_data["value_history"], metadata, session, benchmark_symbol
+            )
+            if full_benchmark_series:
+                symbols[benchmark_symbol] = _downsample_points(full_benchmark_series, point_limit)
+            elif benchmark_error:
+                errors["benchmark"] = benchmark_error
 
         equity = _series_from_history(pf_data["value_history"])
-        benchmark = _spy_comparison(equity, full_spy_series, metrics)
+        benchmark = _benchmark_comparison(equity, full_benchmark_series, metrics, benchmark_symbol)
         if not benchmark:
             try:
                 benchmark = analyzer.calculate_benchmark_comparison()
@@ -616,6 +659,7 @@ def session_details(session_id: str):
             "trades": _trades_payload(trades),
             "metrics": metrics,
             "benchmark": _json_safe(benchmark),
+            "benchmark_symbol": benchmark_symbol,
             "errors": errors,
         }
         return jsonify(payload)

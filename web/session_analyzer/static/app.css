@@ -146,6 +146,16 @@ button:hover {
   gap: 8px;
 }
 
+.benchmark-row {
+  display: flex;
+  gap: 8px;
+}
+
+.benchmark-row input {
+  min-width: 0;
+  text-transform: uppercase;
+}
+
 .date-range input {
   flex: 1;
   min-width: 0;
@@ -388,6 +398,10 @@ tbody tr:hover {
 
 @media (max-width: 640px) {
   .session-controls {
+    flex-direction: column;
+  }
+
+  .benchmark-row {
     flex-direction: column;
   }
 
