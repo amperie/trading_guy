@@ -1,0 +1,142 @@
+# Aggressive joint HPO: tune Tom RSI V2 for return, not conservative Calmar.
+#
+# Run:
+#   python run.py hpo-split --config configs/tom_rsi_v2_aggressive_joint_hpo_split.yaml \
+#       --account tom_paper
+#
+# This keeps the same algorithm/portfolio classes but deliberately lets the
+# optimizer accept materially larger drawdowns than the conservative profile.
+
+mode: hpo
+
+data_provider:
+  provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+  symbols: [UPRO]
+  timeframe: Minute
+  start_date: "2023-01-01"
+  end_date: "2026-03-31"
+  adjustment: split
+  market_hours_only: false
+
+algorithm:
+  algorithm: trading.algorithms.volatility_filtered_rsi_mean_reversion_v2.VolatilityFilteredRsiMeanReversionAlgorithmV2
+  symbol: UPRO
+  history_length: 260
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+    atr_percentile_low: 10
+    atr_percentile_high: 95
+    require_full_atr_window: true
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+    buy_rearm_threshold: 40
+    sell_rearm_threshold: 60
+  price_confirmation:
+    reversal_bar_lookback: 2
+
+portfolio:
+  portfolio: trading.core.pf.risk_managed_single_symbol_portfolio.RiskManagedSingleSymbolPortfolio
+  symbol: UPRO
+  cash: 100000.0
+  keep_history: true
+  tx_cost: 1.5
+  max_exposure: 1.0
+  risk_per_trade: 0.02
+  min_signal_strength: 40
+  min_trade_value: 100
+  atr_stop_multiple: 2.5
+  profit_target_r_multiple: 2.0
+  fallback_stop_pct: 2.0
+  entry_start: "09:30"
+  entry_end: "15:55"
+  cooldown_minutes: 0
+  max_holding_minutes: 0
+  max_entries_per_day: 6
+  max_daily_loss_pct: 0.06
+  max_drawdown_pct: 0.20
+  drawdown_confirmation_bars: 3
+  halt_on_drawdown: false
+  flatten_before_close: false
+  flatten_time: "15:55"
+
+order_manager:
+  order_manager: trading.core.om.backtesting_om.BacktestingOrderManager
+  market_hours_only: true
+
+state_store:
+  enabled: false
+
+hpo:
+  validation_period_days: 120
+  objective_metric: val_annualized_return
+  num_samples: 960
+  max_concurrent_trials: 16
+  log_trials_to_mlflow: true
+  log_ray_worker_output: true
+
+  search_space:
+    regime_detection.ma_short_period:         {type: randint, low: 10, high: 101}
+    regime_detection.ma_long_period:          {type: choice, values: [100, 150, 200, 240, 300]}
+    regime_detection.ma_proximity_tolerance:  {type: uniform, low: 0.005, high: 0.08}
+    regime_detection.atr_period:              {type: choice, values: [7, 10, 14, 20, 28]}
+    regime_detection.atr_percentile_window:   {type: choice, values: [10, 20, 40, 60, 120]}
+    regime_detection.atr_percentile_low:      {type: randint, low: 0, high: 26}
+    regime_detection.atr_percentile_high:     {type: randint, low: 75, high: 101}
+    rsi_config.rsi_period:                    {type: randint, low: 4, high: 22}
+    rsi_config.rsi_oversold_threshold:        {type: randint, low: 25, high: 46}
+    rsi_config.rsi_overbought_threshold:      {type: randint, low: 55, high: 81}
+    rsi_config.buy_rearm_threshold:           {type: choice, values: [35, 40, 45, 50]}
+    rsi_config.sell_rearm_threshold:          {type: choice, values: [50, 55, 60, 65]}
+    price_confirmation.reversal_bar_lookback: {type: choice, values: [2, 3, 4]}
+    max_exposure:                             {type: choice, values: [0.65, 0.80, 0.90, 1.00]}
+    risk_per_trade:                           {type: loguniform, low: 0.0075, high: 0.05}
+    atr_stop_multiple:                        {type: uniform, low: 1.25, high: 5.0}
+    profit_target_r_multiple:                 {type: uniform, low: 0.75, high: 5.0}
+    fallback_stop_pct:                        {type: uniform, low: 1.0, high: 4.0}
+    cooldown_minutes:                         {type: choice, values: [0, 15, 30, 60]}
+    max_holding_minutes:                      {type: choice, values: [0, 390, 780, 1560, 3120, 6240]}
+    max_entries_per_day:                      {type: choice, values: [2, 4, 6, 8, 0]}
+    min_signal_strength:                      {type: choice, values: [0, 25, 40, 50, 60]}
+    max_daily_loss_pct:                       {type: choice, values: [0.03, 0.05, 0.08, 0.12, 0.0]}
+    max_drawdown_pct:                         {type: choice, values: [0.10, 0.15, 0.20, 0.30, 0.0]}
+
+  algorithm_param_keys:
+    - regime_detection.ma_short_period
+    - regime_detection.ma_long_period
+    - regime_detection.ma_proximity_tolerance
+    - regime_detection.atr_period
+    - regime_detection.atr_percentile_window
+    - regime_detection.atr_percentile_low
+    - regime_detection.atr_percentile_high
+    - rsi_config.rsi_period
+    - rsi_config.rsi_oversold_threshold
+    - rsi_config.rsi_overbought_threshold
+    - rsi_config.buy_rearm_threshold
+    - rsi_config.sell_rearm_threshold
+    - price_confirmation.reversal_bar_lookback
+  portfolio_param_keys:
+    - max_exposure
+    - risk_per_trade
+    - atr_stop_multiple
+    - profit_target_r_multiple
+    - fallback_stop_pct
+    - cooldown_minutes
+    - max_holding_minutes
+    - max_entries_per_day
+    - min_signal_strength
+    - max_daily_loss_pct
+    - max_drawdown_pct
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: tom_rsi_v2_hpo_split
+  run_name: tom-rsi-v2-aggressive-joint-hpo
+  description: Aggressive joint split HPO for Tom RSI V2; final 120 days select by annualized return

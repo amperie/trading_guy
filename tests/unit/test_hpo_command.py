@@ -57,6 +57,44 @@ def test_run_hpo_from_raw_config_passes_ray_worker_log_flag(monkeypatch):
     assert captured["log_ray_worker_output"] is False
 
 
+def test_iter_yaml_configs_returns_sorted_yaml_files(tmp_path):
+    (tmp_path / "b.yml").write_text("mode: hpo\n")
+    (tmp_path / "a.yaml").write_text("mode: hpo\n")
+    (tmp_path / "ignore.txt").write_text("x\n")
+
+    paths = hpo_cmd._iter_yaml_configs(str(tmp_path))
+
+    assert [path.name for path in paths] == ["a.yaml", "b.yml"]
+
+
+def test_cmd_hpo_split_folder_runs_configs_in_series(monkeypatch, tmp_path):
+    first = tmp_path / "a.yaml"
+    second = tmp_path / "b.yaml"
+    first.write_text("mode: hpo\n")
+    second.write_text("mode: hpo\n")
+    calls = []
+
+    monkeypatch.setattr(hpo_cmd, "load_account_creds", lambda account: {"api_key": "x", "secret_key": "y"})
+    monkeypatch.setattr(hpo_cmd, "load_raw_config", lambda path: {"path": path})
+    monkeypatch.setattr(hpo_cmd, "apply_cli_overrides", lambda cfg, args: cfg)
+    monkeypatch.setattr(hpo_cmd, "apply_session_log_file", lambda cfg, args: None)
+    monkeypatch.setattr(hpo_cmd, "fill_data_provider_creds", lambda cfg, creds: None)
+    monkeypatch.setattr(hpo_cmd, "run_hpo_split_from_raw_config", lambda raw_cfg, **kwargs: calls.append((raw_cfg, kwargs)))
+
+    hpo_cmd.cmd_hpo_split_folder(argparse.Namespace(
+        config_folder=str(tmp_path),
+        account="paper",
+        num_samples=5,
+        max_concurrent_trials=2,
+        validation_period_days=30,
+    ))
+
+    assert [call[0]["path"] for call in calls] == [str(first), str(second)]
+    assert calls[0][1]["num_samples_override"] == 5
+    assert calls[0][1]["max_concurrent_override"] == 2
+    assert calls[0][1]["validation_period_days_override"] == 30
+
+
 def test_resolve_hpo_split_dates_uses_config_range():
     start, train_end, val_start, end = hpo_cmd._resolve_hpo_split_dates(
         {"start_date": "2024-01-01", "end_date": "2024-01-31"},

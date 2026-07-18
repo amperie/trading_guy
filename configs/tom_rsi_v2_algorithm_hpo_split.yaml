@@ -1,0 +1,117 @@
+# Phase 2: tune Tom RSI V2 after copying the Phase-1 winning portfolio values
+# into the portfolio section below. This file is runnable as-is, but using the
+# Phase-1 winner is required for the intended sequential experiment.
+#
+# Run after updating portfolio values:
+#   python run.py hpo-split --config configs/tom_rsi_v2_algorithm_hpo_split.yaml \
+#       --account tom_paper
+
+mode: hpo
+
+data_provider:
+  provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+  symbols: [UPRO]
+  timeframe: Minute
+  start_date: "2023-01-01"
+  end_date: "2026-03-31"
+  adjustment: split
+  market_hours_only: false
+
+algorithm:
+  algorithm: trading.algorithms.volatility_filtered_rsi_mean_reversion_v2.VolatilityFilteredRsiMeanReversionAlgorithmV2
+  symbol: UPRO
+  history_length: 260
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+    atr_percentile_low: 20
+    atr_percentile_high: 80
+    require_full_atr_window: true
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+    buy_rearm_threshold: 40
+    sell_rearm_threshold: 60
+  price_confirmation:
+    reversal_bar_lookback: 2
+
+portfolio:
+  portfolio: trading.core.pf.risk_managed_single_symbol_portfolio.RiskManagedSingleSymbolPortfolio
+  symbol: UPRO
+  cash: 100000.0
+  keep_history: true
+  tx_cost: 1.5
+  # Replace these eight values with the Phase-1 winner before running Phase 2.
+  max_exposure: 0.50
+  risk_per_trade: 0.005
+  atr_stop_multiple: 2.25
+  profit_target_r_multiple: 1.5
+  cooldown_minutes: 60
+  max_holding_minutes: 1560
+  max_entries_per_day: 2
+  min_signal_strength: 50
+  min_trade_value: 100
+  fallback_stop_pct: 1.5
+  entry_start: "09:35"
+  entry_end: "15:30"
+  max_daily_loss_pct: 0.02
+  max_drawdown_pct: 0.08
+  drawdown_confirmation_bars: 3
+  halt_on_drawdown: false
+  flatten_before_close: false
+  flatten_time: "15:55"
+
+order_manager:
+  order_manager: trading.core.om.backtesting_om.BacktestingOrderManager
+  market_hours_only: true
+
+state_store:
+  enabled: false
+
+hpo:
+  validation_period_days: 90
+  objective_metric: val_calmar_ratio
+  num_samples: 200
+  max_concurrent_trials: 8
+  log_trials_to_mlflow: true
+  log_ray_worker_output: true
+
+  search_space:
+    regime_detection.ma_short_period:         {type: randint, low: 20, high: 81}
+    regime_detection.ma_long_period:          {type: choice, values: [120, 160, 200, 240]}
+    regime_detection.ma_proximity_tolerance:  {type: uniform, low: 0.005, high: 0.04}
+    regime_detection.atr_period:              {type: choice, values: [7, 10, 14, 20, 28]}
+    regime_detection.atr_percentile_window:   {type: choice, values: [20, 40, 60, 120]}
+    regime_detection.atr_percentile_low:      {type: randint, low: 0, high: 36}
+    regime_detection.atr_percentile_high:     {type: randint, low: 55, high: 96}
+    rsi_config.rsi_period:                    {type: randint, low: 5, high: 26}
+    rsi_config.rsi_oversold_threshold:        {type: randint, low: 20, high: 41}
+    rsi_config.rsi_overbought_threshold:      {type: randint, low: 60, high: 81}
+    price_confirmation.reversal_bar_lookback: {type: choice, values: [2, 3, 4]}
+
+  algorithm_param_keys:
+    - regime_detection.ma_short_period
+    - regime_detection.ma_long_period
+    - regime_detection.ma_proximity_tolerance
+    - regime_detection.atr_period
+    - regime_detection.atr_percentile_window
+    - regime_detection.atr_percentile_low
+    - regime_detection.atr_percentile_high
+    - rsi_config.rsi_period
+    - rsi_config.rsi_oversold_threshold
+    - rsi_config.rsi_overbought_threshold
+    - price_confirmation.reversal_bar_lookback
+  portfolio_param_keys: []
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: tom_rsi_v2_hpo_split
+  run_name: tom-rsi-v2-algorithm-hpo
+  description: Algorithm-only split HPO for Tom RSI V2 using the Phase-1 portfolio winner
+

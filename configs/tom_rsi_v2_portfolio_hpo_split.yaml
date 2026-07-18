@@ -1,0 +1,110 @@
+# Phase 1: tune the risk-managed portfolio while keeping Tom RSI V2 fixed.
+#
+# Run:
+#   python run.py hpo-split --config configs/tom_rsi_v2_portfolio_hpo_split.yaml \
+#       --account tom_paper
+
+mode: hpo
+
+data_provider:
+  provider: trading.data_providers.alpaca_data_provider.AlpacaDataProvider
+  symbols: [UPRO]
+  timeframe: Minute
+  start_date: "2023-01-01"
+  end_date: "2026-03-31"
+  adjustment: split
+  # Match the live/Mongo indicator stream; orders remain regular-hours-only.
+  market_hours_only: false
+
+algorithm:
+  algorithm: trading.algorithms.volatility_filtered_rsi_mean_reversion_v2.VolatilityFilteredRsiMeanReversionAlgorithmV2
+  symbol: UPRO
+  history_length: 260
+  regime_detection:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+    atr_percentile_low: 20
+    atr_percentile_high: 80
+    require_full_atr_window: true
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+    buy_rearm_threshold: 40
+    sell_rearm_threshold: 60
+  price_confirmation:
+    reversal_bar_lookback: 2
+
+portfolio:
+  portfolio: trading.core.pf.risk_managed_single_symbol_portfolio.RiskManagedSingleSymbolPortfolio
+  symbol: UPRO
+  cash: 100000.0
+  keep_history: true
+  tx_cost: 1.5
+  max_exposure: 0.50
+  risk_per_trade: 0.005
+  min_signal_strength: 50
+  min_trade_value: 100
+  atr_stop_multiple: 2.25
+  profit_target_r_multiple: 1.5
+  fallback_stop_pct: 1.5
+  entry_start: "09:35"
+  entry_end: "15:30"
+  cooldown_minutes: 60
+  max_holding_minutes: 1560
+  max_entries_per_day: 2
+  # Risk policy is fixed rather than optimized away for higher return.
+  max_daily_loss_pct: 0.02
+  max_drawdown_pct: 0.08
+  drawdown_confirmation_bars: 3
+  halt_on_drawdown: false
+  flatten_before_close: false
+  flatten_time: "15:55"
+
+order_manager:
+  order_manager: trading.core.om.backtesting_om.BacktestingOrderManager
+  market_hours_only: true
+
+state_store:
+  enabled: false
+
+hpo:
+  validation_period_days: 90
+  objective_metric: val_calmar_ratio
+  num_samples: 150
+  max_concurrent_trials: 8
+  log_trials_to_mlflow: true
+  log_ray_worker_output: true
+
+  search_space:
+    max_exposure:              {type: choice, values: [0.35, 0.50, 0.65, 0.80, 0.90]}
+    risk_per_trade:            {type: loguniform, low: 0.0025, high: 0.015}
+    atr_stop_multiple:         {type: uniform, low: 1.25, high: 4.0}
+    profit_target_r_multiple:  {type: uniform, low: 0.75, high: 3.0}
+    cooldown_minutes:          {type: choice, values: [0, 30, 60, 120, 240]}
+    max_holding_minutes:       {type: choice, values: [390, 780, 1560, 2340, 3120]}
+    max_entries_per_day:       {type: choice, values: [1, 2, 3, 4]}
+    min_signal_strength:       {type: choice, values: [50, 55, 60, 65, 70, 75]}
+
+  algorithm_param_keys: []
+  portfolio_param_keys:
+    - max_exposure
+    - risk_per_trade
+    - atr_stop_multiple
+    - profit_target_r_multiple
+    - cooldown_minutes
+    - max_holding_minutes
+    - max_entries_per_day
+    - min_signal_strength
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: tom_rsi_v2_hpo_split
+  run_name: tom-rsi-v2-portfolio-hpo
+  description: Portfolio-only split HPO for Tom RSI V2; final 90 days select by Calmar ratio
+

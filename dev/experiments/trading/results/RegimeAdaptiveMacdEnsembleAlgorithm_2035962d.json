@@ -1,0 +1,685 @@
+{
+  "experiment_id": "2035962d-88fd-4d74-a252-6b76cb30895e",
+  "proposal_name": "regime_adaptive_macd_ensemble",
+  "class_name": "RegimeAdaptiveMacdEnsembleAlgorithm",
+  "proposal": {
+    "name": "regime_adaptive_macd_ensemble",
+    "description": "Multi-regime MACD strategy that detects market regime (trending vs. ranging) using 50/200 MA crossover and ATR volatility percentile, then applies regime-conditional MACD parameters. Emits LONG when MACD histogram crosses above signal line in trending regime with ADX > 25 confirmation; emits LONG on RSI oversold (< 30) + MACD positive divergence in ranging regime. Emits SHORT on opposite conditions. Requires 2-of-3 indicator alignment (MACD + RSI + ADX) before signal emission.",
+    "mode": "backtest",
+    "optimization_target": "joint",
+    "data_source": "alpaca",
+    "data_provider": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+    "symbol": "SPY",
+    "symbols": [
+      "SPY"
+    ],
+    "tradable_symbols": [
+      "SPY"
+    ],
+    "timeframe": "1m",
+    "start_date": "2023-01-01",
+    "end_date": "2025-12-31",
+    "limit": 750000,
+    "history_length": 300,
+    "stop_pct": 1.5,
+    "profit_pct": 2.0,
+    "tx_cost": 1.5,
+    "hyperparameters": {
+      "regime_detection": {
+        "ma_short_period": 50,
+        "ma_long_period": 200,
+        "atr_period": 14,
+        "atr_rolling_window": 20,
+        "trending_volatility_threshold": 1.0,
+        "ranging_ma_tolerance": 0.02
+      },
+      "trending_regime_params": {
+        "macd_fast": 10,
+        "macd_slow": 28,
+        "macd_signal": 9,
+        "adx_threshold": 25,
+        "rsi_period": 14,
+        "rsi_overbought": 70
+      },
+      "ranging_regime_params": {
+        "macd_fast": 12,
+        "macd_slow": 26,
+        "macd_signal": 9,
+        "rsi_period": 14,
+        "rsi_oversold": 30,
+        "rsi_overbought": 70
+      },
+      "signal_alignment_requirement": 2
+    },
+    "hpo": {
+      "objective_metric": "sharpe_ratio",
+      "num_samples": 120,
+      "max_concurrent_trials": 8,
+      "algorithm_param_keys": [
+        "trending_macd_fast",
+        "trending_macd_slow",
+        "trending_macd_signal",
+        "trending_adx_threshold",
+        "ranging_macd_fast",
+        "ranging_macd_slow",
+        "ranging_rsi_oversold"
+      ],
+      "portfolio_param_keys": [
+        "stop_pct",
+        "profit_pct"
+      ],
+      "search_space": {
+        "trending_macd_fast": {
+          "type": "randint",
+          "low": 1,
+          "high": 30
+        },
+        "trending_macd_slow": {
+          "type": "randint",
+          "low": 15,
+          "high": 60
+        },
+        "trending_macd_signal": {
+          "type": "randint",
+          "low": 5,
+          "high": 25
+        },
+        "trending_adx_threshold": {
+          "type": "randint",
+          "low": 15,
+          "high": 40
+        },
+        "ranging_macd_fast": {
+          "type": "randint",
+          "low": 1,
+          "high": 30
+        },
+        "ranging_macd_slow": {
+          "type": "randint",
+          "low": 15,
+          "high": 60
+        },
+        "ranging_rsi_oversold": {
+          "type": "randint",
+          "low": 15,
+          "high": 40
+        },
+        "stop_pct": {
+          "type": "uniform",
+          "low": 0.5,
+          "high": 5.0
+        },
+        "profit_pct": {
+          "type": "uniform",
+          "low": 1.0,
+          "high": 8.0
+        }
+      }
+    },
+    "benchmark": "SPY",
+    "aggregation_enabled": false,
+    "aggregation_period_minutes": 1,
+    "success_criterion": {
+      "sharpe_ratio": 20,
+      "max_drawdown_pct": -30.0
+    }
+  },
+  "metrics": {
+    "total_return": 0.0,
+    "total_return_pct": 0.0,
+    "annualized_return": 0.0,
+    "sharpe_ratio": 0,
+    "sortino_ratio": 0,
+    "max_drawdown": 0.0,
+    "max_drawdown_pct": 0.0,
+    "max_drawdown_duration": 0,
+    "total_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "win_rate": 0,
+    "avg_win": 0,
+    "avg_loss": 0,
+    "largest_win": 0,
+    "largest_loss": 0,
+    "profit_factor": 0,
+    "avg_trade_pnl": 0,
+    "avg_trade_duration": 0,
+    "avg_bars_in_trade": 0,
+    "bracket_trades": 0,
+    "bracket_stop_triggers": 0,
+    "bracket_profit_triggers": 0,
+    "bracket_manual_exits": 0,
+    "bracket_stop_rate": 0,
+    "bracket_profit_rate": 0,
+    "calmar_ratio": 0,
+    "ulcer_index": 0.0,
+    "volatility": 0.0,
+    "skewness": 0.0,
+    "kurtosis": 0.0,
+    "best_day": 0.0,
+    "worst_day": 0.0,
+    "avg_daily_return": 0.0,
+    "final_equity": 100000.0,
+    "initial_equity": 100000.0,
+    "peak_equity": 100000.0,
+    "total_days": 1092.2701388888888,
+    "trading_days": 292541
+  },
+  "execution_config": {
+    "mode": "backtest",
+    "algorithm": {
+      "implementation": "__generated__",
+      "params": {
+        "symbol": "SPY",
+        "symbols": [
+          "SPY"
+        ],
+        "tradable_symbols": [
+          "SPY"
+        ],
+        "macro_symbols": [],
+        "regime_detection": {
+          "ma_short_period": 50,
+          "ma_long_period": 200,
+          "atr_period": 14,
+          "atr_rolling_window": 20,
+          "trending_volatility_threshold": 1.0,
+          "ranging_ma_tolerance": 0.02
+        },
+        "trending_regime_params": {
+          "macd_fast": 10,
+          "macd_slow": 28,
+          "macd_signal": 9,
+          "adx_threshold": 25,
+          "rsi_period": 14,
+          "rsi_overbought": 70
+        },
+        "ranging_regime_params": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "rsi_period": 14,
+          "rsi_oversold": 30,
+          "rsi_overbought": 70
+        },
+        "signal_alignment_requirement": 2,
+        "history_length": 310
+      }
+    },
+    "portfolio": {
+      "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+      "params": {
+        "cash": 100000.0,
+        "keep_history": true,
+        "stop_pct": 1.5,
+        "profit_pct": 2.0,
+        "tx_cost": 1.5,
+        "symbol": "SPY"
+      }
+    },
+    "order_manager": {
+      "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+      "params": {}
+    },
+    "data_provider": {
+      "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+      "params": {
+        "provider": "alpaca",
+        "api_key": "***redacted***",
+        "secret_key": "***redacted***",
+        "symbols": [
+          "SPY"
+        ],
+        "timeframe": "Minute",
+        "adjustment": "split",
+        "market_hours_only": true,
+        "start_date": "2023-01-01",
+        "end_date": "2025-12-31",
+        "limit": 750000
+      }
+    },
+    "analysis": {
+      "enabled": true,
+      "log_to_mlflow": true,
+      "experiment_name": "trading_agent_experiments",
+      "run_name": "regime_adaptive_macd_ensemble_backtest",
+      "description": "Multi-regime MACD strategy that detects market regime (trending vs. ranging) using 50/200 MA crossover and ATR volatility percentile, then applies regime-conditional MACD parameters. Emits LONG when MACD histogram crosses above signal line in trending regime with ADX > 25 confirmation; emits LONG on RSI oversold (< 30) + MACD positive divergence in ranging regime. Emits SHORT on opposite conditions. Requires 2-of-3 indicator alignment (MACD + RSI + ADX) before signal emission.",
+      "benchmarks": {},
+      "mlflow_policy": {
+        "annualized_return_threshold": 0.0,
+        "sample_negative_rate": 20
+      }
+    },
+    "aggregation": {
+      "enabled": false,
+      "aggregation_period_minutes": 1
+    },
+    "walk_forward": {
+      "optimization_window_days": 90,
+      "trading_window_days": 30,
+      "improvement_threshold_pct": 5.0,
+      "num_trials": 20,
+      "max_concurrent_trials": 4
+    },
+    "hpo": {
+      "objective_metric": "sharpe_ratio",
+      "num_samples": 120,
+      "max_concurrent_trials": 8,
+      "algorithm_param_keys": [
+        "trending_macd_fast",
+        "trending_macd_slow",
+        "trending_macd_signal",
+        "trending_adx_threshold",
+        "ranging_macd_fast",
+        "ranging_macd_slow",
+        "ranging_rsi_oversold"
+      ],
+      "portfolio_param_keys": [
+        "stop_pct",
+        "profit_pct"
+      ],
+      "search_space": {
+        "trending_macd_fast": {
+          "type": "randint",
+          "low": 1,
+          "high": 30
+        },
+        "trending_macd_slow": {
+          "type": "randint",
+          "low": 15,
+          "high": 60
+        },
+        "trending_macd_signal": {
+          "type": "randint",
+          "low": 5,
+          "high": 25
+        },
+        "trending_adx_threshold": {
+          "type": "randint",
+          "low": 15,
+          "high": 40
+        },
+        "ranging_macd_fast": {
+          "type": "randint",
+          "low": 1,
+          "high": 30
+        },
+        "ranging_macd_slow": {
+          "type": "randint",
+          "low": 15,
+          "high": 60
+        },
+        "ranging_rsi_oversold": {
+          "type": "randint",
+          "low": 15,
+          "high": 40
+        },
+        "stop_pct": {
+          "type": "uniform",
+          "low": 0.5,
+          "high": 20.0
+        },
+        "profit_pct": {
+          "type": "uniform",
+          "low": 0.5,
+          "high": 20.0
+        }
+      },
+      "optimization_target": "joint"
+    },
+    "optimization": {
+      "target": "joint"
+    },
+    "mlflow": {
+      "enabled": true
+    },
+    "state_store": {
+      "enabled": false
+    },
+    "logging": {},
+    "generated_algorithm": {
+      "class_name": "RegimeAdaptiveMacdEnsembleAlgorithm",
+      "script_path": "dev\\experiments\\trading\\implementations\\RegimeAdaptiveMacdEnsembleAlgorithm.py"
+    }
+  },
+  "variant_results": [
+    {
+      "variant_name": "base",
+      "mode": "backtest",
+      "metrics": {
+        "total_return": 0.0,
+        "total_return_pct": 0.0,
+        "annualized_return": 0.0,
+        "sharpe_ratio": 0,
+        "sortino_ratio": 0,
+        "max_drawdown": 0.0,
+        "max_drawdown_pct": 0.0,
+        "max_drawdown_duration": 0,
+        "total_trades": 0,
+        "winning_trades": 0,
+        "losing_trades": 0,
+        "win_rate": 0,
+        "avg_win": 0,
+        "avg_loss": 0,
+        "largest_win": 0,
+        "largest_loss": 0,
+        "profit_factor": 0,
+        "avg_trade_pnl": 0,
+        "avg_trade_duration": 0,
+        "avg_bars_in_trade": 0,
+        "bracket_trades": 0,
+        "bracket_stop_triggers": 0,
+        "bracket_profit_triggers": 0,
+        "bracket_manual_exits": 0,
+        "bracket_stop_rate": 0,
+        "bracket_profit_rate": 0,
+        "calmar_ratio": 0,
+        "ulcer_index": 0.0,
+        "volatility": 0.0,
+        "skewness": 0.0,
+        "kurtosis": 0.0,
+        "best_day": 0.0,
+        "worst_day": 0.0,
+        "avg_daily_return": 0.0,
+        "final_equity": 100000.0,
+        "initial_equity": 100000.0,
+        "peak_equity": 100000.0,
+        "total_days": 1092.2701388888888,
+        "trading_days": 292541
+      },
+      "config": {
+        "mode": "backtest",
+        "algorithm": {
+          "implementation": "__generated__",
+          "params": {
+            "symbol": "SPY",
+            "symbols": [
+              "SPY"
+            ],
+            "tradable_symbols": [
+              "SPY"
+            ],
+            "macro_symbols": [],
+            "regime_detection": {
+              "ma_short_period": 50,
+              "ma_long_period": 200,
+              "atr_period": 14,
+              "atr_rolling_window": 20,
+              "trending_volatility_threshold": 1.0,
+              "ranging_ma_tolerance": 0.02
+            },
+            "trending_regime_params": {
+              "macd_fast": 10,
+              "macd_slow": 28,
+              "macd_signal": 9,
+              "adx_threshold": 25,
+              "rsi_period": 14,
+              "rsi_overbought": 70
+            },
+            "ranging_regime_params": {
+              "macd_fast": 12,
+              "macd_slow": 26,
+              "macd_signal": 9,
+              "rsi_period": 14,
+              "rsi_oversold": 30,
+              "rsi_overbought": 70
+            },
+            "signal_alignment_requirement": 2,
+            "history_length": 310
+          }
+        },
+        "portfolio": {
+          "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+          "params": {
+            "cash": 100000.0,
+            "keep_history": true,
+            "stop_pct": 1.5,
+            "profit_pct": 2.0,
+            "tx_cost": 1.5,
+            "symbol": "SPY"
+          }
+        },
+        "order_manager": {
+          "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+          "params": {}
+        },
+        "data_provider": {
+          "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "params": {
+            "provider": "alpaca",
+            "api_key": "PKWLVTSMBCVI3PEREXCXNFRNUE",
+            "secret_key": "Bty6S6WvKVvEGpPdWzmu64VQ3GofGxNA9TQjgASQssAJ",
+            "symbols": [
+              "SPY"
+            ],
+            "timeframe": "Minute",
+            "adjustment": "split",
+            "market_hours_only": true,
+            "start_date": "2023-01-01",
+            "end_date": "2025-12-31",
+            "limit": 750000
+          }
+        },
+        "analysis": {
+          "enabled": true,
+          "log_to_mlflow": true,
+          "experiment_name": "trading_agent_experiments",
+          "run_name": "regime_adaptive_macd_ensemble_backtest",
+          "description": "Multi-regime MACD strategy that detects market regime (trending vs. ranging) using 50/200 MA crossover and ATR volatility percentile, then applies regime-conditional MACD parameters. Emits LONG when MACD histogram crosses above signal line in trending regime with ADX > 25 confirmation; emits LONG on RSI oversold (< 30) + MACD positive divergence in ranging regime. Emits SHORT on opposite conditions. Requires 2-of-3 indicator alignment (MACD + RSI + ADX) before signal emission.",
+          "benchmarks": {},
+          "mlflow_policy": {
+            "annualized_return_threshold": 0.0,
+            "sample_negative_rate": 20
+          }
+        },
+        "aggregation": {
+          "enabled": false,
+          "aggregation_period_minutes": 1
+        },
+        "walk_forward": {
+          "optimization_window_days": 90,
+          "trading_window_days": 30,
+          "improvement_threshold_pct": 5.0,
+          "num_trials": 20,
+          "max_concurrent_trials": 4
+        },
+        "hpo": {
+          "objective_metric": "sharpe_ratio",
+          "num_samples": 120,
+          "max_concurrent_trials": 8,
+          "algorithm_param_keys": [
+            "trending_macd_fast",
+            "trending_macd_slow",
+            "trending_macd_signal",
+            "trending_adx_threshold",
+            "ranging_macd_fast",
+            "ranging_macd_slow",
+            "ranging_rsi_oversold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "trending_macd_fast": {
+              "type": "randint",
+              "low": 1,
+              "high": 30
+            },
+            "trending_macd_slow": {
+              "type": "randint",
+              "low": 15,
+              "high": 60
+            },
+            "trending_macd_signal": {
+              "type": "randint",
+              "low": 5,
+              "high": 25
+            },
+            "trending_adx_threshold": {
+              "type": "randint",
+              "low": 15,
+              "high": 40
+            },
+            "ranging_macd_fast": {
+              "type": "randint",
+              "low": 1,
+              "high": 30
+            },
+            "ranging_macd_slow": {
+              "type": "randint",
+              "low": 15,
+              "high": 60
+            },
+            "ranging_rsi_oversold": {
+              "type": "randint",
+              "low": 15,
+              "high": 40
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 20.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 20.0
+            }
+          },
+          "optimization_target": "joint"
+        },
+        "optimization": {
+          "target": "joint"
+        },
+        "mlflow": {
+          "enabled": true
+        },
+        "state_store": {
+          "enabled": false
+        },
+        "logging": {},
+        "generated_algorithm": {
+          "class_name": "RegimeAdaptiveMacdEnsembleAlgorithm",
+          "script_path": "dev\\experiments\\trading\\implementations\\RegimeAdaptiveMacdEnsembleAlgorithm.py"
+        }
+      },
+      "report": "\n================================================================================\nTRADING PERFORMANCE REPORT\n================================================================================\n\nOVERVIEW\n--------\nInitial Equity:         $100,000.00\nFinal Equity:           $100,000.00\nPeak Equity:            $100,000.00\nTotal Return:           $0.00 (0.00%)\nAnnualized Return:      0.00%\n\nRISK METRICS\n------------\nVolatility (Ann.):      0.00%\nSharpe Ratio:           0.00\nSortino Ratio:          0.00\nCalmar Ratio:           0.00\nMax Drawdown:           $0.00 (0.00%)\nMax DD Duration:        0.0 days\nUlcer Index:            0.00\n\nTRADE STATISTICS\n----------------\nTotal Trades:           0\nWinning Trades:         0\nLosing Trades:          0\nWin Rate:               0.00%\n\nAverage Win:            $0.00\nAverage Loss:           $0.00\nLargest Win:            $0.00\nLargest Loss:           $0.00\nProfit Factor:          0.00\n\nAvg Trade P&L:          $0.00\nAvg Trade Duration:     0.00 hours\nAvg Bars in Trade:      0.0\n\nDAILY STATISTICS\n----------------\nBest Day:               0.00%\nWorst Day:              0.00%\nAvg Daily Return:       0.0000%\n\nDISTRIBUTION\n------------\nSkewness:               0.00\nKurtosis:               0.00\n\nBRACKET ORDER ANALYSIS\n----------------------\nTotal Bracket Trades:   0\nStop Loss Triggers:     0 (0.0%)\nProfit Taker Triggers:  0 (0.0%)\nManual Exits:           0\n\nBENCHMARK COMPARISON (BUY & HOLD)\n----------------------------------\n\nSPY:\n  Initial Price:        $384.13\n  Final Price:          $686.94\n  Price Change:         78.83%\n  B&H Total Return:     $78,830.08 (78.83%)\n  B&H Sharpe Ratio:     0.61\n  B&H Volatility:       6.72%\n  B&H Max Drawdown:     -21.29%\n\nSTRATEGY vs. BUY & HOLD COMPARISON\n-----------------------------------\nStrategy Return:        0.00%\nBuy & Hold Return:      78.83%\nAlpha (Excess Return):  -78.83% [-]\n\nStrategy Sharpe:        0.00\nBuy & Hold Sharpe:      0.61\n\nStrategy Volatility:    0.00%\nBuy & Hold Volatility:  6.72%\n\nPerformance:            UNDERPERFORMED buy-and-hold by 78.83%\n\nTIME PERIOD\n-----------\nTotal Days:             1092.3\nTrading Days:           292541\n\n================================================================================\n",
+      "raw_output": {
+        "best_config": {},
+        "best_algorithm_config": {
+          "symbol": "SPY",
+          "symbols": [
+            "SPY"
+          ],
+          "tradable_symbols": [
+            "SPY"
+          ],
+          "macro_symbols": [],
+          "regime_detection": {
+            "ma_short_period": 50,
+            "ma_long_period": 200,
+            "atr_period": 14,
+            "atr_rolling_window": 20,
+            "trending_volatility_threshold": 1.0,
+            "ranging_ma_tolerance": 0.02
+          },
+          "trending_regime_params": {
+            "macd_fast": 10,
+            "macd_slow": 28,
+            "macd_signal": 9,
+            "adx_threshold": 25,
+            "rsi_period": 14,
+            "rsi_overbought": 70
+          },
+          "ranging_regime_params": {
+            "macd_fast": 12,
+            "macd_slow": 26,
+            "macd_signal": 9,
+            "rsi_period": 14,
+            "rsi_oversold": 30,
+            "rsi_overbought": 70
+          },
+          "signal_alignment_requirement": 2,
+          "history_length": 310
+        },
+        "best_portfolio_config": {
+          "stop_pct": 1.5,
+          "profit_pct": 2.0,
+          "tx_cost": 1.5,
+          "symbol": "SPY"
+        },
+        "hpo_config": {
+          "objective_metric": "sharpe_ratio",
+          "num_samples": 120,
+          "max_concurrent_trials": 8,
+          "algorithm_param_keys": [
+            "trending_macd_fast",
+            "trending_macd_slow",
+            "trending_macd_signal",
+            "trending_adx_threshold",
+            "ranging_macd_fast",
+            "ranging_macd_slow",
+            "ranging_rsi_oversold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "trending_macd_fast": {
+              "type": "randint",
+              "low": 1,
+              "high": 30
+            },
+            "trending_macd_slow": {
+              "type": "randint",
+              "low": 15,
+              "high": 60
+            },
+            "trending_macd_signal": {
+              "type": "randint",
+              "low": 5,
+              "high": 25
+            },
+            "trending_adx_threshold": {
+              "type": "randint",
+              "low": 15,
+              "high": 40
+            },
+            "ranging_macd_fast": {
+              "type": "randint",
+              "low": 1,
+              "high": 30
+            },
+            "ranging_macd_slow": {
+              "type": "randint",
+              "low": 15,
+              "high": 60
+            },
+            "ranging_rsi_oversold": {
+              "type": "randint",
+              "low": 15,
+              "high": 40
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 20.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 20.0
+            }
+          },
+          "optimization_target": "joint"
+        },
+        "result_summary": {
+          "trade_count": 0
+        }
+      }
+    }
+  ],
+  "report": "\n================================================================================\nTRADING PERFORMANCE REPORT\n================================================================================\n\nOVERVIEW\n--------\nInitial Equity:         $100,000.00\nFinal Equity:           $100,000.00\nPeak Equity:            $100,000.00\nTotal Return:           $0.00 (0.00%)\nAnnualized Return:      0.00%\n\nRISK METRICS\n------------\nVolatility (Ann.):      0.00%\nSharpe Ratio:           0.00\nSortino Ratio:          0.00\nCalmar Ratio:           0.00\nMax Drawdown:           $0.00 (0.00%)\nMax DD Duration:        0.0 days\nUlcer Index:            0.00\n\nTRADE STATISTICS\n----------------\nTotal Trades:           0\nWinning Trades:         0\nLosing Trades:          0\nWin Rate:               0.00%\n\nAverage Win:            $0.00\nAverage Loss:           $0.00\nLargest Win:            $0.00\nLargest Loss:           $0.00\nProfit Factor:          0.00\n\nAvg Trade P&L:          $0.00\nAvg Trade Duration:     0.00 hours\nAvg Bars in Trade:      0.0\n\nDAILY STATISTICS\n----------------\nBest Day:               0.00%\nWorst Day:              0.00%\nAvg Daily Return:       0.0000%\n\nDISTRIBUTION\n------------\nSkewness:               0.00\nKurtosis:               0.00\n\nBRACKET ORDER ANALYSIS\n----------------------\nTotal Bracket Trades:   0\nStop Loss Triggers:     0 (0.0%)\nProfit Taker Triggers:  0 (0.0%)\nManual Exits:           0\n\nBENCHMARK COMPARISON (BUY & HOLD)\n----------------------------------\n\nSPY:\n  Initial Price:        $384.13\n  Final Price:          $686.94\n  Price Change:         78.83%\n  B&H Total Return:     $78,830.08 (78.83%)\n  B&H Sharpe Ratio:     0.61\n  B&H Volatility:       6.72%\n  B&H Max Drawdown:     -21.29%\n\nSTRATEGY vs. BUY & HOLD COMPARISON\n-----------------------------------\nStrategy Return:        0.00%\nBuy & Hold Return:      78.83%\nAlpha (Excess Return):  -78.83% [-]\n\nStrategy Sharpe:        0.00\nBuy & Hold Sharpe:      0.61\n\nStrategy Volatility:    0.00%\nBuy & Hold Volatility:  6.72%\n\nPerformance:            UNDERPERFORMED buy-and-hold by 78.83%\n\nTIME PERIOD\n-----------\nTotal Days:             1092.3\nTrading Days:           292541\n\n================================================================================\n"
+}

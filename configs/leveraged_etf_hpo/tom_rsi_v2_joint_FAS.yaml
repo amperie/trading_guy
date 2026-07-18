@@ -1,0 +1,14 @@
+extends: ../tom_rsi_v2_aggressive_joint_hpo_split.yaml
+
+data_provider:
+  symbols: [FAS]
+
+algorithm:
+  symbol: FAS
+
+portfolio:
+  symbol: FAS
+
+analysis:
+  run_name: tom-rsi-v2-joint-hpo-return-seeking-FAS
+  description: Return-seeking joint split HPO for FAS

@@ -1,0 +1,773 @@
+{
+  "experiment_id": "6a1330f3-3d24-4902-b393-f1df622062d7",
+  "proposal_name": "macro_regime_filter_with_extreme_macd",
+  "class_name": "MacroRegimeExtremeMACD",
+  "proposal": {
+    "name": "macro_regime_filter_with_extreme_macd",
+    "description": "Combines a macro regime score (T10Y2Y spread, VIX percentile, SPY RSI(200)) with extreme-period MACD (fast=600\u20131200, slow=1800\u20132500, signal=200\u2013400) on 5-minute bars. Long signals trigger when MACD crosses above signal line with positive histogram AND regime_score > +0.3 AND price > EMA(200). Short signals reverse these conditions. Exit on MACD crossback or regime_score threshold breach.",
+    "mode": "walk-forward",
+    "optimization_target": "joint",
+    "data_source": "alpaca",
+    "symbol": "SPY",
+    "timeframe": "5min",
+    "start_date": "2022-01-01",
+    "end_date": "2024-12-31",
+    "history_length": 2500,
+    "stop_pct": 2.0,
+    "profit_pct": 5.0,
+    "tx_cost": 0.001,
+    "hyperparameters": {
+      "fast_period": 900,
+      "slow_period": 2100,
+      "signal_period": 300,
+      "regime_long_threshold": 0.3,
+      "regime_short_threshold": -0.3,
+      "ema_200_period": 200,
+      "t10y2y_norm_window": 252,
+      "vix_norm_window": 252
+    },
+    "walk_forward": {
+      "optimization_window_days": 180,
+      "trading_window_days": 30,
+      "step_days": 30,
+      "num_trials": 80,
+      "max_concurrent_trials": 8,
+      "algorithm_param_keys": [
+        "fast_period",
+        "slow_period",
+        "signal_period",
+        "regime_long_threshold",
+        "regime_short_threshold"
+      ],
+      "portfolio_param_keys": [
+        "stop_pct",
+        "profit_pct"
+      ],
+      "search_space": {
+        "fast_period": {
+          "type": "randint",
+          "low": 600,
+          "high": 1200
+        },
+        "slow_period": {
+          "type": "randint",
+          "low": 1800,
+          "high": 2500
+        },
+        "signal_period": {
+          "type": "randint",
+          "low": 200,
+          "high": 400
+        },
+        "regime_long_threshold": {
+          "type": "uniform",
+          "low": 0.2,
+          "high": 0.5
+        },
+        "regime_short_threshold": {
+          "type": "uniform",
+          "low": -0.5,
+          "high": -0.2
+        },
+        "stop_pct": {
+          "type": "uniform",
+          "low": 0.5,
+          "high": 5.0
+        },
+        "profit_pct": {
+          "type": "uniform",
+          "low": 2.0,
+          "high": 15.0
+        }
+      }
+    },
+    "benchmark": "SPY",
+    "aggregation_enabled": false,
+    "success_criterion": {
+      "sharpe_ratio": {
+        "operator": ">=",
+        "threshold": 1.0
+      },
+      "max_drawdown_pct": {
+        "operator": ">=",
+        "threshold": -25.0
+      },
+      "annualized_return": {
+        "operator": ">=",
+        "threshold": 8.0
+      }
+    },
+    "experiment_variants": [
+      {
+        "name": "macro_regime_conservative",
+        "regime_long_threshold": 0.4,
+        "regime_short_threshold": -0.4,
+        "stop_pct": 1.5,
+        "profit_pct": 8.0
+      },
+      {
+        "name": "macro_regime_aggressive",
+        "regime_long_threshold": 0.2,
+        "regime_short_threshold": -0.2,
+        "stop_pct": 3.0,
+        "profit_pct": 6.0
+      }
+    ]
+  },
+  "metrics": {
+    "annualized_return": 0.0,
+    "num_periods": 0.0,
+    "sharpe_ratio": 0.0,
+    "total_return_pct": 0.0,
+    "total_trades": 0.0,
+    "win_rate": 0.0,
+    "variant_count": 3,
+    "best_variant_sharpe_ratio": 0.0,
+    "worst_variant_sharpe_ratio": 0.0,
+    "sharpe_ratio_std": 0.0
+  },
+  "execution_config": {
+    "mode": "walk-forward",
+    "algorithm": {
+      "implementation": "__generated__",
+      "params": {
+        "symbol": "SPY",
+        "history_length": 2500,
+        "fast_period": 900,
+        "slow_period": 2100,
+        "signal_period": 300,
+        "regime_long_threshold": 0.3,
+        "regime_short_threshold": -0.3,
+        "ema_200_period": 200,
+        "t10y2y_norm_window": 252,
+        "vix_norm_window": 252
+      }
+    },
+    "portfolio": {
+      "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+      "params": {
+        "symbol": "SPY",
+        "cash": 100000.0,
+        "keep_history": true,
+        "stop_pct": 2.0,
+        "profit_pct": 5.0,
+        "tx_cost": 0.001
+      }
+    },
+    "order_manager": {
+      "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+      "params": {}
+    },
+    "data_provider": {
+      "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+      "params": {
+        "provider": "alpaca",
+        "api_key": "***redacted***",
+        "secret_key": "***redacted***",
+        "symbols": [
+          "SPY"
+        ],
+        "timeframe": "Minute",
+        "adjustment": "split",
+        "market_hours_only": true,
+        "start_date": "2022-01-01",
+        "end_date": "2024-12-31",
+        "limit": 65000
+      }
+    },
+    "analysis": {
+      "enabled": true,
+      "log_to_mlflow": true,
+      "experiment_name": "trading_agent_experiments",
+      "run_name": "macro_regime_filter_with_extreme_macd_walk-forward",
+      "description": "Combines a macro regime score (T10Y2Y spread, VIX percentile, SPY RSI(200)) with extreme-period MACD (fast=600\u20131200, slow=1800\u20132500, signal=200\u2013400) on 5-minute bars. Long signals trigger when MACD crosses above signal line with positive histogram AND regime_score > +0.3 AND price > EMA(200). Short signals reverse these conditions. Exit on MACD crossback or regime_score threshold breach.",
+      "benchmarks": {},
+      "mlflow_policy": {
+        "annualized_return_threshold": 0.0,
+        "sample_negative_rate": 20
+      }
+    },
+    "aggregation": {
+      "enabled": true,
+      "aggregation_period_minutes": 5
+    },
+    "walk_forward": {
+      "optimization_window_days": 180,
+      "trading_window_days": 30,
+      "improvement_threshold_pct": 5.0,
+      "num_trials": 80,
+      "max_concurrent_trials": 8,
+      "step_days": 30,
+      "algorithm_param_keys": [
+        "fast_period",
+        "slow_period",
+        "signal_period",
+        "regime_long_threshold",
+        "regime_short_threshold"
+      ],
+      "portfolio_param_keys": [
+        "stop_pct",
+        "profit_pct"
+      ],
+      "search_space": {
+        "fast_period": {
+          "type": "randint",
+          "low": 600,
+          "high": 1200
+        },
+        "slow_period": {
+          "type": "randint",
+          "low": 1800,
+          "high": 2500
+        },
+        "signal_period": {
+          "type": "randint",
+          "low": 200,
+          "high": 400
+        },
+        "regime_long_threshold": {
+          "type": "uniform",
+          "low": 0.2,
+          "high": 0.5
+        },
+        "regime_short_threshold": {
+          "type": "uniform",
+          "low": -0.5,
+          "high": -0.2
+        },
+        "stop_pct": {
+          "type": "uniform",
+          "low": 0.5,
+          "high": 5.0
+        },
+        "profit_pct": {
+          "type": "uniform",
+          "low": 2.0,
+          "high": 15.0
+        }
+      }
+    },
+    "hpo": {
+      "objective_metric": "annualized_return",
+      "num_samples": 80,
+      "max_concurrent_trials": 8,
+      "search_space": {},
+      "algorithm_param_keys": [],
+      "portfolio_param_keys": [],
+      "optimization_target": "joint"
+    },
+    "optimization": {
+      "target": "joint"
+    },
+    "mlflow": {
+      "enabled": true
+    },
+    "state_store": {
+      "enabled": false
+    },
+    "logging": {},
+    "generated_algorithm": {
+      "class_name": "MacroRegimeExtremeMACD",
+      "script_path": "dev\\experiments\\trading\\implementations\\MacroRegimeExtremeMACD.py"
+    }
+  },
+  "variant_results": [
+    {
+      "variant_name": "base",
+      "mode": "walk-forward",
+      "metrics": {
+        "annualized_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "win_rate": 0.0,
+        "total_return_pct": 0.0,
+        "total_trades": 0.0,
+        "num_periods": 0.0
+      },
+      "config": {
+        "mode": "walk-forward",
+        "algorithm": {
+          "implementation": "__generated__",
+          "params": {
+            "symbol": "SPY",
+            "history_length": 2500,
+            "fast_period": 900,
+            "slow_period": 2100,
+            "signal_period": 300,
+            "regime_long_threshold": 0.3,
+            "regime_short_threshold": -0.3,
+            "ema_200_period": 200,
+            "t10y2y_norm_window": 252,
+            "vix_norm_window": 252
+          }
+        },
+        "portfolio": {
+          "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+          "params": {
+            "symbol": "SPY",
+            "cash": 100000.0,
+            "keep_history": true,
+            "stop_pct": 2.0,
+            "profit_pct": 5.0,
+            "tx_cost": 0.001
+          }
+        },
+        "order_manager": {
+          "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+          "params": {}
+        },
+        "data_provider": {
+          "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "params": {
+            "provider": "alpaca",
+            "api_key": "PKWLVTSMBCVI3PEREXCXNFRNUE",
+            "secret_key": "Bty6S6WvKVvEGpPdWzmu64VQ3GofGxNA9TQjgASQssAJ",
+            "symbols": [
+              "SPY"
+            ],
+            "timeframe": "Minute",
+            "adjustment": "split",
+            "market_hours_only": true,
+            "start_date": "2022-01-01",
+            "end_date": "2024-12-31",
+            "limit": 65000
+          }
+        },
+        "analysis": {
+          "enabled": true,
+          "log_to_mlflow": true,
+          "experiment_name": "trading_agent_experiments",
+          "run_name": "macro_regime_filter_with_extreme_macd_walk-forward",
+          "description": "Combines a macro regime score (T10Y2Y spread, VIX percentile, SPY RSI(200)) with extreme-period MACD (fast=600\u20131200, slow=1800\u20132500, signal=200\u2013400) on 5-minute bars. Long signals trigger when MACD crosses above signal line with positive histogram AND regime_score > +0.3 AND price > EMA(200). Short signals reverse these conditions. Exit on MACD crossback or regime_score threshold breach.",
+          "benchmarks": {},
+          "mlflow_policy": {
+            "annualized_return_threshold": 0.0,
+            "sample_negative_rate": 20
+          }
+        },
+        "aggregation": {
+          "enabled": true,
+          "aggregation_period_minutes": 5
+        },
+        "walk_forward": {
+          "optimization_window_days": 180,
+          "trading_window_days": 30,
+          "improvement_threshold_pct": 5.0,
+          "num_trials": 80,
+          "max_concurrent_trials": 8,
+          "step_days": 30,
+          "algorithm_param_keys": [
+            "fast_period",
+            "slow_period",
+            "signal_period",
+            "regime_long_threshold",
+            "regime_short_threshold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "fast_period": {
+              "type": "randint",
+              "low": 600,
+              "high": 1200
+            },
+            "slow_period": {
+              "type": "randint",
+              "low": 1800,
+              "high": 2500
+            },
+            "signal_period": {
+              "type": "randint",
+              "low": 200,
+              "high": 400
+            },
+            "regime_long_threshold": {
+              "type": "uniform",
+              "low": 0.2,
+              "high": 0.5
+            },
+            "regime_short_threshold": {
+              "type": "uniform",
+              "low": -0.5,
+              "high": -0.2
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 5.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 2.0,
+              "high": 15.0
+            }
+          }
+        },
+        "hpo": {
+          "objective_metric": "annualized_return",
+          "num_samples": 80,
+          "max_concurrent_trials": 8,
+          "search_space": {},
+          "algorithm_param_keys": [],
+          "portfolio_param_keys": [],
+          "optimization_target": "joint"
+        },
+        "optimization": {
+          "target": "joint"
+        },
+        "mlflow": {
+          "enabled": true
+        },
+        "state_store": {
+          "enabled": false
+        },
+        "logging": {},
+        "generated_algorithm": {
+          "class_name": "MacroRegimeExtremeMACD",
+          "script_path": "dev\\experiments\\trading\\implementations\\MacroRegimeExtremeMACD.py"
+        }
+      },
+      "report": "{}",
+      "raw_output": {
+        "aggregate": {},
+        "periods": []
+      }
+    },
+    {
+      "variant_name": "macro_regime_conservative",
+      "mode": "walk-forward",
+      "metrics": {
+        "annualized_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "win_rate": 0.0,
+        "total_return_pct": 0.0,
+        "total_trades": 0.0,
+        "num_periods": 0.0
+      },
+      "config": {
+        "mode": "walk-forward",
+        "algorithm": {
+          "implementation": "__generated__",
+          "params": {
+            "symbol": "SPY",
+            "history_length": 2500,
+            "fast_period": 900,
+            "slow_period": 2100,
+            "signal_period": 300,
+            "regime_long_threshold": 0.3,
+            "regime_short_threshold": -0.3,
+            "ema_200_period": 200,
+            "t10y2y_norm_window": 252,
+            "vix_norm_window": 252
+          }
+        },
+        "portfolio": {
+          "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+          "params": {
+            "symbol": "SPY",
+            "cash": 100000.0,
+            "keep_history": true,
+            "stop_pct": 2.0,
+            "profit_pct": 5.0,
+            "tx_cost": 0.001
+          }
+        },
+        "order_manager": {
+          "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+          "params": {}
+        },
+        "data_provider": {
+          "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "params": {
+            "provider": "alpaca",
+            "api_key": "PKWLVTSMBCVI3PEREXCXNFRNUE",
+            "secret_key": "Bty6S6WvKVvEGpPdWzmu64VQ3GofGxNA9TQjgASQssAJ",
+            "symbols": [
+              "SPY"
+            ],
+            "timeframe": "Minute",
+            "adjustment": "split",
+            "market_hours_only": true,
+            "start_date": "2022-01-01",
+            "end_date": "2024-12-31",
+            "limit": 65000
+          }
+        },
+        "analysis": {
+          "enabled": true,
+          "log_to_mlflow": true,
+          "experiment_name": "trading_agent_experiments",
+          "run_name": "macro_regime_filter_with_extreme_macd_walk-forward",
+          "description": "Combines a macro regime score (T10Y2Y spread, VIX percentile, SPY RSI(200)) with extreme-period MACD (fast=600\u20131200, slow=1800\u20132500, signal=200\u2013400) on 5-minute bars. Long signals trigger when MACD crosses above signal line with positive histogram AND regime_score > +0.3 AND price > EMA(200). Short signals reverse these conditions. Exit on MACD crossback or regime_score threshold breach.",
+          "benchmarks": {},
+          "mlflow_policy": {
+            "annualized_return_threshold": 0.0,
+            "sample_negative_rate": 20
+          }
+        },
+        "aggregation": {
+          "enabled": true,
+          "aggregation_period_minutes": 5
+        },
+        "walk_forward": {
+          "optimization_window_days": 180,
+          "trading_window_days": 30,
+          "improvement_threshold_pct": 5.0,
+          "num_trials": 80,
+          "max_concurrent_trials": 8,
+          "step_days": 30,
+          "algorithm_param_keys": [
+            "fast_period",
+            "slow_period",
+            "signal_period",
+            "regime_long_threshold",
+            "regime_short_threshold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "fast_period": {
+              "type": "randint",
+              "low": 600,
+              "high": 1200
+            },
+            "slow_period": {
+              "type": "randint",
+              "low": 1800,
+              "high": 2500
+            },
+            "signal_period": {
+              "type": "randint",
+              "low": 200,
+              "high": 400
+            },
+            "regime_long_threshold": {
+              "type": "uniform",
+              "low": 0.2,
+              "high": 0.5
+            },
+            "regime_short_threshold": {
+              "type": "uniform",
+              "low": -0.5,
+              "high": -0.2
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 5.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 2.0,
+              "high": 15.0
+            }
+          }
+        },
+        "hpo": {
+          "objective_metric": "annualized_return",
+          "num_samples": 80,
+          "max_concurrent_trials": 8,
+          "search_space": {},
+          "algorithm_param_keys": [],
+          "portfolio_param_keys": [],
+          "optimization_target": "joint"
+        },
+        "optimization": {
+          "target": "joint"
+        },
+        "mlflow": {
+          "enabled": true
+        },
+        "state_store": {
+          "enabled": false
+        },
+        "logging": {},
+        "generated_algorithm": {
+          "class_name": "MacroRegimeExtremeMACD",
+          "script_path": "dev\\experiments\\trading\\implementations\\MacroRegimeExtremeMACD.py"
+        },
+        "name": "macro_regime_conservative",
+        "regime_long_threshold": 0.4,
+        "regime_short_threshold": -0.4,
+        "stop_pct": 1.5,
+        "profit_pct": 8.0
+      },
+      "report": "{}",
+      "raw_output": {
+        "aggregate": {},
+        "periods": []
+      }
+    },
+    {
+      "variant_name": "macro_regime_aggressive",
+      "mode": "walk-forward",
+      "metrics": {
+        "annualized_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "win_rate": 0.0,
+        "total_return_pct": 0.0,
+        "total_trades": 0.0,
+        "num_periods": 0.0
+      },
+      "config": {
+        "mode": "walk-forward",
+        "algorithm": {
+          "implementation": "__generated__",
+          "params": {
+            "symbol": "SPY",
+            "history_length": 2500,
+            "fast_period": 900,
+            "slow_period": 2100,
+            "signal_period": 300,
+            "regime_long_threshold": 0.3,
+            "regime_short_threshold": -0.3,
+            "ema_200_period": 200,
+            "t10y2y_norm_window": 252,
+            "vix_norm_window": 252
+          }
+        },
+        "portfolio": {
+          "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+          "params": {
+            "symbol": "SPY",
+            "cash": 100000.0,
+            "keep_history": true,
+            "stop_pct": 2.0,
+            "profit_pct": 5.0,
+            "tx_cost": 0.001
+          }
+        },
+        "order_manager": {
+          "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+          "params": {}
+        },
+        "data_provider": {
+          "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "params": {
+            "provider": "alpaca",
+            "api_key": "PKWLVTSMBCVI3PEREXCXNFRNUE",
+            "secret_key": "Bty6S6WvKVvEGpPdWzmu64VQ3GofGxNA9TQjgASQssAJ",
+            "symbols": [
+              "SPY"
+            ],
+            "timeframe": "Minute",
+            "adjustment": "split",
+            "market_hours_only": true,
+            "start_date": "2022-01-01",
+            "end_date": "2024-12-31",
+            "limit": 65000
+          }
+        },
+        "analysis": {
+          "enabled": true,
+          "log_to_mlflow": true,
+          "experiment_name": "trading_agent_experiments",
+          "run_name": "macro_regime_filter_with_extreme_macd_walk-forward",
+          "description": "Combines a macro regime score (T10Y2Y spread, VIX percentile, SPY RSI(200)) with extreme-period MACD (fast=600\u20131200, slow=1800\u20132500, signal=200\u2013400) on 5-minute bars. Long signals trigger when MACD crosses above signal line with positive histogram AND regime_score > +0.3 AND price > EMA(200). Short signals reverse these conditions. Exit on MACD crossback or regime_score threshold breach.",
+          "benchmarks": {},
+          "mlflow_policy": {
+            "annualized_return_threshold": 0.0,
+            "sample_negative_rate": 20
+          }
+        },
+        "aggregation": {
+          "enabled": true,
+          "aggregation_period_minutes": 5
+        },
+        "walk_forward": {
+          "optimization_window_days": 180,
+          "trading_window_days": 30,
+          "improvement_threshold_pct": 5.0,
+          "num_trials": 80,
+          "max_concurrent_trials": 8,
+          "step_days": 30,
+          "algorithm_param_keys": [
+            "fast_period",
+            "slow_period",
+            "signal_period",
+            "regime_long_threshold",
+            "regime_short_threshold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "fast_period": {
+              "type": "randint",
+              "low": 600,
+              "high": 1200
+            },
+            "slow_period": {
+              "type": "randint",
+              "low": 1800,
+              "high": 2500
+            },
+            "signal_period": {
+              "type": "randint",
+              "low": 200,
+              "high": 400
+            },
+            "regime_long_threshold": {
+              "type": "uniform",
+              "low": 0.2,
+              "high": 0.5
+            },
+            "regime_short_threshold": {
+              "type": "uniform",
+              "low": -0.5,
+              "high": -0.2
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 5.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 2.0,
+              "high": 15.0
+            }
+          }
+        },
+        "hpo": {
+          "objective_metric": "annualized_return",
+          "num_samples": 80,
+          "max_concurrent_trials": 8,
+          "search_space": {},
+          "algorithm_param_keys": [],
+          "portfolio_param_keys": [],
+          "optimization_target": "joint"
+        },
+        "optimization": {
+          "target": "joint"
+        },
+        "mlflow": {
+          "enabled": true
+        },
+        "state_store": {
+          "enabled": false
+        },
+        "logging": {},
+        "generated_algorithm": {
+          "class_name": "MacroRegimeExtremeMACD",
+          "script_path": "dev\\experiments\\trading\\implementations\\MacroRegimeExtremeMACD.py"
+        },
+        "name": "macro_regime_aggressive",
+        "regime_long_threshold": 0.2,
+        "regime_short_threshold": -0.2,
+        "stop_pct": 3.0,
+        "profit_pct": 6.0
+      },
+      "report": "{}",
+      "raw_output": {
+        "aggregate": {},
+        "periods": []
+      }
+    }
+  ],
+  "report": "{}"
+}

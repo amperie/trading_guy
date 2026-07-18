@@ -1,0 +1,85 @@
+# Risk-managed V2 of the clean Tom RSI paper deployment.
+#
+# Run against the same stored MongoDB ticks:
+#   python run.py backtest --config configs/tom_rsi_mean_reversion_v2_mongo.yaml --account paper --no-mlflow
+#
+# Override the stored session when comparing another sample:
+#   python run.py mongo-backtest --config configs/tom_rsi_mean_reversion_v2_mongo.yaml \
+#       --account paper --session-id <session-id> --no-mlflow
+
+mode: backtest
+
+data_provider:
+  provider: trading.data_providers.mongodb_data_provider.MongoDBDataProvider
+  session_id: tom_volatility_filtered_rsi_mean_reversion
+  connection_uri: mongodb://hp.lan:27017
+  database: live_trading
+
+algorithm:
+  algorithm: trading.algorithms.volatility_filtered_rsi_mean_reversion_v2.VolatilityFilteredRsiMeanReversionAlgorithmV2
+  symbol: UPRO
+  regime_detection:
+    # Tom baseline parameters:
+    ma_short_period: 50
+    ma_long_period: 200
+    ma_proximity_tolerance: 0.02
+    atr_period: 14
+    atr_percentile_window: 20
+    atr_percentile_level: 50
+    # V2 requires a stable sample and targets moderate rather than extreme volatility.
+    atr_percentile_low: 20
+    atr_percentile_high: 80
+    require_full_atr_window: true
+  rsi_config:
+    rsi_period: 14
+    rsi_oversold_threshold: 30
+    rsi_overbought_threshold: 70
+    buy_rearm_threshold: 40
+    sell_rearm_threshold: 60
+  price_confirmation:
+    reversal_bar_lookback: 2
+  history_length: 260
+
+portfolio:
+  portfolio: trading.core.pf.risk_managed_single_symbol_portfolio.RiskManagedSingleSymbolPortfolio
+  symbol: UPRO
+  cash: 100000.0
+  keep_history: true
+  tx_cost: 1.5
+
+  max_exposure: 0.50
+  risk_per_trade: 0.005
+  min_signal_strength: 50
+  min_trade_value: 100
+  atr_stop_multiple: 2.25
+  profit_target_r_multiple: 1.5
+  fallback_stop_pct: 1.5
+
+  entry_start: "09:35"
+  entry_end: "15:30"
+  cooldown_minutes: 60
+  max_holding_minutes: 1560
+  max_entries_per_day: 2
+  max_daily_loss_pct: 0.02
+  max_drawdown_pct: 0.08
+  drawdown_confirmation_bars: 3
+  halt_on_drawdown: false
+  flatten_before_close: false
+  flatten_time: "15:55"
+
+order_manager:
+  order_manager: trading.core.om.backtesting_om.BacktestingOrderManager
+  market_hours_only: true
+
+state_store:
+  enabled: false
+  connection_uri: mongodb://hp.lan:27017
+  database: live_trading
+
+analysis:
+  enabled: true
+  log_to_mlflow: true
+  experiment_name: Trading Strategy Comparisons
+  run_name: tom-rsi-v2-risk-managed-mongo
+  description: Tom RSI V2 on the clean Tom paper session ticks with risk sizing and corrected exits
+  benchmarks: {}

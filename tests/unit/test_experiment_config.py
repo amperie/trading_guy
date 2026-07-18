@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from trading.commands.common import adapt_live_config_to_mongo_backtest, apply_cli_overrides
+from trading.commands.common import _load_yaml_profile, adapt_live_config_to_mongo_backtest, apply_cli_overrides
 from trading.config import component_loader
 from trading.config import ExperimentService
 from trading.experiments import ExperimentRequest, build_runtime, describe_experiment, load_experiment
@@ -167,6 +167,43 @@ def test_debug_on_sigint_top_level_flag_is_allowed():
     assert config.debug_on_sigint is False
 
 
+def test_load_yaml_profile_extends_relative_parent(tmp_path):
+    parent = tmp_path / "base.yaml"
+    child_dir = tmp_path / "nested"
+    child_dir.mkdir()
+    child = child_dir / "child.yaml"
+    parent.write_text(
+        """
+algorithm:
+  symbol: UPRO
+  rsi_config:
+    rsi_period: 14
+portfolio:
+  symbol: UPRO
+hpo:
+  num_samples: 960
+""",
+        encoding="utf-8",
+    )
+    child.write_text(
+        """
+extends: ../base.yaml
+algorithm:
+  symbol: TQQQ
+portfolio:
+  symbol: TQQQ
+""",
+        encoding="utf-8",
+    )
+
+    profile = _load_yaml_profile(str(child))
+
+    assert profile["algorithm"]["symbol"] == "TQQQ"
+    assert profile["algorithm"]["rsi_config"]["rsi_period"] == 14
+    assert profile["portfolio"]["symbol"] == "TQQQ"
+    assert profile["hpo"]["num_samples"] == 960
+
+
 def test_known_component_validation_rejects_bad_param_type():
     cfg = _legacy_backtest_config()
     cfg["algorithm"]["macd_fast_period"] = "not-an-int"
@@ -290,6 +327,7 @@ def test_adapt_live_config_to_mongo_backtest_builds_runtime_sections():
     assert adapted["data_provider"]["session_id"] == "live-demo-1"
     assert adapted["data_provider"]["connection_uri"] == "mongodb://example:27017"
     assert adapted["data_provider"]["database"] == "live_trading"
+    assert adapted["state_store"]["enabled"] is False
 
 
 def test_adapt_live_config_to_mongo_backtest_leaves_regular_backtest_unchanged():
@@ -314,6 +352,7 @@ def test_adapt_live_config_to_mongo_backtest_force_rewrites_existing_runtime_sec
     assert adapted["order_manager"]["order_manager"] == "trading.core.om.backtesting_om.BacktestingOrderManager"
     assert adapted["data_provider"]["provider"] == "trading.data_providers.mongodb_data_provider.MongoDBDataProvider"
     assert adapted["data_provider"]["session_id"] == "mongo-force-1"
+    assert adapted["state_store"]["enabled"] is False
 
 
 def test_remote_component_config_and_runtime(monkeypatch):

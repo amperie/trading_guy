@@ -1,0 +1,14 @@
+extends: ../tom_rsi_v2_aggressive_joint_hpo_split.yaml
+
+data_provider:
+  symbols: [SOXL]
+
+algorithm:
+  symbol: SOXL
+
+portfolio:
+  symbol: SOXL
+
+analysis:
+  run_name: tom-rsi-v2-joint-hpo-return-seeking-SOXL
+  description: Return-seeking joint split HPO for SOXL

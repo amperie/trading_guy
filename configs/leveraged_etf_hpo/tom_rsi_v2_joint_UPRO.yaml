@@ -1,0 +1,14 @@
+extends: ../tom_rsi_v2_aggressive_joint_hpo_split.yaml
+
+data_provider:
+  symbols: [UPRO]
+
+algorithm:
+  symbol: UPRO
+
+portfolio:
+  symbol: UPRO
+
+analysis:
+  run_name: tom-rsi-v2-joint-hpo-return-seeking-UPRO
+  description: Return-seeking joint split HPO for UPRO

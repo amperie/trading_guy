@@ -1,0 +1,14 @@
+extends: ../tom_rsi_v2_aggressive_joint_hpo_split.yaml
+
+data_provider:
+  symbols: [TNA]
+
+algorithm:
+  symbol: TNA
+
+portfolio:
+  symbol: TNA
+
+analysis:
+  run_name: tom-rsi-v2-joint-hpo-return-seeking-TNA
+  description: Return-seeking joint split HPO for TNA

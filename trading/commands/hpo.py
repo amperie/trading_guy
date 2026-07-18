@@ -827,6 +827,40 @@ def cmd_hpo_split(args: argparse.Namespace):
     )
 
 
+def _iter_yaml_configs(folder: str) -> list[Path]:
+    config_dir = Path(folder)
+    if not config_dir.exists() or not config_dir.is_dir():
+        raise ValueError(f"Config folder does not exist or is not a directory: {folder}")
+    return sorted(
+        path for pattern in ("*.yaml", "*.yml")
+        for path in config_dir.glob(pattern)
+        if path.is_file()
+    )
+
+
+def cmd_hpo_split_folder(args: argparse.Namespace):
+    config_paths = _iter_yaml_configs(args.config_folder)
+    if not config_paths:
+        raise ValueError(f"No YAML configs found in folder: {args.config_folder}")
+
+    creds = load_account_creds(args.account)
+    logger.info("Running %s split-HPO configs from %s", len(config_paths), args.config_folder)
+    for index, config_path in enumerate(config_paths, start=1):
+        logger.info("Starting split-HPO config %s/%s: %s", index, len(config_paths), config_path)
+        raw_cfg = load_raw_config(str(config_path))
+        raw_cfg = apply_cli_overrides(raw_cfg, args)
+        apply_session_log_file(raw_cfg, args)
+        fill_data_provider_creds(raw_cfg, creds)
+        run_hpo_split_from_raw_config(
+            raw_cfg,
+            config_artifact_path=str(config_path),
+            num_samples_override=getattr(args, "num_samples", None),
+            max_concurrent_override=getattr(args, "max_concurrent_trials", None),
+            validation_period_days_override=getattr(args, "validation_period_days", None),
+        )
+        logger.info("Finished split-HPO config %s/%s: %s", index, len(config_paths), config_path)
+
+
 def cmd_hpo(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)

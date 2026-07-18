@@ -1,0 +1,14 @@
+extends: ../tom_rsi_v2_aggressive_joint_hpo_split.yaml
+
+data_provider:
+  symbols: [TQQQ]
+
+algorithm:
+  symbol: TQQQ
+
+portfolio:
+  symbol: TQQQ
+
+analysis:
+  run_name: tom-rsi-v2-joint-hpo-return-seeking-TQQQ
+  description: Return-seeking joint split HPO for TQQQ

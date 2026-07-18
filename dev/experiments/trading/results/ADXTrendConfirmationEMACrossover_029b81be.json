@@ -1,0 +1,828 @@
+{
+  "experiment_id": "029b81be-f2f2-4f75-9c28-4c0065bb0694",
+  "proposal_name": "adx_trend_confirmation_with_scaled_ema_crossover",
+  "class_name": "ADXTrendConfirmationEMACrossover",
+  "proposal": {
+    "name": "adx_trend_confirmation_with_scaled_ema_crossover",
+    "description": "Enters long when EMA(400\u2013700) crosses above EMA(1200\u20132000), ADX(100\u2013200) > 15\u201340, regime_score > +0.3, AND price > EMA(fast) with 2+ bars confirmation. Short mirrors these conditions. Exit on EMA crossback, ADX drop below 15, or regime reversal. Confirmation requirement eliminates single-bar whipsaws.",
+    "mode": "walk-forward",
+    "optimization_target": "joint",
+    "data_source": "alpaca",
+    "symbol": "SPY",
+    "timeframe": "5min",
+    "start_date": "2022-01-01",
+    "end_date": "2024-12-31",
+    "history_length": 2500,
+    "stop_pct": 2.0,
+    "profit_pct": 5.0,
+    "tx_cost": 0.001,
+    "hyperparameters": {
+      "ema_fast": 550,
+      "ema_slow": 1600,
+      "adx_period": 150,
+      "adx_threshold": 25,
+      "confirmation_bars": 2,
+      "regime_long_threshold": 0.3,
+      "regime_short_threshold": -0.3
+    },
+    "walk_forward": {
+      "optimization_window_days": 180,
+      "trading_window_days": 30,
+      "step_days": 30,
+      "num_trials": 90,
+      "max_concurrent_trials": 9,
+      "algorithm_param_keys": [
+        "ema_fast",
+        "ema_slow",
+        "adx_period",
+        "adx_threshold",
+        "confirmation_bars",
+        "regime_long_threshold",
+        "regime_short_threshold"
+      ],
+      "portfolio_param_keys": [
+        "stop_pct",
+        "profit_pct"
+      ],
+      "search_space": {
+        "ema_fast": {
+          "type": "randint",
+          "low": 400,
+          "high": 700
+        },
+        "ema_slow": {
+          "type": "randint",
+          "low": 1200,
+          "high": 2000
+        },
+        "adx_period": {
+          "type": "randint",
+          "low": 100,
+          "high": 200
+        },
+        "adx_threshold": {
+          "type": "randint",
+          "low": 15,
+          "high": 40
+        },
+        "confirmation_bars": {
+          "type": "randint",
+          "low": 1,
+          "high": 3
+        },
+        "regime_long_threshold": {
+          "type": "uniform",
+          "low": 0.2,
+          "high": 0.5
+        },
+        "regime_short_threshold": {
+          "type": "uniform",
+          "low": -0.5,
+          "high": -0.2
+        },
+        "stop_pct": {
+          "type": "uniform",
+          "low": 0.5,
+          "high": 5.0
+        },
+        "profit_pct": {
+          "type": "uniform",
+          "low": 2.0,
+          "high": 15.0
+        }
+      }
+    },
+    "benchmark": "SPY",
+    "aggregation_enabled": false,
+    "success_criterion": {
+      "sharpe_ratio": {
+        "operator": ">=",
+        "threshold": 1.0
+      },
+      "max_drawdown_pct": {
+        "operator": ">=",
+        "threshold": -25.0
+      },
+      "annualized_return": {
+        "operator": ">=",
+        "threshold": 8.0
+      }
+    },
+    "experiment_variants": [
+      {
+        "name": "ema_adx_fast_trend",
+        "ema_fast": 450,
+        "ema_slow": 1300,
+        "confirmation_bars": 1,
+        "adx_threshold": 20
+      },
+      {
+        "name": "ema_adx_slow_confirmed",
+        "ema_fast": 650,
+        "ema_slow": 1900,
+        "confirmation_bars": 3,
+        "adx_threshold": 35
+      }
+    ]
+  },
+  "metrics": {
+    "annualized_return": 0.0,
+    "num_periods": 0.0,
+    "sharpe_ratio": 0.0,
+    "total_return_pct": 0.0,
+    "total_trades": 0.0,
+    "win_rate": 0.0,
+    "variant_count": 3,
+    "best_variant_sharpe_ratio": 0.0,
+    "worst_variant_sharpe_ratio": 0.0,
+    "sharpe_ratio_std": 0.0
+  },
+  "execution_config": {
+    "mode": "walk-forward",
+    "algorithm": {
+      "implementation": "__generated__",
+      "params": {
+        "symbol": "SPY",
+        "history_length": 2500,
+        "ema_fast": 550,
+        "ema_slow": 1600,
+        "adx_period": 150,
+        "adx_threshold": 25,
+        "confirmation_bars": 2,
+        "regime_long_threshold": 0.3,
+        "regime_short_threshold": -0.3
+      }
+    },
+    "portfolio": {
+      "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+      "params": {
+        "symbol": "SPY",
+        "cash": 100000.0,
+        "keep_history": true,
+        "stop_pct": 2.0,
+        "profit_pct": 5.0,
+        "tx_cost": 0.001
+      }
+    },
+    "order_manager": {
+      "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+      "params": {}
+    },
+    "data_provider": {
+      "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+      "params": {
+        "provider": "alpaca",
+        "api_key": "***redacted***",
+        "secret_key": "***redacted***",
+        "symbols": [
+          "SPY"
+        ],
+        "timeframe": "Minute",
+        "adjustment": "split",
+        "market_hours_only": true,
+        "start_date": "2022-01-01",
+        "end_date": "2024-12-31",
+        "limit": 65000
+      }
+    },
+    "analysis": {
+      "enabled": true,
+      "log_to_mlflow": true,
+      "experiment_name": "trading_agent_experiments",
+      "run_name": "adx_trend_confirmation_with_scaled_ema_crossover_walk-forward",
+      "description": "Enters long when EMA(400\u2013700) crosses above EMA(1200\u20132000), ADX(100\u2013200) > 15\u201340, regime_score > +0.3, AND price > EMA(fast) with 2+ bars confirmation. Short mirrors these conditions. Exit on EMA crossback, ADX drop below 15, or regime reversal. Confirmation requirement eliminates single-bar whipsaws.",
+      "benchmarks": {},
+      "mlflow_policy": {
+        "annualized_return_threshold": 0.0,
+        "sample_negative_rate": 20
+      }
+    },
+    "aggregation": {
+      "enabled": true,
+      "aggregation_period_minutes": 5
+    },
+    "walk_forward": {
+      "optimization_window_days": 180,
+      "trading_window_days": 30,
+      "improvement_threshold_pct": 5.0,
+      "num_trials": 90,
+      "max_concurrent_trials": 9,
+      "step_days": 30,
+      "algorithm_param_keys": [
+        "ema_fast",
+        "ema_slow",
+        "adx_period",
+        "adx_threshold",
+        "confirmation_bars",
+        "regime_long_threshold",
+        "regime_short_threshold"
+      ],
+      "portfolio_param_keys": [
+        "stop_pct",
+        "profit_pct"
+      ],
+      "search_space": {
+        "ema_fast": {
+          "type": "randint",
+          "low": 400,
+          "high": 700
+        },
+        "ema_slow": {
+          "type": "randint",
+          "low": 1200,
+          "high": 2000
+        },
+        "adx_period": {
+          "type": "randint",
+          "low": 100,
+          "high": 200
+        },
+        "adx_threshold": {
+          "type": "randint",
+          "low": 15,
+          "high": 40
+        },
+        "confirmation_bars": {
+          "type": "randint",
+          "low": 1,
+          "high": 3
+        },
+        "regime_long_threshold": {
+          "type": "uniform",
+          "low": 0.2,
+          "high": 0.5
+        },
+        "regime_short_threshold": {
+          "type": "uniform",
+          "low": -0.5,
+          "high": -0.2
+        },
+        "stop_pct": {
+          "type": "uniform",
+          "low": 0.5,
+          "high": 5.0
+        },
+        "profit_pct": {
+          "type": "uniform",
+          "low": 2.0,
+          "high": 15.0
+        }
+      }
+    },
+    "hpo": {
+      "objective_metric": "annualized_return",
+      "num_samples": 80,
+      "max_concurrent_trials": 8,
+      "search_space": {},
+      "algorithm_param_keys": [],
+      "portfolio_param_keys": [],
+      "optimization_target": "joint"
+    },
+    "optimization": {
+      "target": "joint"
+    },
+    "mlflow": {
+      "enabled": true
+    },
+    "state_store": {
+      "enabled": false
+    },
+    "logging": {},
+    "generated_algorithm": {
+      "class_name": "ADXTrendConfirmationEMACrossover",
+      "script_path": "dev\\experiments\\trading\\implementations\\ADXTrendConfirmationEMACrossover.py"
+    }
+  },
+  "variant_results": [
+    {
+      "variant_name": "base",
+      "mode": "walk-forward",
+      "metrics": {
+        "annualized_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "win_rate": 0.0,
+        "total_return_pct": 0.0,
+        "total_trades": 0.0,
+        "num_periods": 0.0
+      },
+      "config": {
+        "mode": "walk-forward",
+        "algorithm": {
+          "implementation": "__generated__",
+          "params": {
+            "symbol": "SPY",
+            "history_length": 2500,
+            "ema_fast": 550,
+            "ema_slow": 1600,
+            "adx_period": 150,
+            "adx_threshold": 25,
+            "confirmation_bars": 2,
+            "regime_long_threshold": 0.3,
+            "regime_short_threshold": -0.3
+          }
+        },
+        "portfolio": {
+          "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+          "params": {
+            "symbol": "SPY",
+            "cash": 100000.0,
+            "keep_history": true,
+            "stop_pct": 2.0,
+            "profit_pct": 5.0,
+            "tx_cost": 0.001
+          }
+        },
+        "order_manager": {
+          "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+          "params": {}
+        },
+        "data_provider": {
+          "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "params": {
+            "provider": "alpaca",
+            "api_key": "PKWLVTSMBCVI3PEREXCXNFRNUE",
+            "secret_key": "Bty6S6WvKVvEGpPdWzmu64VQ3GofGxNA9TQjgASQssAJ",
+            "symbols": [
+              "SPY"
+            ],
+            "timeframe": "Minute",
+            "adjustment": "split",
+            "market_hours_only": true,
+            "start_date": "2022-01-01",
+            "end_date": "2024-12-31",
+            "limit": 65000
+          }
+        },
+        "analysis": {
+          "enabled": true,
+          "log_to_mlflow": true,
+          "experiment_name": "trading_agent_experiments",
+          "run_name": "adx_trend_confirmation_with_scaled_ema_crossover_walk-forward",
+          "description": "Enters long when EMA(400\u2013700) crosses above EMA(1200\u20132000), ADX(100\u2013200) > 15\u201340, regime_score > +0.3, AND price > EMA(fast) with 2+ bars confirmation. Short mirrors these conditions. Exit on EMA crossback, ADX drop below 15, or regime reversal. Confirmation requirement eliminates single-bar whipsaws.",
+          "benchmarks": {},
+          "mlflow_policy": {
+            "annualized_return_threshold": 0.0,
+            "sample_negative_rate": 20
+          }
+        },
+        "aggregation": {
+          "enabled": true,
+          "aggregation_period_minutes": 5
+        },
+        "walk_forward": {
+          "optimization_window_days": 180,
+          "trading_window_days": 30,
+          "improvement_threshold_pct": 5.0,
+          "num_trials": 90,
+          "max_concurrent_trials": 9,
+          "step_days": 30,
+          "algorithm_param_keys": [
+            "ema_fast",
+            "ema_slow",
+            "adx_period",
+            "adx_threshold",
+            "confirmation_bars",
+            "regime_long_threshold",
+            "regime_short_threshold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "ema_fast": {
+              "type": "randint",
+              "low": 400,
+              "high": 700
+            },
+            "ema_slow": {
+              "type": "randint",
+              "low": 1200,
+              "high": 2000
+            },
+            "adx_period": {
+              "type": "randint",
+              "low": 100,
+              "high": 200
+            },
+            "adx_threshold": {
+              "type": "randint",
+              "low": 15,
+              "high": 40
+            },
+            "confirmation_bars": {
+              "type": "randint",
+              "low": 1,
+              "high": 3
+            },
+            "regime_long_threshold": {
+              "type": "uniform",
+              "low": 0.2,
+              "high": 0.5
+            },
+            "regime_short_threshold": {
+              "type": "uniform",
+              "low": -0.5,
+              "high": -0.2
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 5.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 2.0,
+              "high": 15.0
+            }
+          }
+        },
+        "hpo": {
+          "objective_metric": "annualized_return",
+          "num_samples": 80,
+          "max_concurrent_trials": 8,
+          "search_space": {},
+          "algorithm_param_keys": [],
+          "portfolio_param_keys": [],
+          "optimization_target": "joint"
+        },
+        "optimization": {
+          "target": "joint"
+        },
+        "mlflow": {
+          "enabled": true
+        },
+        "state_store": {
+          "enabled": false
+        },
+        "logging": {},
+        "generated_algorithm": {
+          "class_name": "ADXTrendConfirmationEMACrossover",
+          "script_path": "dev\\experiments\\trading\\implementations\\ADXTrendConfirmationEMACrossover.py"
+        }
+      },
+      "report": "{}",
+      "raw_output": {
+        "aggregate": {},
+        "periods": []
+      }
+    },
+    {
+      "variant_name": "ema_adx_fast_trend",
+      "mode": "walk-forward",
+      "metrics": {
+        "annualized_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "win_rate": 0.0,
+        "total_return_pct": 0.0,
+        "total_trades": 0.0,
+        "num_periods": 0.0
+      },
+      "config": {
+        "mode": "walk-forward",
+        "algorithm": {
+          "implementation": "__generated__",
+          "params": {
+            "symbol": "SPY",
+            "history_length": 2500,
+            "ema_fast": 550,
+            "ema_slow": 1600,
+            "adx_period": 150,
+            "adx_threshold": 25,
+            "confirmation_bars": 2,
+            "regime_long_threshold": 0.3,
+            "regime_short_threshold": -0.3
+          }
+        },
+        "portfolio": {
+          "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+          "params": {
+            "symbol": "SPY",
+            "cash": 100000.0,
+            "keep_history": true,
+            "stop_pct": 2.0,
+            "profit_pct": 5.0,
+            "tx_cost": 0.001
+          }
+        },
+        "order_manager": {
+          "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+          "params": {}
+        },
+        "data_provider": {
+          "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "params": {
+            "provider": "alpaca",
+            "api_key": "PKWLVTSMBCVI3PEREXCXNFRNUE",
+            "secret_key": "Bty6S6WvKVvEGpPdWzmu64VQ3GofGxNA9TQjgASQssAJ",
+            "symbols": [
+              "SPY"
+            ],
+            "timeframe": "Minute",
+            "adjustment": "split",
+            "market_hours_only": true,
+            "start_date": "2022-01-01",
+            "end_date": "2024-12-31",
+            "limit": 65000
+          }
+        },
+        "analysis": {
+          "enabled": true,
+          "log_to_mlflow": true,
+          "experiment_name": "trading_agent_experiments",
+          "run_name": "adx_trend_confirmation_with_scaled_ema_crossover_walk-forward",
+          "description": "Enters long when EMA(400\u2013700) crosses above EMA(1200\u20132000), ADX(100\u2013200) > 15\u201340, regime_score > +0.3, AND price > EMA(fast) with 2+ bars confirmation. Short mirrors these conditions. Exit on EMA crossback, ADX drop below 15, or regime reversal. Confirmation requirement eliminates single-bar whipsaws.",
+          "benchmarks": {},
+          "mlflow_policy": {
+            "annualized_return_threshold": 0.0,
+            "sample_negative_rate": 20
+          }
+        },
+        "aggregation": {
+          "enabled": true,
+          "aggregation_period_minutes": 5
+        },
+        "walk_forward": {
+          "optimization_window_days": 180,
+          "trading_window_days": 30,
+          "improvement_threshold_pct": 5.0,
+          "num_trials": 90,
+          "max_concurrent_trials": 9,
+          "step_days": 30,
+          "algorithm_param_keys": [
+            "ema_fast",
+            "ema_slow",
+            "adx_period",
+            "adx_threshold",
+            "confirmation_bars",
+            "regime_long_threshold",
+            "regime_short_threshold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "ema_fast": {
+              "type": "randint",
+              "low": 400,
+              "high": 700
+            },
+            "ema_slow": {
+              "type": "randint",
+              "low": 1200,
+              "high": 2000
+            },
+            "adx_period": {
+              "type": "randint",
+              "low": 100,
+              "high": 200
+            },
+            "adx_threshold": {
+              "type": "randint",
+              "low": 15,
+              "high": 40
+            },
+            "confirmation_bars": {
+              "type": "randint",
+              "low": 1,
+              "high": 3
+            },
+            "regime_long_threshold": {
+              "type": "uniform",
+              "low": 0.2,
+              "high": 0.5
+            },
+            "regime_short_threshold": {
+              "type": "uniform",
+              "low": -0.5,
+              "high": -0.2
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 5.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 2.0,
+              "high": 15.0
+            }
+          }
+        },
+        "hpo": {
+          "objective_metric": "annualized_return",
+          "num_samples": 80,
+          "max_concurrent_trials": 8,
+          "search_space": {},
+          "algorithm_param_keys": [],
+          "portfolio_param_keys": [],
+          "optimization_target": "joint"
+        },
+        "optimization": {
+          "target": "joint"
+        },
+        "mlflow": {
+          "enabled": true
+        },
+        "state_store": {
+          "enabled": false
+        },
+        "logging": {},
+        "generated_algorithm": {
+          "class_name": "ADXTrendConfirmationEMACrossover",
+          "script_path": "dev\\experiments\\trading\\implementations\\ADXTrendConfirmationEMACrossover.py"
+        },
+        "name": "ema_adx_fast_trend",
+        "ema_fast": 450,
+        "ema_slow": 1300,
+        "confirmation_bars": 1,
+        "adx_threshold": 20
+      },
+      "report": "{}",
+      "raw_output": {
+        "aggregate": {},
+        "periods": []
+      }
+    },
+    {
+      "variant_name": "ema_adx_slow_confirmed",
+      "mode": "walk-forward",
+      "metrics": {
+        "annualized_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "win_rate": 0.0,
+        "total_return_pct": 0.0,
+        "total_trades": 0.0,
+        "num_periods": 0.0
+      },
+      "config": {
+        "mode": "walk-forward",
+        "algorithm": {
+          "implementation": "__generated__",
+          "params": {
+            "symbol": "SPY",
+            "history_length": 2500,
+            "ema_fast": 550,
+            "ema_slow": 1600,
+            "adx_period": 150,
+            "adx_threshold": 25,
+            "confirmation_bars": 2,
+            "regime_long_threshold": 0.3,
+            "regime_short_threshold": -0.3
+          }
+        },
+        "portfolio": {
+          "implementation": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
+          "params": {
+            "symbol": "SPY",
+            "cash": 100000.0,
+            "keep_history": true,
+            "stop_pct": 2.0,
+            "profit_pct": 5.0,
+            "tx_cost": 0.001
+          }
+        },
+        "order_manager": {
+          "implementation": "trading.core.om.backtesting_om.BacktestingOrderManager",
+          "params": {}
+        },
+        "data_provider": {
+          "implementation": "trading.data_providers.alpaca_data_provider.AlpacaDataProvider",
+          "params": {
+            "provider": "alpaca",
+            "api_key": "PKWLVTSMBCVI3PEREXCXNFRNUE",
+            "secret_key": "Bty6S6WvKVvEGpPdWzmu64VQ3GofGxNA9TQjgASQssAJ",
+            "symbols": [
+              "SPY"
+            ],
+            "timeframe": "Minute",
+            "adjustment": "split",
+            "market_hours_only": true,
+            "start_date": "2022-01-01",
+            "end_date": "2024-12-31",
+            "limit": 65000
+          }
+        },
+        "analysis": {
+          "enabled": true,
+          "log_to_mlflow": true,
+          "experiment_name": "trading_agent_experiments",
+          "run_name": "adx_trend_confirmation_with_scaled_ema_crossover_walk-forward",
+          "description": "Enters long when EMA(400\u2013700) crosses above EMA(1200\u20132000), ADX(100\u2013200) > 15\u201340, regime_score > +0.3, AND price > EMA(fast) with 2+ bars confirmation. Short mirrors these conditions. Exit on EMA crossback, ADX drop below 15, or regime reversal. Confirmation requirement eliminates single-bar whipsaws.",
+          "benchmarks": {},
+          "mlflow_policy": {
+            "annualized_return_threshold": 0.0,
+            "sample_negative_rate": 20
+          }
+        },
+        "aggregation": {
+          "enabled": true,
+          "aggregation_period_minutes": 5
+        },
+        "walk_forward": {
+          "optimization_window_days": 180,
+          "trading_window_days": 30,
+          "improvement_threshold_pct": 5.0,
+          "num_trials": 90,
+          "max_concurrent_trials": 9,
+          "step_days": 30,
+          "algorithm_param_keys": [
+            "ema_fast",
+            "ema_slow",
+            "adx_period",
+            "adx_threshold",
+            "confirmation_bars",
+            "regime_long_threshold",
+            "regime_short_threshold"
+          ],
+          "portfolio_param_keys": [
+            "stop_pct",
+            "profit_pct"
+          ],
+          "search_space": {
+            "ema_fast": {
+              "type": "randint",
+              "low": 400,
+              "high": 700
+            },
+            "ema_slow": {
+              "type": "randint",
+              "low": 1200,
+              "high": 2000
+            },
+            "adx_period": {
+              "type": "randint",
+              "low": 100,
+              "high": 200
+            },
+            "adx_threshold": {
+              "type": "randint",
+              "low": 15,
+              "high": 40
+            },
+            "confirmation_bars": {
+              "type": "randint",
+              "low": 1,
+              "high": 3
+            },
+            "regime_long_threshold": {
+              "type": "uniform",
+              "low": 0.2,
+              "high": 0.5
+            },
+            "regime_short_threshold": {
+              "type": "uniform",
+              "low": -0.5,
+              "high": -0.2
+            },
+            "stop_pct": {
+              "type": "uniform",
+              "low": 0.5,
+              "high": 5.0
+            },
+            "profit_pct": {
+              "type": "uniform",
+              "low": 2.0,
+              "high": 15.0
+            }
+          }
+        },
+        "hpo": {
+          "objective_metric": "annualized_return",
+          "num_samples": 80,
+          "max_concurrent_trials": 8,
+          "search_space": {},
+          "algorithm_param_keys": [],
+          "portfolio_param_keys": [],
+          "optimization_target": "joint"
+        },
+        "optimization": {
+          "target": "joint"
+        },
+        "mlflow": {
+          "enabled": true
+        },
+        "state_store": {
+          "enabled": false
+        },
+        "logging": {},
+        "generated_algorithm": {
+          "class_name": "ADXTrendConfirmationEMACrossover",
+          "script_path": "dev\\experiments\\trading\\implementations\\ADXTrendConfirmationEMACrossover.py"
+        },
+        "name": "ema_adx_slow_confirmed",
+        "ema_fast": 650,
+        "ema_slow": 1900,
+        "confirmation_bars": 3,
+        "adx_threshold": 35
+      },
+      "report": "{}",
+      "raw_output": {
+        "aggregate": {},
+        "periods": []
+      }
+    }
+  ],
+  "report": "{}"
+}

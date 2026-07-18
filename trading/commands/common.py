@@ -4,6 +4,7 @@ import argparse
 import copy
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -78,6 +79,25 @@ def _set_component_field(cfg: dict[str, Any], section_name: str, field: str, val
     cfg[section_name][field] = value
 
 
+def _load_yaml_profile(config_path: str, seen: set[Path] | None = None) -> dict[str, Any]:
+    path = Path(config_path).expanduser().resolve()
+    seen = seen or set()
+    if path in seen:
+        raise ValueError(f"Circular config extends detected at {path}")
+    seen.add(path)
+
+    with open(path, "r", encoding="utf-8") as handle:
+        profile = yaml.safe_load(handle) or {}
+
+    parent = profile.pop("extends", None)
+    if not parent:
+        return profile
+    parent_path = Path(parent).expanduser()
+    if not parent_path.is_absolute():
+        parent_path = path.parent / parent_path
+    return deep_merge(_load_yaml_profile(str(parent_path), seen), profile)
+
+
 def load_raw_config(config_path: str) -> dict[str, Any]:
     """
     Load a runtime config from either a local YAML file or an MLflow run URL.
@@ -94,8 +114,7 @@ def load_raw_config(config_path: str) -> dict[str, Any]:
 
         profile = load_source_run_context(config_path).raw_config
     else:
-        with open(config_path, "r", encoding="utf-8") as handle:
-            profile = yaml.safe_load(handle) or {}
+        profile = _load_yaml_profile(config_path)
     return deep_merge(root_cfg, profile)
 
 
@@ -208,6 +227,9 @@ def adapt_live_config_to_mongo_backtest(raw_cfg: dict[str, Any], *, force: bool 
         "connection_uri": ss_cfg.get("connection_uri"),
         "database": ss_cfg.get("database"),
     }
+    # The source session is input, never an output. Leaving persistence enabled
+    # would resume and overwrite the MongoDB records being replayed.
+    cfg["state_store"] = {**ss_cfg, "enabled": False}
     return cfg
 
 

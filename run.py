@@ -22,6 +22,7 @@ from trading.commands import (
     cmd_backtest,
     cmd_hpo,
     cmd_hpo_split,
+    cmd_hpo_split_folder,
     cmd_live,
     cmd_mongo_backtest,
     cmd_promote,
@@ -201,6 +202,9 @@ def build_parser() -> argparse.ArgumentParser:
             "    Tune on the training span, then log best-config training and validation backtests.\n"
             "    Accepts --validation-period-days to override hpo.validation_period_days.\n"
             "    Example: python run.py hpo-split --config configs/example_hpo_split.yaml --account paper --validation-period-days 30\n"
+            "  hpo-split-folder:\n"
+            "    Run hpo-split for every YAML config in a folder, in sorted order.\n"
+            "    Example: python run.py hpo-split-folder --config-folder configs/leveraged_etf_hpo --account paper\n"
             "  hpo-from-mlflow:\n"
             "    Rebuild an HPO config from a prior MLflow run, open it for edits, then execute the search.\n"
             "    --account --run-url [--tracking-uri] [--editor]\n"
@@ -468,6 +472,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override hpo.validation_period_days",
     )
     hpo_split_p.set_defaults(func=cmd_hpo_split)
+
+    hpo_split_folder_p = subparsers.add_parser(
+        "hpo-split-folder",
+        help="Run split HPO for every YAML config in a folder, in series",
+        formatter_class=argparse.RawTextHelpFormatter,
+        description=(
+            "Discover *.yaml and *.yml files in --config-folder, sort them by filename, "
+            "and run the existing hpo-split workflow for each file one at a time."
+        ),
+        epilog=(
+            "Example:\n"
+            "  python run.py hpo-split-folder --config-folder configs/leveraged_etf_hpo --account paper\n"
+        ),
+    )
+    hpo_split_folder_p.add_argument("--config-folder", required=True, help="Folder containing YAML configs to run")
+    hpo_split_folder_p.add_argument("--account", required=True, help="Account name from accounts.yaml")
+    hpo_split_folder_p.add_argument("--symbol", help="Override portfolio symbol")
+    hpo_split_folder_p.add_argument("--cash", type=float, help="Override starting cash")
+    hpo_split_folder_p.add_argument("--algorithm", help="Override algorithm implementation path")
+    hpo_split_folder_p.add_argument("--algorithm-url", dest="algorithm_url", help="Load algorithm class code from an HTTP(S) URL")
+    hpo_split_folder_p.add_argument("--portfolio", help="Override portfolio implementation path")
+    hpo_split_folder_p.add_argument("--portfolio-url", dest="portfolio_url", help="Load portfolio class code from an HTTP(S) URL")
+    hpo_split_folder_p.add_argument("--no-mlflow", action="store_true", help="Disable MLflow logging")
+    hpo_split_folder_p.add_argument("--run-name", dest="run_name", help="Override MLflow run name for every config")
+    hpo_split_folder_p.add_argument("--session-id", dest="session_id", help="MongoDB state_store session ID")
+    hpo_split_folder_p.add_argument("--agg-period", dest="agg_period", type=int, help="Override aggregation period")
+    hpo_split_folder_p.add_argument("--num-samples", dest="num_samples", type=int, help="Override hpo.num_samples")
+    hpo_split_folder_p.add_argument(
+        "--max-concurrent-trials",
+        dest="max_concurrent_trials",
+        type=int,
+        help="Override hpo.max_concurrent_trials",
+    )
+    hpo_split_folder_p.add_argument(
+        "--validation-period-days",
+        dest="validation_period_days",
+        type=int,
+        help="Override hpo.validation_period_days",
+    )
+    hpo_split_folder_p.set_defaults(func=cmd_hpo_split_folder)
 
     hpo_mlflow_p = subparsers.add_parser(
         "hpo-from-mlflow",

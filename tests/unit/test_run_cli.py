@@ -229,6 +229,24 @@ def test_build_parser_hpo_split_args():
     assert args.num_samples == 5
 
 
+def test_build_parser_hpo_split_folder_args():
+    parser = build_parser()
+    args = parser.parse_args([
+        "hpo-split-folder",
+        "--config-folder", "configs/leveraged_etf_hpo",
+        "--account", "paper",
+        "--validation-period-days", "30",
+        "--num-samples", "5",
+        "--max-concurrent-trials", "2",
+    ])
+
+    assert args.command == "hpo-split-folder"
+    assert args.config_folder == "configs/leveraged_etf_hpo"
+    assert args.validation_period_days == 30
+    assert args.num_samples == 5
+    assert args.max_concurrent_trials == 2
+
+
 def test_root_help_mentions_hpo_from_mlflow(capsys):
     parser = build_parser()
     with pytest.raises(SystemExit):
@@ -247,6 +265,7 @@ def test_root_help_mentions_hpo_from_mlflow(capsys):
     assert "split-backtest" in help_text
     assert "configs/example_live_walk_forward.yaml" in help_text
     assert "hpo-split" in help_text
+    assert "hpo-split-folder" in help_text
     assert "hpo-split-from-mlflow" in help_text
     assert "session-replay-from-mlflow" in help_text
     assert "Recover config and component code from an MLflow run" in help_text
