@@ -240,6 +240,13 @@ def _metrics_from_equity(equity: list[dict]) -> dict:
     }
 
 
+def _metrics_from_value_history(value_history: dict) -> dict:
+    if not value_history:
+        return {}
+    equity = [{"x": ts.isoformat(), "y": float(value)} for ts, value in sorted(value_history.items())]
+    return _metrics_from_equity(equity)
+
+
 def _fetch_benchmark_series(
     value_history: dict,
     session_metadata: dict,
@@ -566,39 +573,24 @@ def session_summary(session_id: str):
             return jsonify({"error": f"Session not found: {session_id}"}), 404
 
         history = store.load_equity_history(session_id)
-        order_data = store.load_orders(session_id)
-        equity_full = _series_from_history(history["value_history"])
-        cash_full = _series_from_history(history["cash_history"])
-        equity = _downsample_points(equity_full, _max_points_arg("points", SUMMARY_MAX_POINTS))
-        cash = _downsample_points(cash_full, _max_points_arg("points", SUMMARY_MAX_POINTS))
-        metrics = _metrics_from_equity(equity_full)
-        metadata = (session or {}).get("metadata") or {}
         benchmark_symbol = _benchmark_symbol_arg()
-        symbols = {}
-        errors = {}
-        benchmark_series, benchmark_error = _fetch_benchmark_series(
-            history["value_history"], metadata, session, benchmark_symbol
-        )
-        if benchmark_series:
-            symbols[benchmark_symbol] = _downsample_points(benchmark_series, _max_points_arg("points", SUMMARY_MAX_POINTS))
-        elif benchmark_error:
-            errors["benchmark"] = benchmark_error
+        metrics = _metrics_from_value_history(history["value_history"])
 
         payload = {
             "session": _json_safe(session),
             "portfolio": {
-                "total_value": equity,
-                "cash": cash,
+                "total_value": [],
+                "cash": [],
             },
-            "symbols": symbols,
+            "symbols": {},
             "signals": [],
             "indicators": {"_config": {}},
             "metrics": _json_safe(metrics),
-            "benchmark": _json_safe(_benchmark_comparison(equity_full, benchmark_series, metrics, benchmark_symbol)),
+            "benchmark": {},
             "benchmark_symbol": benchmark_symbol,
             "trades": [],
-            "orders": _order_summary(order_data),
-            "errors": errors,
+            "orders": None,
+            "errors": {},
         }
         return jsonify(payload)
     except Exception as exc:
@@ -654,12 +646,17 @@ def session_details(session_id: str):
                 errors["benchmark"] = str(exc)
 
         payload = {
+            "portfolio": {
+                "total_value": _downsample_points(equity, point_limit),
+                "cash": _downsample_points(_series_from_history(pf_data["cash_history"]), point_limit),
+            },
             "symbols": symbols,
             "signals": _signal_payload(pf_data["signals_history"], pf_data["tick_history"], max_points=signal_limit),
             "trades": _trades_payload(trades),
             "metrics": metrics,
             "benchmark": _json_safe(benchmark),
             "benchmark_symbol": benchmark_symbol,
+            "orders": _order_summary(order_data),
             "errors": errors,
         }
         return jsonify(payload)

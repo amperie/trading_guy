@@ -71,16 +71,18 @@ def test_session_summary_route_returns_lightweight_payload(monkeypatch):
         raise AssertionError("heavy analyzer should not run on summary route")
 
     monkeypatch.setattr(sa_app, "_build_analyzer_from_data", fail)
+    monkeypatch.setattr(sa_app, "_fetch_benchmark_series", fail)
 
     client = sa_app.app.test_client()
     response = client.get("/api/session/sess-1")
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["portfolio"]["total_value"]
+    assert payload["portfolio"]["total_value"] == []
     assert payload["symbols"] == {}
     assert payload["signals"] == []
     assert payload["trades"] == []
-    assert payload["orders"]["total"] == 1
+    assert payload["orders"] is None
+    assert payload["metrics"]["bars"] == 3
 
 
 def test_session_details_route_returns_symbols_signals_and_trades(monkeypatch):
@@ -160,11 +162,7 @@ def test_session_summary_route_uses_requested_benchmark(monkeypatch):
     monkeypatch.setattr(sa_app, "_get_state_store", lambda db=None: _FakeStore())
 
     def fake_fetch(value_history, metadata, session=None, symbol="SPY"):
-        assert symbol == "QQQ"
-        return [
-            {"x": "2024-01-01T09:30:00", "y": 100.0},
-            {"x": "2024-01-03T09:30:00", "y": 110.0},
-        ], None
+        raise AssertionError("summary route should not fetch benchmark data")
 
     monkeypatch.setattr(sa_app, "_fetch_benchmark_series", fake_fetch)
 
@@ -173,8 +171,8 @@ def test_session_summary_route_uses_requested_benchmark(monkeypatch):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["benchmark_symbol"] == "QQQ"
-    assert "QQQ" in payload["symbols"]
-    assert payload["benchmark"]["_comparison"]["benchmark_symbol"] == "QQQ"
+    assert payload["symbols"] == {}
+    assert payload["benchmark"] == {}
 
 
 def test_session_indicators_route_is_separate(monkeypatch):

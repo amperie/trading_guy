@@ -141,7 +141,7 @@ function renderMetadata(session, orders) {
   $("metaCreated").textContent = session.created_at
     ? new Date(session.created_at).toLocaleString()
     : "--";
-  $("metaOrders").textContent = orders ? `${orders.total} total` : "--";
+  $("metaOrders").textContent = orders?.total != null ? `${orders.total} total` : "--";
 }
 
 function fmt2(value) {
@@ -778,6 +778,8 @@ async function loadSession() {
   state.benchmarkSymbol = symbol;
   state.detailLoaded = false;
   state.indicatorsLoaded = false;
+  $("dateFrom").value = "";
+  $("dateTo").value = "";
   $("status").textContent = "Loading session summary...";
   try {
     const db = $("dbName").value.trim();

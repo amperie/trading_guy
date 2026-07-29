@@ -501,7 +501,8 @@ class TradingStateStore:
         # Portfolio snapshots -> value_history and cash_history
         value_history = {}
         cash_history = {}
-        for doc in self._snapshots.find(query).sort("timestamp", ASCENDING):
+        projection = {"timestamp": 1, "total_value": 1, "cash": 1}
+        for doc in self._snapshots.find(query, projection).sort("timestamp", ASCENDING):
             ts = doc["timestamp"]
             value_history[ts] = doc["total_value"]
             cash_history[ts] = doc["cash"]
@@ -551,7 +552,8 @@ class TradingStateStore:
 
         value_history = {}
         cash_history = {}
-        for doc in self._snapshots.find(query).sort("timestamp", ASCENDING):
+        projection = {"timestamp": 1, "total_value": 1, "cash": 1}
+        for doc in self._snapshots.find(query, projection).sort("timestamp", ASCENDING):
             ts = doc["timestamp"]
             value_history[ts] = doc["total_value"]
             cash_history[ts] = doc["cash"]
