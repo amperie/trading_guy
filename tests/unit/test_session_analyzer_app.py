@@ -87,7 +87,11 @@ def test_session_summary_route_returns_lightweight_payload(monkeypatch):
 
 def test_session_details_route_returns_symbols_signals_and_trades(monkeypatch):
     monkeypatch.setattr(sa_app, "_get_state_store", lambda db=None: _FakeStore())
-    monkeypatch.setattr(sa_app, "_fetch_benchmark_series", lambda value_history, metadata, session=None, symbol="SPY": ([], None))
+    monkeypatch.setattr(sa_app, "_fetch_benchmark_series", lambda value_history, metadata, session=None, symbol="SPY": ([
+        {"x": sa_app.datetime(2024, 1, 1, 9, 30).isoformat(), "y": 100.0},
+        {"x": sa_app.datetime(2024, 1, 2, 9, 30).isoformat(), "y": 95.0},
+        {"x": sa_app.datetime(2024, 1, 3, 9, 30).isoformat(), "y": 105.0},
+    ], None))
 
     class _FakeAnalyzer:
         def extract_trades(self):
@@ -123,9 +127,10 @@ def test_session_details_route_returns_symbols_signals_and_trades(monkeypatch):
     assert payload["signals"][0]["symbol"] == "AAPL"
     assert payload["trades"][0]["symbol"] == "AAPL"
     assert payload["metrics"]["total_trades"] == 1
+    assert payload["benchmark_metrics"]["max_drawdown_pct"] == -5.0
 
 
-def test_spy_fallback_fetches_boundary_prices_from_alpaca(monkeypatch):
+def test_spy_fallback_fetches_full_price_series_from_alpaca(monkeypatch):
     calls = []
 
     class _FakeAlpacaProvider:
@@ -137,9 +142,11 @@ def test_spy_fallback_fetches_boundary_prices_from_alpaca(monkeypatch):
             pass
 
         def get_data(self):
-            if self.cfg["sort"] == "asc":
-                return pd.DataFrame([{"timestamp": sa_app.datetime(2024, 1, 1, 9, 30), "close": 100.0}])
-            return pd.DataFrame([{"timestamp": sa_app.datetime(2024, 1, 3, 9, 30), "close": 105.0}])
+            return pd.DataFrame([
+                {"timestamp": sa_app.datetime(2024, 1, 1, 9, 30), "close": 100.0},
+                {"timestamp": sa_app.datetime(2024, 1, 2, 9, 30), "close": 95.0},
+                {"timestamp": sa_app.datetime(2024, 1, 3, 9, 30), "close": 105.0},
+            ])
 
     history = {
         sa_app.datetime(2024, 1, 1, 9, 30): 1000.0,
@@ -152,8 +159,8 @@ def test_spy_fallback_fetches_boundary_prices_from_alpaca(monkeypatch):
     benchmark = sa_app._spy_comparison(sa_app._series_from_history(history), spy, {"total_return_pct": 10.0})
 
     assert error is None
-    assert [call["sort"] for call in calls] == ["asc", "desc"]
-    assert [point["y"] for point in spy] == [100.0, 105.0]
+    assert [call["sort"] for call in calls] == ["asc"]
+    assert [point["y"] for point in spy] == [100.0, 95.0, 105.0]
     assert benchmark["_comparison"]["benchmark_return_pct"] == 5.0
     assert benchmark["_comparison"]["alpha"] == 5.0
 

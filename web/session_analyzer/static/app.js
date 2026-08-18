@@ -120,6 +120,7 @@ function mergeSessionData(base, patch) {
     trades: patch?.trades ?? base?.trades ?? [],
     metrics: patch?.metrics ?? base?.metrics ?? {},
     benchmark: patch?.benchmark ?? base?.benchmark ?? {},
+    benchmark_metrics: patch?.benchmark_metrics ?? base?.benchmark_metrics ?? {},
     benchmark_symbol: patch?.benchmark_symbol ?? base?.benchmark_symbol ?? state.benchmarkSymbol,
     orders: patch?.orders ?? base?.orders ?? {},
     errors: { ...(base?.errors || {}), ...(patch?.errors || {}) },
@@ -148,7 +149,7 @@ function fmt2(value) {
   return value != null ? value.toFixed(2) : "--";
 }
 
-function renderMetrics(metrics, benchmark) {
+function renderMetrics(metrics, benchmark, benchmarkMetrics) {
   const symbol = benchmark?._comparison?.benchmark_symbol || state.raw?.benchmark_symbol || state.benchmarkSymbol;
   $("metricReturn").textContent = formatPct(metrics.total_return_pct);
   $("metricAnnualized").textContent = formatPct(metrics.annualized_return);
@@ -162,6 +163,11 @@ function renderMetrics(metrics, benchmark) {
   $("metricAvgTrade").textContent = `Avg PnL ${formatMoney(metrics.avg_trade_pnl)}`;
   $("metricTradingDays").textContent = metrics.trading_days != null ? `${metrics.trading_days}` : "--";
   $("metricBars").textContent = metrics.bars != null ? `${metrics.bars} bars` : "--";
+  $("metricBenchmarkLabel").textContent = `${symbol} Benchmark`;
+  $("metricBenchmarkSharpe").textContent = `Sharpe ${fmt2(benchmarkMetrics?.sharpe_ratio)}`;
+  $("metricBenchmarkSortino").textContent = `Sortino ${fmt2(benchmarkMetrics?.sortino_ratio)}`;
+  $("metricBenchmarkVolatility").textContent = `Volatility ${fmt2(benchmarkMetrics?.volatility)}%`;
+  $("metricBenchmarkDrawdown").textContent = `Max Drawdown ${formatPct(benchmarkMetrics?.max_drawdown_pct)}`;
 
   if (benchmark && benchmark._comparison) {
     const alpha = benchmark._comparison.alpha ?? null;
@@ -337,6 +343,17 @@ function recomputeBenchmark(equitySeries, benchmarkSeries, symbol) {
   };
 }
 
+function recomputeBenchmarkMetrics(benchmarkSeries, equitySeries) {
+  if (!benchmarkSeries || !benchmarkSeries.length || !equitySeries.length) return {};
+  const startDate = new Date(equitySeries[0].x);
+  const endDate = new Date(equitySeries[equitySeries.length - 1].x);
+  const filteredBenchmark = benchmarkSeries.filter((pt) => {
+    const t = new Date(pt.x);
+    return t >= startDate && t <= endDate;
+  });
+  return recomputeMetrics(filteredBenchmark, []);
+}
+
 function applyDateFilter(raw, start, end) {
   if (!start && !end) return raw;
   const filteredValue = filterSeries(raw.portfolio.total_value, start, end);
@@ -361,6 +378,7 @@ function applyDateFilter(raw, start, end) {
     trades: filteredTrades,
     metrics: recomputeMetrics(filteredValue, filteredTrades),
     benchmark: recomputeBenchmark(filteredValue, filteredSymbols[symbol], symbol),
+    benchmark_metrics: recomputeBenchmarkMetrics(filteredSymbols[symbol], filteredValue),
   };
 }
 
@@ -722,7 +740,7 @@ function applyAndRender() {
   state.filtered = applyDateFilter(state.raw, start, end);
   const d = state.filtered;
   renderMetadata(d.session, d.orders);
-  renderMetrics(d.metrics, d.benchmark || {});
+  renderMetrics(d.metrics, d.benchmark || {}, d.benchmark_metrics || {});
   renderTradeTable(d.trades);
   renderSymbols(d.symbols);
   renderCharts();

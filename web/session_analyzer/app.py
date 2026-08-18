@@ -247,6 +247,13 @@ def _metrics_from_value_history(value_history: dict) -> dict:
     return _metrics_from_equity(equity)
 
 
+def _window_series(series: list[dict], start: datetime, end: datetime) -> list[dict]:
+    return [
+        item for item in series
+        if start <= _to_eastern_naive(datetime.fromisoformat(item["x"])) <= end
+    ]
+
+
 def _fetch_benchmark_series(
     value_history: dict,
     session_metadata: dict,
@@ -262,7 +269,7 @@ def _fetch_benchmark_series(
     timeframe = _alpaca_timeframe(session_metadata)
     start_date, end_date = _alpaca_range(value_history, timeframe)
 
-    def fetch_endpoint(sort: str):
+    def fetch_endpoint():
         provider = AlpacaDataProvider({
             "api_key": api_key,
             "secret_key": secret_key,
@@ -270,8 +277,7 @@ def _fetch_benchmark_series(
             "timeframe": timeframe,
             "start_date": start_date,
             "end_date": end_date,
-            "limit": 1,
-            "sort": sort,
+            "sort": "asc",
             "market_hours_only": True,
         })
         provider.load_data()
@@ -279,20 +285,17 @@ def _fetch_benchmark_series(
         return df if df is not None else None
 
     try:
-        start_df = fetch_endpoint("asc")
-        end_df = fetch_endpoint("desc")
+        df = fetch_endpoint()
     except Exception as exc:
         return [], f"Failed to fetch {symbol} from Alpaca: {exc}"
-    if start_df is None or end_df is None or start_df.empty or end_df.empty:
+    if df is None or df.empty:
         return [], f"Alpaca returned no {symbol} bars for session range"
 
     points = [
-        {"x": start_df.iloc[0]["timestamp"].isoformat(), "y": float(start_df.iloc[0]["close"])},
-        {"x": end_df.iloc[0]["timestamp"].isoformat(), "y": float(end_df.iloc[0]["close"])},
+        {"x": row.timestamp.isoformat(), "y": float(row.close)}
+        for row in df.sort_values("timestamp").itertuples(index=False)
     ]
-    if points[0]["x"] == points[1]["x"]:
-        points.pop()
-    return sorted(points, key=lambda item: item["x"]), None
+    return points, None
 
 
 def _benchmark_comparison(equity: list[dict], benchmark: list[dict], metrics: dict, symbol: str) -> dict:
@@ -300,10 +303,7 @@ def _benchmark_comparison(equity: list[dict], benchmark: list[dict], metrics: di
         return {}
     start = _to_eastern_naive(datetime.fromisoformat(equity[0]["x"]))
     end = _to_eastern_naive(datetime.fromisoformat(equity[-1]["x"]))
-    benchmark_window = [
-        item for item in benchmark
-        if start <= _to_eastern_naive(datetime.fromisoformat(item["x"])) <= end
-    ]
+    benchmark_window = _window_series(benchmark, start, end)
     if not benchmark_window:
         benchmark_window = benchmark
     first_benchmark = float(benchmark_window[0]["y"])
@@ -587,6 +587,7 @@ def session_summary(session_id: str):
             "indicators": {"_config": {}},
             "metrics": _json_safe(metrics),
             "benchmark": {},
+            "benchmark_metrics": {},
             "benchmark_symbol": benchmark_symbol,
             "trades": [],
             "orders": None,
@@ -639,6 +640,14 @@ def session_details(session_id: str):
 
         equity = _series_from_history(pf_data["value_history"])
         benchmark = _benchmark_comparison(equity, full_benchmark_series, metrics, benchmark_symbol)
+        benchmark_window = []
+        if equity and full_benchmark_series:
+            benchmark_window = _window_series(
+                full_benchmark_series,
+                _to_eastern_naive(datetime.fromisoformat(equity[0]["x"])),
+                _to_eastern_naive(datetime.fromisoformat(equity[-1]["x"])),
+            ) or full_benchmark_series
+        benchmark_metrics = _metrics_from_equity(benchmark_window)
         if not benchmark:
             try:
                 benchmark = analyzer.calculate_benchmark_comparison()
@@ -655,6 +664,7 @@ def session_details(session_id: str):
             "trades": _trades_payload(trades),
             "metrics": metrics,
             "benchmark": _json_safe(benchmark),
+            "benchmark_metrics": _json_safe(benchmark_metrics),
             "benchmark_symbol": benchmark_symbol,
             "orders": _order_summary(order_data),
             "errors": errors,
