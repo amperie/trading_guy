@@ -915,11 +915,56 @@ def test_backtest_objective_fn_supports_nested_algorithm_keys(monkeypatch):
         portfolio_param_keys=["stop_pct"],
     )
 
-    assert result == {"_metric": 1.23}
+    assert result["_metric"] == 1.23
+    assert result["_objective_annualized_return"] == 1.23
     assert captured["alg_cfg"] == {"regime": {"alpha": 8, "beta": 2}}
     assert captured["pf_cfg"] == {"stop_pct": 3.5, "profit_pct": 4.0}
     assert captured["warmup_dp_cfg"] == {"path": "warmup"}
     assert captured["log_to_mlflow"] is False
+
+
+def test_backtest_objective_fn_supports_composite_objective(monkeypatch):
+    def fake_run_backtest_local(*args, **kwargs):
+        return {"metrics": SimpleNamespace(
+            annualized_return=12.0,
+            max_drawdown_pct=-4.0,
+            volatility=8.0,
+            sortino_ratio=1.5,
+            calmar_ratio=3.0,
+            total_trades=10,
+        )}
+
+    monkeypatch.setattr(run_backtest_ray, "run_backtest_local", fake_run_backtest_local)
+
+    result = run_backtest_ray.backtest_objective_fn(
+        config={},
+        symbol="SPY",
+        algorithm_class=DummyAlgorithm,
+        portfolio_class=DummyPortfolio,
+        data_provider_class=DummyDataProvider,
+        order_manager_class=DummyOrderManager,
+        base_algorithm_config={},
+        base_portfolio_config={},
+        base_data_provider_config={},
+        base_backtest_config={
+            "objective": {
+                "metric": "composite_v1",
+                "weights": {
+                    "annualized_return": 1.0,
+                    "max_drawdown_pct": -1.5,
+                    "volatility": -0.25,
+                    "sortino_ratio": 5.0,
+                    "calmar_ratio": 2.0,
+                },
+            }
+        },
+        algorithm_param_keys=[],
+        portfolio_param_keys=[],
+    )
+
+    assert result["_metric"] == pytest.approx(17.5)
+    assert result["_objective_max_drawdown_pct"] == 4.0
+    assert result["_objective_penalty"] == 0.0
 
 
 def test_tune_backtest_hyperparameters_disables_ray_sigint_handler_and_shuts_down(monkeypatch):

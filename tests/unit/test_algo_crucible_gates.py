@@ -65,9 +65,10 @@ def test_regime_gate_stage_consumes_oos_outputs(tmp_path: Path):
     orchestrator = CrucibleOrchestrator(platform_path, workload_path)
 
     orchestrator.run_walk_forward_oos(use_ray=False)
-    result = CrucibleOrchestrator(platform_path, workload_path).run_regime_gate_stage(rerun=True)
+    result = CrucibleOrchestrator(platform_path, workload_path).run_regime_gate_stage()
     gate_summary = pd.read_csv(Path(result["run_dir"]) / "summaries" / "regime_gate_summary.csv")
 
     assert result["summary"]["candidate_count"] == 1
+    assert result["status"] == "running"
     assert len(gate_summary) == 1
     assert gate_summary["candidate_type"].iloc[0] in {"generalist", "specialist", "reject"}

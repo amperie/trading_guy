@@ -326,11 +326,13 @@ def _build_minimal_warmup_dp_cfg(
     if data_provider_class is not None:
         provider_name = f"{data_provider_class.__module__}.{data_provider_class.__name__}"
     timeframe = str(training_dp_cfg.get("timeframe", "Minute"))
-    reference_dt = pd.to_datetime(warmup_end).to_pydatetime()
-    warmup_start = compute_warmup_start_date(warmup_bars, timeframe, reference_dt)
-    warmup_cfg["start_date"] = pd.to_datetime(warmup_start).strftime("%Y-%m-%d %H:%M:%S.%f")
     if "alpaca" in provider_name.lower():
+        warmup_cfg.pop("start_date", None)
         warmup_cfg["limit"] = warmup_bars
+    else:
+        reference_dt = pd.to_datetime(warmup_end).to_pydatetime()
+        warmup_start = compute_warmup_start_date(warmup_bars, timeframe, reference_dt)
+        warmup_cfg["start_date"] = pd.to_datetime(warmup_start).strftime("%Y-%m-%d %H:%M:%S.%f")
     return warmup_cfg
 
 

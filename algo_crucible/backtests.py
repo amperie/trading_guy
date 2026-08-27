@@ -27,6 +27,10 @@ def run_validation_backtest(payload: dict[str, Any]) -> dict[str, Any]:
     regimes = regime_scorecard(pf, ticks, candidate.algorithm_params.get("market_regime", {}))
     return {
         "candidate_id": candidate.candidate_id,
+        "seed_id": payload.get("seed_id"),
+        "neighbor_id": payload.get("neighbor_id"),
+        "scenario_id": payload.get("scenario_id"),
+        "source_candidate_id": payload.get("source_candidate_id", candidate.candidate_id),
         "window_id": window["window_id"],
         "window": window,
         "overall_scorecard": metrics,

@@ -489,7 +489,62 @@ def backtest_objective_fn(
         log_to_mlflow=log_to_mlflow,
     )
 
-    return {"_metric": result['metrics'].annualized_return}
+    score, details = objective_score(result["metrics"], backtest_cfg.get("objective"))
+    return {"_metric": score, **details}
+
+
+def objective_score(metrics, objective: dict | str | None = None) -> tuple[float, dict[str, float]]:
+    if objective is None:
+        objective = {"metric": "annualized_return"}
+    if isinstance(objective, str):
+        objective = {"metric": objective}
+    metric = str(objective.get("metric", "annualized_return"))
+    if metric != "composite_v1":
+        value = _metric_value(metrics, metric)
+        return value, {f"_objective_{metric}": value}
+
+    weights = {
+        "annualized_return": 1.0,
+        "max_drawdown_pct": -1.5,
+        "volatility": -0.25,
+        "sortino_ratio": 5.0,
+        "calmar_ratio": 2.0,
+        **(objective.get("weights") or {}),
+    }
+    gates = objective.get("gates") or {}
+    min_trades = int(gates.get("min_trades", 0) or 0)
+    max_drawdown = gates.get("max_drawdown_pct")
+    total_trades = int(_metric_value(metrics, "total_trades", 0.0) or 0)
+    drawdown = abs(_metric_value(metrics, "max_drawdown_pct", 0.0))
+    penalty = 0.0
+    if total_trades < min_trades:
+        penalty += float(objective.get("low_trade_penalty", 1000.0)) * (min_trades - total_trades)
+    if max_drawdown is not None and drawdown > abs(float(max_drawdown)):
+        penalty += float(objective.get("drawdown_gate_penalty", 100.0)) * (drawdown - abs(float(max_drawdown)))
+
+    components = {key: _objective_component(metrics, key) for key in weights}
+    score = sum(float(weight) * components[key] for key, weight in weights.items()) - penalty
+    details = {f"_objective_{key}": float(value) for key, value in components.items()}
+    details["_objective_penalty"] = float(penalty)
+    details["_objective_total_trades"] = float(total_trades)
+    return float(score), details
+
+
+def _metric_value(metrics, key: str, default: float | None = None) -> float:
+    value = getattr(metrics, key, default)
+    if value is None:
+        value = default
+    if value is None:
+        raise ValueError(f"Unknown objective metric '{key}'")
+    value = float(value)
+    return value if math.isfinite(value) else 0.0
+
+
+def _objective_component(metrics, key: str) -> float:
+    value = _metric_value(metrics, key, 0.0)
+    if key in {"max_drawdown", "max_drawdown_pct", "ulcer_index"}:
+        return abs(value)
+    return value
 
 
 def run_backtest_local(
@@ -760,7 +815,14 @@ def tune_backtest_hyperparameters(
             metric_value = float(metric)
             if not math.isfinite(metric_value):
                 continue
-            trial_summaries.append({"config": result.config, "metric": metric_value})
+            objective_details = {}
+            for key, value in result.metrics.items():
+                if str(key).startswith("_objective_") and value is not None:
+                    try:
+                        objective_details[key] = float(value)
+                    except (TypeError, ValueError):
+                        continue
+            trial_summaries.append({"config": result.config, "metric": metric_value, "objective_details": objective_details})
         if not trial_summaries:
             raise RuntimeError(
                 f"All {num_samples} HPO trials failed or produced no optimization metric. "

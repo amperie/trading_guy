@@ -47,7 +47,7 @@ def test_crucible_populates_representative_mlflow_parent_run(tmp_path: Path):
     assert gate_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
     assert run.info.experiment_id == experiment.experiment_id
     assert run.data.tags["crucible.run_name"] == run_name
-    assert run.data.tags["crucible.status"] == "complete"
+    assert run.data.tags["crucible.status"] == "running"
     assert "walk_forward_oos.jobs_complete" in run.data.metrics
     assert "walk_forward_oos.total_return_pct_std_dev" in run.data.metrics
     assert "walk_forward_oos.total_return_pct_min" in run.data.metrics

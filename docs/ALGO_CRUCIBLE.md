@@ -253,8 +253,23 @@ fixed_assumptions:
   slippage_bps: 5
   benchmark_symbol: "SPY"
 
+hpo:
+  objective:
+    metric: composite_v1
+    weights:
+      annualized_return: 1.0
+      max_drawdown_pct: -1.5
+      volatility: -0.25
+      sortino_ratio: 5.0
+      calmar_ratio: 2.0
+    gates:
+      min_trades: 20
+      max_drawdown_pct: 25
+    low_trade_penalty: 1000
+    drawdown_gate_penalty: 100
+
 objectives:
-  hpo_objective_metric: "annualized_return"
+  hpo_objective_metric: "composite_v1"
   generalist_gate_metric: "median_oos_return"
   specialist_gate_metric: "regime_median_oos_return"
   plateau_metric: "median_oos_return"
@@ -438,6 +453,17 @@ Separate:
 
 If every stage optimizes annualized return, the crucible will still overfit.
 Each stage should optimize or gate on the metric appropriate to that stage.
+The shared Ray HPO launcher still defaults to `annualized_return` for backward
+compatibility. Crucible workloads should opt into `composite_v1`, which scores:
+
+```text
+annualized_return
+- drawdown_weight * abs(max_drawdown_pct)
+- volatility_weight * volatility
++ sortino_weight * sortino_ratio
++ calmar_weight * calmar_ratio
+- configured gate penalties
+```
 
 ## Failure Taxonomy
 

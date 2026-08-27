@@ -79,6 +79,17 @@ class RayJobRunner:
         for result in fresh:
             state_store.write_artifact_json(run_id, _result_path_from_dict(result), result)
         results = sorted([*reused, *fresh], key=lambda row: row["job_id"])
+        failed = [row for row in results if row.get("status") == "failed"]
+        logger.info(
+            f"Completed crucible jobs stage={resolved[0].stage if resolved else 'n/a'} "
+            f"complete={sum(1 for row in results if row.get('status') == 'complete')} "
+            f"failed={len(failed)} reused={len(reused)}"
+        )
+        for row in failed[:10]:
+            logger.warning(
+                f"Crucible job failed stage={row.get('stage')} job_id={row.get('job_id')} "
+                f"error_type={row.get('error_type')} error={row.get('error')}"
+            )
         return JobBatchResult(
             jobs_total=len(resolved),
             jobs_complete=sum(1 for row in results if row.get("status") == "complete"),

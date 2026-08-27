@@ -26,6 +26,7 @@ def run_hpo_search(resolved_cfg) -> dict[str, Any]:
         "experiment_name": "Algo Crucible HPO",
         "run_name": resolved_cfg.crucible_run_id,
         "description": workload.get("workload", {}).get("description", ""),
+        "objective": hpo_cfg.get("objective"),
     }
     best_config, trial_summaries = tune_backtest_hyperparameters(
         symbol=base_backtest_config["symbol"],
@@ -89,6 +90,7 @@ def build_hpo_summary(
             "trial_id": trial.get("trial_id", f"trial_{idx:04d}"),
             "candidate_id": candidate.candidate_id,
             "metric": float(metric),
+            "objective_details": trial.get("objective_details", {}),
             "config": trial_config,
             "algorithm_params": al_cfg,
             "portfolio_params": pf_cfg,

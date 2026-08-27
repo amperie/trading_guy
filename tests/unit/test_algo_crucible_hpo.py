@@ -17,7 +17,13 @@ def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
         "resume": {"local_cache_dir": str(tmp_path / "runs")},
         "state_store": {"backend": "local"},
         "ray": {"max_concurrent_trials": 2, "log_worker_output": False},
-        "hpo": {"num_samples": 3},
+        "hpo": {
+            "num_samples": 3,
+            "objective": {
+                "metric": "composite_v1",
+                "weights": {"annualized_return": 1.0, "max_drawdown_pct": -1.5},
+            },
+        },
     }
     workload = {
         "workload": {"name": "hpo", "run_name": "hpo_v1"},
@@ -96,8 +102,8 @@ def test_hpo_stage_writes_full_trial_and_candidate_summaries(monkeypatch, tmp_pa
         return (
             {"history_length": 2, "stop_pct": 8.0},
             [
-                {"config": {"history_length": 2, "stop_pct": 8.0}, "metric": 10.0},
-                {"config": {"history_length": 1, "stop_pct": 12.0}, "metric": 5.0},
+                {"config": {"history_length": 2, "stop_pct": 8.0}, "metric": 10.0, "objective_details": {"_objective_max_drawdown_pct": 3.0}},
+                {"config": {"history_length": 1, "stop_pct": 12.0}, "metric": 5.0, "objective_details": {"_objective_max_drawdown_pct": 4.0}},
             ],
         )
 
@@ -112,7 +118,9 @@ def test_hpo_stage_writes_full_trial_and_candidate_summaries(monkeypatch, tmp_pa
     assert result["summary"]["hpo.trials_total"] == 2
     assert result["summary"]["hpo.best_metric"] == 10.0
     assert len(trials) == 2
+    assert "objective_details" in trials.columns
     assert len(candidates) == 2
     assert captured["return_trial_summaries"] is True
     assert captured["algorithm_param_keys"] == ["history_length"]
     assert captured["portfolio_param_keys"] == ["stop_pct"]
+    assert captured["base_backtest_config"]["objective"]["metric"] == "composite_v1"

@@ -12,6 +12,21 @@ from algo_crucible.config import resolve_configs
 from algo_crucible.gates import evaluate_regime_aware_gates, gate_summary_metrics
 from algo_crucible.hpo import run_hpo_search
 from algo_crucible.jobs import CrucibleJob, RayJobRunner
+from algo_crucible.plateau import (
+    build_plateau_neighbors,
+    distance_decay_svg,
+    load_plateau_seeds,
+    plateau_metrics,
+    seed_summary_rows,
+    summarize_plateaus,
+)
+from algo_crucible.perturbations import (
+    apply_scenario,
+    build_perturbation_scenarios,
+    load_perturbation_candidates,
+    perturbation_metrics,
+    summarize_perturbations,
+)
 from algo_crucible.scoring import distribution_stats, distribution_svg, overall_scorecard, prefixed_numeric_metrics, regime_scorecard, rows_to_csv
 from algo_crucible.state_store import create_state_store
 from algo_crucible.windows import data_range_from_frame, generate_walk_forward_windows, windows_to_rows
@@ -86,6 +101,8 @@ class CrucibleOrchestrator:
     def run_walk_forward_oos(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_03_summary.json") and not rerun:
+            return run
         candidate = build_candidate(cfg)
         dp, _, _, _ = build_components(cfg.workload, candidate)
         dp.load_data()
@@ -170,7 +187,7 @@ class CrucibleOrchestrator:
         if summary["profitable_windows_pct"] is not None:
             metrics["walk_forward_oos.profitable_windows_pct"] = summary["profitable_windows_pct"]
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
-            "status": "complete",
+            "status": "running",
             "summary": summary,
             "metrics": metrics,
             "artifacts": artifacts,
@@ -182,7 +199,7 @@ class CrucibleOrchestrator:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
         existing = self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/hpo_stage_summary.json")
-        if existing and run.get("status") == "complete" and not rerun:
+        if existing and not rerun:
             return run
 
         hpo = run_hpo_search(cfg)
@@ -210,7 +227,7 @@ class CrucibleOrchestrator:
             "hpo_candidate_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/hpo_candidate_summary.csv", rows_to_csv(candidate_rows)),
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
-            "status": "complete",
+            "status": "running",
             "summary": summary,
             "metrics": {key: value for key, value in hpo["metrics"].items() if isinstance(value, (int, float)) and value is not None},
             "artifacts": artifacts,
@@ -221,6 +238,8 @@ class CrucibleOrchestrator:
     def run_regime_gate_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_05_summary.json") and not rerun:
+            return run
         run_dir = Path(run["run_dir"])
         oos_path = run_dir / "summaries" / "oos_summary.csv"
         regime_path = run_dir / "summaries" / "validation_regime_summary.csv"
@@ -254,12 +273,223 @@ class CrucibleOrchestrator:
             ),
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
-            "status": "complete",
+            "status": "running",
             "summary": summary,
             "metrics": metrics,
             "artifacts": artifacts,
         })
         logger.info(f"Completed regime gate stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_plateau_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_06_summary.json") and not rerun:
+            return run
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting plateau stage for {cfg.crucible_run_id}")
+        space = cfg.workload.get("search_space", {}).get("space") or cfg.platform.get("hpo", {}).get("space", {})
+        seeds = load_plateau_seeds(run_dir, cfg, cfg.platform)
+        neighbors = build_plateau_neighbors(seeds, cfg, cfg.platform)
+        logger.info(
+            f"Prepared plateau stage run_id={cfg.crucible_run_id} "
+            f"seeds={len(seeds)} neighbors={len(neighbors)}"
+        )
+
+        dp, _, _, _ = build_components(cfg.workload, build_candidate(cfg))
+        dp.load_data()
+        data_start, data_end = data_range_from_frame(dp.data)
+        wf_cfg = cfg.platform.get("walk_forward", {})
+        windows = generate_walk_forward_windows(
+            data_start=data_start,
+            data_end=data_end,
+            optimization_window_days=int(wf_cfg.get("optimization_window_days", 30)),
+            validation_window_days=int(wf_cfg.get("validation_window_days", 10)),
+            embargo_days=int(wf_cfg.get("embargo_days", 0)),
+            step_days=wf_cfg.get("step_days"),
+            min_windows=int(wf_cfg.get("min_windows", 1)),
+        )
+        window_rows = windows_to_rows(windows)
+        logger.info(
+            f"Plateau validation windows run_id={cfg.crucible_run_id} "
+            f"windows={len(window_rows)} jobs={len(neighbors) * len(window_rows)}"
+        )
+        jobs = [
+            CrucibleJob("06_plateau", "plateau_validation_backtest", {
+                "crucible_run_id": cfg.crucible_run_id,
+                "seed_id": neighbor["seed_id"],
+                "neighbor_id": neighbor["neighbor_id"],
+                "candidate": neighbor["candidate"].to_dict(),
+                "window": window,
+                "workload": cfg.workload,
+            })
+            for neighbor in neighbors
+            for window in window_rows
+        ]
+        ray_cfg = cfg.platform.get("ray", {})
+        runner = RayJobRunner(
+            use_ray=bool(ray_cfg.get("enabled", True) if use_ray is None else use_ray),
+            max_concurrent_jobs=ray_cfg.get("max_concurrent_trials"),
+        )
+        batch = runner.run_jobs(
+            run_id=cfg.crucible_run_id,
+            jobs=jobs,
+            worker=run_validation_backtest,
+            state_store=self.state_store,
+            rerun_failed_jobs=bool(cfg.platform.get("resume", {}).get("rerun_failed_jobs", True)),
+        )
+        scored = summarize_plateaus(seeds=seeds, neighbors=neighbors, job_results=batch.results, platform=cfg.platform)
+        seed_rows = seed_summary_rows(seeds, space)
+        neighbor_rows = scored["neighbor_rows"]
+        plateau_rows = scored["summary_rows"]
+        metrics = plateau_metrics(plateau_rows, batch.jobs_total, batch.jobs_complete, batch.jobs_failed)
+        gate_value = _pct_threshold(cfg.platform.get("gates", {}).get("generalist", {}).get("min_median_oos_return", 0.0))
+        artifact_index = {}
+        chart_artifacts = {}
+        for seed in seeds:
+            rows = [row for row in neighbor_rows if row["seed_id"] == seed["seed_id"]]
+            path = f"plots/plateau_distance_decay_{seed['seed_id']}.svg"
+            chart_artifacts[seed["seed_id"]] = self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                path,
+                distance_decay_svg(seed["seed_id"], rows, gate_value),
+            )
+            artifact_index[seed["seed_id"]] = {
+                "distance_decay": path,
+                "gate_metric": "median_oos_return",
+                "gate_value": gate_value,
+                "detail_run_ids": [],
+            }
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "seed_count": len(seeds),
+            "neighbor_count": len(neighbors),
+            "accepted_plateaus": int(metrics["plateau.accepted_plateaus"]),
+            "rejected_peaks": int(metrics["plateau.rejected_peaks"]),
+        }
+        artifacts = {
+            "plateau_seed_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/plateau_seed_summary.csv", rows_to_csv(seed_rows)),
+            "plateau_neighbor_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/plateau_neighbor_summary.csv", rows_to_csv(neighbor_rows)),
+            "plateau_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/plateau_summary.csv", rows_to_csv(plateau_rows)),
+            "plateau_artifact_index": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/plateau_artifact_index.json", artifact_index),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_06_summary.json", summary),
+            **chart_artifacts,
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "running",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        for row in plateau_rows:
+            logger.info(
+                f"Plateau decision run_id={cfg.crucible_run_id} seed_id={row.get('seed_id')} "
+                f"candidate_id={row.get('candidate_id')} accepted={row.get('accepted')} "
+                f"pass_rate={row.get('neighbor_pass_rate')} reason={row.get('failure_reason')}"
+            )
+        logger.info(f"Completed plateau stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_perturbation_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_07_summary.json") and not rerun:
+            return run
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting perturbation stage for {cfg.crucible_run_id}")
+        candidates = load_perturbation_candidates(run_dir, cfg)
+        scenarios = build_perturbation_scenarios(cfg.platform)
+        logger.info(
+            f"Prepared perturbation stage run_id={cfg.crucible_run_id} "
+            f"candidates={len(candidates)} scenarios={len(scenarios)}"
+        )
+
+        dp, _, _, _ = build_components(cfg.workload, build_candidate(cfg))
+        dp.load_data()
+        data_start, data_end = data_range_from_frame(dp.data)
+        wf_cfg = cfg.platform.get("walk_forward", {})
+        windows = windows_to_rows(generate_walk_forward_windows(
+            data_start=data_start,
+            data_end=data_end,
+            optimization_window_days=int(wf_cfg.get("optimization_window_days", 30)),
+            validation_window_days=int(wf_cfg.get("validation_window_days", 10)),
+            embargo_days=int(wf_cfg.get("embargo_days", 0)),
+            step_days=wf_cfg.get("step_days"),
+            min_windows=int(wf_cfg.get("min_windows", 1)),
+        ))
+        jobs = []
+        scenario_rows = []
+        for candidate in candidates:
+            for scenario in scenarios:
+                workload, perturbed = apply_scenario(cfg, candidate["candidate"], scenario)
+                scenario_rows.append({
+                    "candidate_id": candidate["candidate"].candidate_id,
+                    "scenario_id": scenario["scenario_id"],
+                    "scenario_name": scenario["name"],
+                    "required": scenario["required"],
+                    "perturbed_candidate_id": perturbed.candidate_id,
+                })
+                for window in windows:
+                    jobs.append(CrucibleJob("07_perturbation", "scenario_validation_backtest", {
+                        "crucible_run_id": cfg.crucible_run_id,
+                        "scenario_id": scenario["scenario_id"],
+                        "source_candidate_id": candidate["candidate"].candidate_id,
+                        "candidate": perturbed.to_dict(),
+                        "window": window,
+                        "workload": workload,
+                    }))
+        logger.info(
+            f"Perturbation validation windows run_id={cfg.crucible_run_id} "
+            f"windows={len(windows)} jobs={len(jobs)}"
+        )
+
+        ray_cfg = cfg.platform.get("ray", {})
+        runner = RayJobRunner(
+            use_ray=bool(ray_cfg.get("enabled", True) if use_ray is None else use_ray),
+            max_concurrent_jobs=ray_cfg.get("max_concurrent_trials"),
+        )
+        batch = runner.run_jobs(
+            run_id=cfg.crucible_run_id,
+            jobs=jobs,
+            worker=run_validation_backtest,
+            state_store=self.state_store,
+            rerun_failed_jobs=bool(cfg.platform.get("resume", {}).get("rerun_failed_jobs", True)),
+        )
+        scored = summarize_perturbations(
+            candidates=candidates,
+            scenarios=scenarios,
+            job_results=batch.results,
+            platform=cfg.platform,
+        )
+        metrics = perturbation_metrics(scored["summary_rows"], batch.jobs_total, batch.jobs_complete, batch.jobs_failed)
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_count": len(candidates),
+            "scenario_count": len(scenarios),
+            "accepted_candidates": int(metrics["perturbation.accepted_candidates"]),
+            "rejected_candidates": int(metrics["perturbation.rejected_candidates"]),
+        }
+        artifacts = {
+            "perturbation_scenarios": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/perturbation_scenarios.csv", rows_to_csv(scenario_rows)),
+            "perturbation_scenario_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/perturbation_scenario_summary.csv", rows_to_csv(scored["scenario_rows"])),
+            "perturbation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/perturbation_summary.csv", rows_to_csv(scored["summary_rows"])),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_07_summary.json", summary),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "running",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        for row in scored["summary_rows"]:
+            logger.info(
+                f"Perturbation decision run_id={cfg.crucible_run_id} "
+                f"candidate_id={row.get('candidate_id')} accepted={row.get('accepted')} "
+                f"pass_rate={row.get('scenario_pass_rate')} reason={row.get('failure_reason')}"
+            )
+        logger.info(f"Completed perturbation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
 
@@ -293,3 +523,8 @@ def _pct(flags: list[bool]) -> float | None:
     if not flags:
         return None
     return 100.0 * sum(1 for flag in flags if flag) / len(flags)
+
+
+def _pct_threshold(value) -> float:
+    value = float(value)
+    return value * 100.0 if abs(value) <= 1.0 else value

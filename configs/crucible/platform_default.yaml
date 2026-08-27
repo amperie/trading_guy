@@ -28,6 +28,21 @@ state_store:
     - mongodb
     - composite
 
+hpo:
+  objective:
+    metric: composite_v1
+    weights:
+      annualized_return: 1.0
+      max_drawdown_pct: -1.5
+      volatility: -0.25
+      sortino_ratio: 5.0
+      calmar_ratio: 2.0
+    gates:
+      min_trades: 0
+      max_drawdown_pct: 25
+    low_trade_penalty: 1000
+    drawdown_gate_penalty: 100
+
 gates:
   generalist:
     min_trades: 0
@@ -40,3 +55,27 @@ gates:
     min_regime_median_oos_return: 0.0
     min_regime_profitable_windows_pct: 0.60
     max_regime_drawdown: 0.20
+
+plateau:
+  max_seeds: 5
+  min_seed_distance: 0.15
+  neighborhood_radius_pct: 0.10
+  max_neighbors_per_seed: 25
+  min_neighbor_trials: 3
+  min_neighbor_pass_rate: 0.60
+  max_peak_to_median_degradation: 0.50
+
+perturbations:
+  max_scenarios: 20
+  max_required_failures: 0
+  min_scenario_pass_rate: 0.80
+  scenarios:
+    - name: baseline
+      required: true
+      patch: {}
+    - name: cost_slippage_2x
+      required: true
+      portfolio_param_multipliers:
+        tx_cost: 2.0
+        transaction_cost: 2.0
+        slippage_bps: 2.0
