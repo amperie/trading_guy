@@ -220,6 +220,8 @@ data/*_5min.csv
 data/dr_signals_*.csv
 data/ml/*_ml_*.csv
 data/ml/dataset.csv
+data/alpaca_archive/
+data/alpaca_archive_backup/
 
 # Claude Code temporary files
 tmpclaude-*

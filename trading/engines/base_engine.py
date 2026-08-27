@@ -295,7 +295,15 @@ class BaseEngine(ABC):
     def _get_indicator_snapshot_for_persistence(self, tick: list[PriceData]) -> dict | None:
         if self.al is None:
             return None
-        return self.al.get_indicator_snapshot(tick)
+        indicator_snapshot = self.al.get_indicator_snapshot(tick)
+        regime_snapshot = None
+        if hasattr(self.al, "get_regime_snapshot"):
+            regime_snapshot = self.al.get_regime_snapshot()
+        if regime_snapshot is None:
+            return indicator_snapshot
+        if indicator_snapshot is None:
+            return {"market_regime": regime_snapshot}
+        return {**indicator_snapshot, "market_regime": regime_snapshot}
 
     def _decorate_persisted_signals(
         self,

@@ -110,6 +110,8 @@ class Algorithm(ABC):
         "price_history",
         "price_data_history",
         "full_history",
+        "regime_detector",
+        "_regime_snapshots",
     }
 
     def __init__(self, cfg: Dict[str, Any]=None, history_length: int=0):
@@ -142,6 +144,14 @@ class Algorithm(ABC):
         self.price_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.price_data_history: Dict[str, deque] = defaultdict(lambda: deque())
         self.full_history: List[Dict[str, PriceData]] = []
+        self.regime_detector = None
+        self._regime_snapshots = {}
+
+        regime_cfg = cfg.get("market_regime", {})
+        if regime_cfg.get("enabled", False):
+            from trading.analysis.market_regime import MarketRegimeDetector
+            detector_cfg = {key: value for key, value in regime_cfg.items() if key != "enabled"}
+            self.regime_detector = MarketRegimeDetector(detector_cfg)
 
         if self.history_length > 0:
             # Initialize dequeues with maxlen for automatic size management
@@ -175,6 +185,9 @@ class Algorithm(ABC):
             # Append full history if configured to do so
         if "full_history" in self.cfg and self.cfg["full_history"] is True:
             self.full_history.append(data)
+
+        if self.regime_detector is not None:
+            self._regime_snapshots = self.regime_detector.update(data)
 
     @final
     def get_price_history(self) -> Dict[str, deque]:
@@ -313,6 +326,18 @@ class Algorithm(ABC):
         in MongoDB. Override in algorithms that want live indicator logging.
         """
         return None
+
+    def get_regime(self, symbol: str):
+        """Return the latest market-regime snapshot for a symbol, if enabled."""
+        if self.regime_detector is None:
+            return None
+        return self.regime_detector.get(symbol)
+
+    def get_regime_snapshot(self) -> dict | None:
+        """Return latest market-regime snapshots suitable for persistence."""
+        if self.regime_detector is None:
+            return None
+        return self.regime_detector.snapshot()
 
     def get_bias(self, data: list[PriceData] | None = None) -> float:
         """Return the algorithm's current directional bias on a [-1, 1] scale.
