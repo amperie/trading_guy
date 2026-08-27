@@ -12,6 +12,25 @@ class Candidate:
     algorithm_params: dict[str, Any]
     portfolio_params: dict[str, Any]
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Candidate":
+        return cls(
+            candidate_id=data["candidate_id"],
+            algorithm_class=data["algorithm_class"],
+            portfolio_class=data["portfolio_class"],
+            algorithm_params=data["algorithm_params"],
+            portfolio_params=data["portfolio_params"],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "algorithm_class": self.algorithm_class,
+            "portfolio_class": self.portfolio_class,
+            "algorithm_params": self.algorithm_params,
+            "portfolio_params": self.portfolio_params,
+        }
+
 
 @dataclass
 class CandidateResult:

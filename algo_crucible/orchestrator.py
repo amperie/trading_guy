@@ -4,10 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from algo_crucible.backtests import run_validation_backtest
 from algo_crucible.builders import build_candidate, build_components
 from algo_crucible.config import resolve_configs
+from algo_crucible.jobs import CrucibleJob, RayJobRunner
 from algo_crucible.scoring import overall_scorecard, regime_scorecard, rows_to_csv
 from algo_crucible.state_store import create_state_store
+from algo_crucible.windows import data_range_from_frame, generate_walk_forward_windows, windows_to_rows
 from trading.analysis.analysis_engine import AnalysisEngine
 from trading.engines.backtest_engine import BacktestingEngine
 from utils.logger import Logger
@@ -75,3 +78,115 @@ class CrucibleOrchestrator:
         })
         logger.info(f"Completed crucible run {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
+
+    def run_walk_forward_oos(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        candidate = build_candidate(cfg)
+        dp, _, _, _ = build_components(cfg.workload, candidate)
+        dp.load_data()
+        data_start, data_end = data_range_from_frame(dp.data)
+        wf_cfg = cfg.platform.get("walk_forward", {})
+        windows = generate_walk_forward_windows(
+            data_start=data_start,
+            data_end=data_end,
+            optimization_window_days=int(wf_cfg.get("optimization_window_days", 30)),
+            validation_window_days=int(wf_cfg.get("validation_window_days", 10)),
+            embargo_days=int(wf_cfg.get("embargo_days", 0)),
+            step_days=wf_cfg.get("step_days"),
+            min_windows=int(wf_cfg.get("min_windows", 1)),
+        )
+        window_rows = windows_to_rows(windows)
+        jobs = [
+            CrucibleJob("03_walk_forward_oos", "validation_backtest", {
+                "crucible_run_id": cfg.crucible_run_id,
+                "candidate": candidate.to_dict(),
+                "window": row,
+                "workload": cfg.workload,
+            })
+            for row in window_rows
+        ]
+        ray_cfg = cfg.platform.get("ray", {})
+        runner = RayJobRunner(
+            use_ray=bool(ray_cfg.get("enabled", True) if use_ray is None else use_ray),
+            max_concurrent_jobs=ray_cfg.get("max_concurrent_trials"),
+        )
+        batch = runner.run_jobs(
+            run_id=cfg.crucible_run_id,
+            jobs=jobs,
+            worker=run_validation_backtest,
+            state_store=self.state_store,
+            rerun_failed_jobs=bool(cfg.platform.get("resume", {}).get("rerun_failed_jobs", True)),
+        )
+        completed = [row["result"] for row in batch.results if row.get("status") == "complete"]
+        oos_rows = [_window_metric_row(result) for result in completed]
+        regime_rows = [
+            {"window_id": result["window_id"], "candidate_id": result["candidate_id"], **regime}
+            for result in completed
+            for regime in result["regime_scorecard"]
+        ]
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_id": candidate.candidate_id,
+            "window_count": len(windows),
+            "jobs_total": batch.jobs_total,
+            "jobs_complete": batch.jobs_complete,
+            "jobs_failed": batch.jobs_failed,
+            "jobs_reused": batch.jobs_reused,
+            "median_oos_return_pct": _median([row["total_return_pct"] for row in oos_rows]),
+            "profitable_windows_pct": _pct([row["total_return_pct"] > 0 for row in oos_rows]),
+        }
+        artifacts = {
+            "window_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/window_summary.csv", rows_to_csv(window_rows)),
+            "oos_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/oos_summary.csv", rows_to_csv(oos_rows)),
+            "validation_regime_summary": self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                "summaries/validation_regime_summary.csv",
+                rows_to_csv(regime_rows),
+            ),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_03_summary.json", summary),
+        }
+        metrics = {
+            "walk_forward_oos.jobs_total": batch.jobs_total,
+            "walk_forward_oos.jobs_complete": batch.jobs_complete,
+            "walk_forward_oos.jobs_failed": batch.jobs_failed,
+            "walk_forward_oos.jobs_reused": batch.jobs_reused,
+        }
+        if summary["median_oos_return_pct"] is not None:
+            metrics["walk_forward_oos.median_return_pct"] = summary["median_oos_return_pct"]
+        if summary["profitable_windows_pct"] is not None:
+            metrics["walk_forward_oos.profitable_windows_pct"] = summary["profitable_windows_pct"]
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "complete",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        logger.info(f"Completed walk-forward OOS stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+
+def _window_metric_row(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "candidate_id": result["candidate_id"],
+        "window_id": result["window_id"],
+        **result["window"],
+        **result["overall_scorecard"],
+    }
+
+
+def _median(values: list[float]) -> float | None:
+    values = sorted(value for value in values if value is not None)
+    if not values:
+        return None
+    mid = len(values) // 2
+    if len(values) % 2:
+        return float(values[mid])
+    return float((values[mid - 1] + values[mid]) / 2.0)
+
+
+def _pct(flags: list[bool]) -> float | None:
+    if not flags:
+        return None
+    return 100.0 * sum(1 for flag in flags if flag) / len(flags)
