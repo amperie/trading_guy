@@ -27,3 +27,16 @@ state_store:
     - mlflow
     - mongodb
     - composite
+
+gates:
+  generalist:
+    min_trades: 0
+    min_median_oos_return: 0.0
+    min_profitable_windows_pct: 0.50
+    max_drawdown: 0.25
+  specialist:
+    min_regime_bars: 5
+    min_regime_windows: 2
+    min_regime_median_oos_return: 0.0
+    min_regime_profitable_windows_pct: 0.60
+    max_regime_drawdown: 0.20

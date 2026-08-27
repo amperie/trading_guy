@@ -4,9 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from algo_crucible.backtests import run_validation_backtest
 from algo_crucible.builders import build_candidate, build_components
 from algo_crucible.config import resolve_configs
+from algo_crucible.gates import evaluate_regime_aware_gates, gate_summary_metrics
+from algo_crucible.hpo import run_hpo_search
 from algo_crucible.jobs import CrucibleJob, RayJobRunner
 from algo_crucible.scoring import overall_scorecard, regime_scorecard, rows_to_csv
 from algo_crucible.state_store import create_state_store
@@ -166,6 +170,90 @@ class CrucibleOrchestrator:
         logger.info(f"Completed walk-forward OOS stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    def run_hpo_stage(self, rerun: bool = False) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        existing = self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/hpo_stage_summary.json")
+        if existing and run.get("status") == "complete" and not rerun:
+            return run
+
+        hpo = run_hpo_search(cfg)
+        trial_rows = [_json_row(row) for row in hpo["trial_rows"]]
+        candidate_rows = [
+            {
+                "candidate_id": candidate.candidate_id,
+                "algorithm_class": candidate.algorithm_class,
+                "portfolio_class": candidate.portfolio_class,
+                "algorithm_params": json.dumps(candidate.algorithm_params, sort_keys=True),
+                "portfolio_params": json.dumps(candidate.portfolio_params, sort_keys=True),
+            }
+            for candidate in hpo["candidates"]
+        ]
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "best_config": hpo["best_config"],
+            **hpo["metrics"],
+        }
+        artifacts = {
+            "hpo_stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/hpo_stage_summary.json", summary),
+            "hpo_trial_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/hpo_trial_summary.csv", rows_to_csv(trial_rows)),
+            "hpo_failed_trials": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/hpo_failed_trials.csv", rows_to_csv(hpo["failed_trials"])),
+            "hpo_candidate_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/hpo_candidate_summary.csv", rows_to_csv(candidate_rows)),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "complete",
+            "summary": summary,
+            "metrics": {key: value for key, value in hpo["metrics"].items() if isinstance(value, (int, float)) and value is not None},
+            "artifacts": artifacts,
+        })
+        logger.info(f"Completed HPO stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_regime_gate_stage(self, rerun: bool = False) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        run_dir = Path(run["run_dir"])
+        oos_path = run_dir / "summaries" / "oos_summary.csv"
+        regime_path = run_dir / "summaries" / "validation_regime_summary.csv"
+        if not oos_path.exists() or not regime_path.exists():
+            raise FileNotFoundError("run_walk_forward_oos must produce OOS and regime summaries before regime gates can run")
+
+        overall_rows = pd.read_csv(oos_path).to_dict(orient="records")
+        regime_rows = pd.read_csv(regime_path).to_dict(orient="records")
+        decisions = evaluate_regime_aware_gates(overall_rows, regime_rows, cfg.platform)
+        decision_rows = [decision.to_row() for decision in decisions]
+        metrics = gate_summary_metrics(decisions)
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_count": len(decisions),
+            "passed_candidate_count": int(metrics["regime_gate.passed"]),
+            "generalist_count": int(metrics["regime_gate.generalists"]),
+            "specialist_count": int(metrics["regime_gate.specialists"]),
+            "reject_count": int(metrics["regime_gate.rejected"]),
+        }
+        artifacts = {
+            "regime_gate_summary": self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                "summaries/regime_gate_summary.csv",
+                rows_to_csv(decision_rows),
+            ),
+            "stage_summary": self.state_store.write_artifact_json(
+                cfg.crucible_run_id,
+                "summaries/stage_05_summary.json",
+                summary,
+            ),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "complete",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        logger.info(f"Completed regime gate stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
 
 def _window_metric_row(result: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -173,6 +261,13 @@ def _window_metric_row(result: dict[str, Any]) -> dict[str, Any]:
         "window_id": result["window_id"],
         **result["window"],
         **result["overall_scorecard"],
+    }
+
+
+def _json_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: json.dumps(value, sort_keys=True) if isinstance(value, (dict, list)) else value
+        for key, value in row.items()
     }
 
 

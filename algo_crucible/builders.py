@@ -26,6 +26,24 @@ def build_candidate(resolved_cfg) -> Any:
     return Candidate(f"candidate_{candidate_hash}", al_class, pf_class, al_params, pf_params)
 
 
+def build_candidate_from_params(resolved_cfg, algorithm_params: dict[str, Any], portfolio_params: dict[str, Any]) -> Any:
+    from algo_crucible.ids import hash16
+    from algo_crucible.models import Candidate
+
+    workload = resolved_cfg.workload
+    al_class = workload["algorithm"]["algorithm"]
+    pf_class = workload["portfolio"]["portfolio"]
+    candidate_hash = hash16({
+        "algorithm_class": al_class,
+        "portfolio_class": pf_class,
+        "algorithm_params": algorithm_params,
+        "portfolio_params": portfolio_params,
+        "workload_hash": resolved_cfg.workload_hash,
+        "regime": algorithm_params.get("market_regime", {}),
+    })
+    return Candidate(f"candidate_{candidate_hash}", al_class, pf_class, algorithm_params, portfolio_params)
+
+
 def build_components(workload: dict[str, Any], candidate):
     dp_cfg = copy.deepcopy(workload["data_provider"])
     om_cfg = copy.deepcopy(workload.get("order_manager", {}))

@@ -38,3 +38,12 @@ portfolio:
 fixed_assumptions:
   starting_cash: 100000
   benchmark_symbol: "SPY"
+
+search_space:
+  space:
+    stop_pct: {type: uniform, low: 10.0, high: 30.0}
+    profit_pct: {type: uniform, low: 10.0, high: 30.0}
+  algorithm_param_keys: []
+  portfolio_param_keys:
+    - stop_pct
+    - profit_pct
