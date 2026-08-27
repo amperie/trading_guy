@@ -82,6 +82,16 @@ ray:
   memory_per_job_gb: 2
   log_worker_output: false
 
+logging:
+  level: INFO
+  structured_events: true
+  log_stage_transitions: true
+  log_job_lifecycle: true
+  log_gate_decisions: true
+  log_every_n_completed_jobs: 25
+  suppress_per_bar_logs: true
+  persist_logs_to_mlflow: true
+
 budgets:
   max_total_jobs: 5000
   max_stage_jobs: 1000
@@ -556,6 +566,87 @@ Suggested kill switch rules:
 
 Kill switch breaches should be logged and included in paper-trading quality
 gate evidence.
+
+## Logging Requirements
+
+The crucible should have enough logging to debug long distributed runs without
+turning logs into per-bar noise.
+
+Required logging:
+
+- Run creation and resume decisions.
+- Config hashes and resolved run ID.
+- Data fingerprint creation and mismatch warnings.
+- Stage start, completion, failure, skip, and resume.
+- Ray job submission counts.
+- Ray job completion counts.
+- Ray job failures with job ID, stage, candidate ID, and reason.
+- Gate decisions with candidate ID, candidate type, pass/fail, and reason codes.
+- Plateau seed selection and rejection reasons.
+- Perturbation failure summaries.
+- Confirmation and promotion decisions.
+- MLflow artifact upload failures.
+- State-store read/write failures.
+
+Avoid:
+
+- Per-bar logs during backtests.
+- Full config dumps in every worker log.
+- Full metric payloads for every failed candidate.
+- Repeated unchanged progress messages.
+
+Recommended structured event shape:
+
+```json
+{
+  "event": "gate_decision",
+  "crucible_run_id": "spy_macd_switch_v1_8f31c2a91b7d4e22",
+  "stage": "03_regime_gate",
+  "candidate_id": "candidate_abc123",
+  "candidate_type": "specialist",
+  "passed": true,
+  "reason_codes": ["regime_repeatability_passed"],
+  "timestamp": "2026-08-27T12:34:56Z"
+}
+```
+
+Driver logs should focus on orchestration:
+
+- Current stage.
+- Jobs submitted.
+- Jobs completed / failed / reused.
+- ETA when available.
+- Gate summaries.
+- Next action.
+
+Worker logs should focus on one job:
+
+- Job start.
+- Input IDs and hashes.
+- Backtest or validation completion.
+- Compact metric summary.
+- Artifact/result write.
+- Failure traceback if the job fails.
+
+Progress logging should be throttled:
+
+```yaml
+logging:
+  log_every_n_completed_jobs: 25
+```
+
+The MLflow parent run should include log artifacts or links when
+`persist_logs_to_mlflow` is true:
+
+```text
+logs/driver.log
+logs/stage_02_hpo_walk_forward.log
+logs/failed_jobs/<job_id>.log
+```
+
+For large runs, only persist detailed worker logs for failed jobs and retained
+detail runs. Compact job results should carry enough summary information for
+normal inspection.
 
 ## Stage 1: Historical Regime Labeling
 
