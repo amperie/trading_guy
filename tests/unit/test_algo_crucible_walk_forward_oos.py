@@ -88,6 +88,10 @@ def test_walk_forward_oos_runs_validation_windows_and_reuses_results(tmp_path: P
     assert first["summary"]["window_count"] == 4
     assert len(oos) == 4
     assert second["summary"]["jobs_reused"] == 4
+    assert "total_return_pct_std_dev" in first["summary"]["distribution_stats"]
+    assert "walk_forward_oos.total_return_pct_std_dev" in first["metrics"]
+    assert "walk_forward_oos.max_drawdown_pct_min" in first["metrics"]
+    assert (run_dir / "charts" / "walk_forward_oos_distributions.svg").exists()
     assert not regimes.empty
     assert all(pd.to_datetime(windows["validation_start"]) >= pd.to_datetime(windows["train_end"]) + pd.Timedelta(days=3))
     assert set(oos["window_id"]) == set(windows["window_id"])

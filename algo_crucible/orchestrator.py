@@ -12,7 +12,7 @@ from algo_crucible.config import resolve_configs
 from algo_crucible.gates import evaluate_regime_aware_gates, gate_summary_metrics
 from algo_crucible.hpo import run_hpo_search
 from algo_crucible.jobs import CrucibleJob, RayJobRunner
-from algo_crucible.scoring import overall_scorecard, regime_scorecard, rows_to_csv
+from algo_crucible.scoring import distribution_stats, distribution_svg, overall_scorecard, prefixed_numeric_metrics, regime_scorecard, rows_to_csv
 from algo_crucible.state_store import create_state_store
 from algo_crucible.windows import data_range_from_frame, generate_walk_forward_windows, windows_to_rows
 from trading.analysis.analysis_engine import AnalysisEngine
@@ -129,6 +129,7 @@ class CrucibleOrchestrator:
             for result in completed
             for regime in result["regime_scorecard"]
         ]
+        distributions = distribution_stats(oos_rows)
         summary = {
             "crucible_run_id": cfg.crucible_run_id,
             "run_name": cfg.run_name,
@@ -140,6 +141,7 @@ class CrucibleOrchestrator:
             "jobs_reused": batch.jobs_reused,
             "median_oos_return_pct": _median([row["total_return_pct"] for row in oos_rows]),
             "profitable_windows_pct": _pct([row["total_return_pct"] > 0 for row in oos_rows]),
+            "distribution_stats": distributions,
         }
         artifacts = {
             "window_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/window_summary.csv", rows_to_csv(window_rows)),
@@ -149,6 +151,11 @@ class CrucibleOrchestrator:
                 "summaries/validation_regime_summary.csv",
                 rows_to_csv(regime_rows),
             ),
+            "oos_distribution_chart": self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                "charts/walk_forward_oos_distributions.svg",
+                distribution_svg(oos_rows, "Walk-forward OOS metric distributions"),
+            ),
             "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_03_summary.json", summary),
         }
         metrics = {
@@ -156,6 +163,7 @@ class CrucibleOrchestrator:
             "walk_forward_oos.jobs_complete": batch.jobs_complete,
             "walk_forward_oos.jobs_failed": batch.jobs_failed,
             "walk_forward_oos.jobs_reused": batch.jobs_reused,
+            **prefixed_numeric_metrics("walk_forward_oos", distributions),
         }
         if summary["median_oos_return_pct"] is not None:
             metrics["walk_forward_oos.median_return_pct"] = summary["median_oos_return_pct"]

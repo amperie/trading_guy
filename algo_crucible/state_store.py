@@ -232,6 +232,8 @@ class MLflowCrucibleStateStore(CrucibleStateStore):
             raise CrucibleStateError(f"Unknown crucible run id: {run_id}")
         local_path = Path(manifest["run_dir"]) / relative_path
         if not local_path.exists():
+            if not self._artifact_exists(manifest["mlflow_run_id"], relative_path):
+                return None
             try:
                 downloaded = self.client.download_artifacts(manifest["mlflow_run_id"], relative_path)
                 local_path = Path(downloaded)
@@ -290,6 +292,15 @@ class MLflowCrucibleStateStore(CrucibleStateStore):
         if uri.startswith("file:"):
             return f"http://localhost:5000/#/experiments/{self.experiment_id}/runs/{run_id}"
         return f"{uri}/#/experiments/{self.experiment_id}/runs/{run_id}"
+
+    def _artifact_exists(self, mlflow_run_id: str, relative_path: str) -> bool:
+        target = Path(relative_path).as_posix()
+        parent = str(Path(target).parent).replace("\\", "/")
+        parent = None if parent == "." else parent
+        try:
+            return any(item.path == target for item in self.client.list_artifacts(mlflow_run_id, parent))
+        except Exception:
+            return False
 
     @staticmethod
     def _write_manifest(run_dir: Path, manifest: dict[str, Any]) -> None:
