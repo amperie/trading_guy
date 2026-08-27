@@ -1,0 +1,29 @@
+crucible:
+  name: default_crucible
+  run_name: default_crucible_run
+  output_dir: scratch/crucible_runs
+
+logging:
+  level: INFO
+  structured_events: true
+  log_stage_transitions: true
+  log_job_lifecycle: true
+  log_gate_decisions: true
+  log_every_n_completed_jobs: 25
+  suppress_per_bar_logs: true
+  persist_logs_to_mlflow: true
+
+resume:
+  enabled: true
+  system_of_record: local
+  local_cache_dir: scratch/crucible_runs
+  rerun_failed_jobs: true
+  reuse_completed_jobs: true
+
+state_store:
+  backend: local
+  allow_backends:
+    - local
+    - mlflow
+    - mongodb
+    - composite

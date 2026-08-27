@@ -25,4 +25,4 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["trading*"]
+include = ["trading*", "algo_crucible*"]

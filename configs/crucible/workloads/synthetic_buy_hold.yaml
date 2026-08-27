@@ -1,0 +1,40 @@
+workload:
+  name: synthetic_buy_hold
+  run_name: synthetic_buy_hold_v1
+  description: "Tiny fixed-candidate workload for crucible smoke tests."
+
+data_provider:
+  provider: "trading.data_providers.test_data_provider.TestDataProvider"
+  path: "../data/SPY_5min.csv"
+  truncate: 200
+
+order_manager:
+  order_manager: "trading.core.om.backtesting_om.BacktestingOrderManager"
+
+algorithm:
+  algorithm: "algo_crucible.testing.BuyAndHoldAlgorithm"
+  params:
+    history_length: 2
+    market_regime:
+      enabled: true
+      trend_lookback_hours: 1
+      baseline_ma_window_hours: 1
+      volatility_lookback_hours: 1
+      volatility_percentile_window_hours: 2
+      drawdown_lookback_hours: 2
+      trend_threshold: 0.001
+      market_hours_per_day: 6.5
+      require_full_windows: false
+
+portfolio:
+  portfolio: "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio"
+  params:
+    cash: 100000
+    keep_history: true
+    symbol: "SPY"
+    stop_pct: 20.0
+    profit_pct: 20.0
+
+fixed_assumptions:
+  starting_cash: 100000
+  benchmark_symbol: "SPY"
