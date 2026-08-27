@@ -1,6 +1,0 @@
-{
-  "ar_aic_lookback_days": 7538,
-  "ar_confidence_threshold": 0.7492263612895987,
-  "ar_lag": 1846,
-  "signal_smoothing_period": 3145
-}

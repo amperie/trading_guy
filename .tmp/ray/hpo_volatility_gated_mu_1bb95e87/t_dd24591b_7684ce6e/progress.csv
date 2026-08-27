@@ -1,2 +1,0 @@
-_metric,_trial_error,timestamp,checkpoint_dir_name,done,training_iteration,trial_id,date,time_this_iter_s,time_total_s,pid,hostname,node_ip,time_since_restore,iterations_since_restore
--1000000000.0,"Unknown timeframe '1day'. Valid options: ['Minute', 'Hour', 'Day', 'Week', 'Month']",1778996714,,False,1,dd24591b,2026-05-16_22-45-14,0.4603867530822754,0.4603867530822754,73452,w11,127.0.0.1,0.4603867530822754,1

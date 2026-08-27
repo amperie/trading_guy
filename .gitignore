@@ -30,6 +30,11 @@ workspace.xml
 .venv1/
 scratch/tmp*
 
+# Project temp output
+/.tmp/
+/.tmp_reporting/
+/.pytest_tmp*/
+
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -182,7 +187,7 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
-.tmp/
+.tmp/*
 
 # Abstra
 # Abstra is an AI-powered process automation framework.
@@ -230,7 +235,6 @@ nul
 
 # Alpaca account credentials (use accounts.yaml.example as a template)
 accounts.yaml
-/.tmp/
 /output/
 /trading/promoted/
 scratch/generated*
