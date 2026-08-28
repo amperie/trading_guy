@@ -15,8 +15,9 @@ from utils.utils import merge_nested_config
 
 
 def load_perturbation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict[str, Any]]:
-    plateau_path = Path(run_dir) / "summaries" / "plateau_summary.csv"
-    hpo_path = Path(run_dir) / "summaries" / "hpo_trial_summary.csv"
+    run_dir = Path(run_dir)
+    plateau_path = _existing_path(run_dir, "stages/06_plateau/summaries/plateau_summary.csv", "summaries/plateau_summary.csv")
+    hpo_path = _existing_path(run_dir, "stages/04_hpo/summaries/hpo_trial_summary.csv", "summaries/hpo_trial_summary.csv")
     if not plateau_path.exists():
         raise FileNotFoundError("run_plateau_stage must produce plateau_summary.csv before perturbation analysis can run")
     if not hpo_path.exists():
@@ -264,3 +265,11 @@ def _num(value: Any) -> float | None:
 def _pct_threshold(value: Any) -> float:
     value = float(value)
     return value * 100.0 if abs(value) <= 1.0 else value
+
+
+def _existing_path(run_dir: Path, *relative_paths: str) -> Path:
+    for relative_path in relative_paths:
+        path = run_dir / relative_path
+        if path.exists():
+            return path
+    return run_dir / relative_paths[0]

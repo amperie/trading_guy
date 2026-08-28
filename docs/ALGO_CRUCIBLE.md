@@ -168,6 +168,17 @@ promotion:
   create_promoted_folder: false
   output_dir: trading/promoted
 
+paper_replay:
+  observed_trace_path: null
+  data_path: null
+  candidate_id: null
+  max_missing_timestamps: 0
+  max_regime_mismatches: 0
+  max_signal_mismatches: 0
+  max_order_mismatches: 0
+  max_fill_mismatches: 0
+  fill_price_tolerance_pct: 0.01
+
 mlflow:
   parent_experiment_name: "Algo Crucible"
   detail_experiment_strategy: per_crucible_run
@@ -214,6 +225,10 @@ order_manager:
 
 algorithm:
   algorithm: "trading.algorithms.spy_trend_macd_algorithm.SpyTrendMACDAlgorithm"
+  evaluation_symbols:
+    - SPY   # market/trend context
+    - UPRO  # traded instrument
+    - SPXU  # traded instrument
   params:
     spy_symbol: "SPY"
     upro_symbol: "UPRO"
@@ -291,6 +306,11 @@ Each crucible run should define:
 - Algorithm class.
 - Portfolio class.
 - Data provider config.
+- Algorithm evaluation symbols:
+  - traded symbols
+  - regime/trend context symbols
+  - benchmark or hedge symbols
+  - any other symbol needed to compute signals, gates, or replay evidence
 - Tunable algorithm parameters.
 - Tunable portfolio parameters.
 - Regime detector config.
@@ -541,6 +561,8 @@ Required guards:
 
 - Validation starts after train end plus embargo.
 - Embargo must be compatible with max lookback and warmup requirements.
+- Data-provider symbols must cover every configured algorithm evaluation
+  symbol when the provider declares a symbol list.
 - Regime labels for bar `T` cannot use data after `T`.
 - Warmup data cannot include validation bars in a way that influences training
   selection.
@@ -993,6 +1015,7 @@ algo_crucible/
     plateau.py
     perturbations.py
     confirmation.py
+    paper_replay.py
     state_store.py
 ```
 
@@ -1010,6 +1033,8 @@ Suggested responsibility split:
 - `perturbations.py`: generates scenario patches and summarizes robustness.
 - `confirmation.py`: runs untouched confirmation and writes
   JSON/YAML/Markdown promotion packets.
+- `paper_replay.py`: replays paper/live bars through the frozen candidate and
+  compares online-safe regimes, signals, intended orders, and fills.
 - `state_store.py`: defines the `CrucibleStateStore` interface plus concrete
   implementations such as `MlflowCrucibleStateStore`, future
   `MongoCrucibleStateStore`, and optional `CompositeCrucibleStateStore`.
@@ -1374,6 +1399,17 @@ Recommended MLflow structure:
 ```text
 Experiment: Algo Crucible
   Parent run: crucible/<workload>/<run_id>
+    params:
+      crucible.run_name
+      crucible.run_id
+      crucible.resolved_config_hash
+      crucible.platform_config_hash
+      crucible.workload_config_hash
+      algorithm.class
+      algorithm.evaluation_symbols
+      portfolio.class
+      data_provider.class
+      hpo.objective_metric
     metrics:
       hpo.completed_trials
       hpo.candidates_after_regime_gate
@@ -1383,19 +1419,19 @@ Experiment: Algo Crucible
       perturbation.pass_rate
       confirmation.promoted_candidates
     artifacts:
-      run_manifest.yaml
-      resolved_config.yaml
+      configs/resolved_config.yaml
       stages/...
-      promotion_packet.*
-      summaries/...
-    nested runs:
-      stage/02_hpo_walk_forward
-      stage/04_plateau
-      job/<job_id>
 ```
 
-The parent run is the canonical index. Nested runs are useful for UI filtering
-and metrics, but artifacts under the parent run should be sufficient to resume.
+The parent run is the canonical index. Every stage appends artifacts under its
+own `stages/NN_stage_name/` prefix so the MLflow UI stays navigable and resume
+logic can find deterministic checkpoints.
+
+HPO and other mass-trial stages should not create one MLflow run per trial by
+default. They should log compact CSV summaries under the parent run, such as
+`stages/04_hpo/summaries/hpo_trial_summary.csv`, with tuned parameters, objective
+metrics, candidate IDs, and failure reasons. Full detail runs are optional and
+controlled by the detail-run policy.
 
 Do not rely on MLflow params for mutable state. Params are best treated as
 immutable run descriptors. Use tags for small mutable status fields and artifacts
@@ -1480,23 +1516,48 @@ confirmation.jobs_total
 confirmation.jobs_complete
 confirmation.jobs_failed
 confirmation.promoted_candidates
+
+paper_replay.rows_observed
+paper_replay.rows_replayed
+paper_replay.mismatches_total
+paper_replay.timestamp_missing
+paper_replay.regime_mismatches
+paper_replay.signal_mismatches
+paper_replay.order_mismatches
+paper_replay.fill_mismatches
+paper_replay.passed
 ```
 
 Recommended parent artifacts:
 
 ```text
-summaries/stage_summary.json
-summaries/candidate_summary.csv
-summaries/regime_summary.csv
-summaries/plateau_summary.csv
-summaries/plateau_seed_summary.csv
-summaries/plateau_neighbor_summary.csv
-summaries/plateau_artifact_index.json
-summaries/perturbation_summary.csv
-summaries/detail_run_links.json
-promotion_packet.json
-promotion_packet.yaml
-promotion_packet.md
+configs/resolved_config.yaml
+stages/01_single_candidate/summaries/stage_summary.json
+stages/01_single_candidate/summaries/candidate_summary.csv
+stages/01_single_candidate/summaries/regime_summary.csv
+stages/03_walk_forward_oos/summaries/window_summary.csv
+stages/03_walk_forward_oos/summaries/oos_summary.csv
+stages/03_walk_forward_oos/summaries/validation_regime_summary.csv
+stages/03_walk_forward_oos/charts/walk_forward_oos_distributions.svg
+stages/04_hpo/summaries/stage_summary.json
+stages/04_hpo/summaries/hpo_trial_summary.csv
+stages/04_hpo/summaries/hpo_failed_trials.csv
+stages/04_hpo/summaries/hpo_candidate_summary.csv
+stages/05_regime_gate/summaries/regime_gate_summary.csv
+stages/06_plateau/summaries/plateau_summary.csv
+stages/06_plateau/summaries/plateau_seed_summary.csv
+stages/06_plateau/summaries/plateau_neighbor_summary.csv
+stages/06_plateau/summaries/plateau_artifact_index.json
+stages/07_perturbation/summaries/perturbation_summary.csv
+stages/07_perturbation/summaries/perturbation_scenarios.csv
+stages/07_perturbation/summaries/perturbation_scenario_summary.csv
+stages/08_confirmation/summaries/confirmation_summary.csv
+stages/08_confirmation/frozen_candidates/<candidate_id>.json
+stages/08_confirmation/promotion/promotion_packet.json
+stages/08_confirmation/promotion/promotion_packet.yaml
+stages/08_confirmation/promotion/promotion_packet.md
+stages/09_paper_replay/summaries/paper_replay_trace.csv
+stages/09_paper_replay/summaries/paper_replay_mismatches.csv
 ```
 
 Keep these summaries compact. The parent run should contain enough data to
@@ -1629,10 +1690,10 @@ plateau.best_worst_quartile_return
 The parent run should also store plateau summary tables:
 
 ```text
-summaries/plateau_seed_summary.csv
-summaries/plateau_neighbor_summary.csv
-summaries/plateau_summary.csv
-summaries/plateau_artifact_index.json
+stages/06_plateau/summaries/plateau_seed_summary.csv
+stages/06_plateau/summaries/plateau_neighbor_summary.csv
+stages/06_plateau/summaries/plateau_summary.csv
+stages/06_plateau/summaries/plateau_artifact_index.json
 ```
 
 `plateau_seed_summary.csv` should have one row per selected peak:
@@ -1735,10 +1796,10 @@ The `plateau_artifact_index.json` file should map seeds to artifacts:
   "seed_003": {
     "summary_row": 3,
     "heatmaps": [
-      "plots/plateau_heatmap_seed_003_stop_pct_profit_pct.html"
+      "stages/06_plateau/plots/plateau_heatmap_seed_003_stop_pct_profit_pct.html"
     ],
-    "parallel_coordinates": "plots/plateau_parallel_coordinates_seed_003.html",
-    "distance_decay": "plots/plateau_distance_decay_seed_003.png",
+    "parallel_coordinates": "stages/06_plateau/plots/plateau_parallel_coordinates_seed_003.html",
+    "distance_decay": "stages/06_plateau/plots/plateau_distance_decay_seed_003.png",
     "detail_run_ids": ["..."]
   }
 }
@@ -2027,6 +2088,19 @@ Required implementation:
 - Compare intended orders.
 - Compare fills against tolerance.
 - Record paper quality gate result.
+
+Implemented module:
+
+- `algo_crucible.paper_replay.load_frozen_candidate()` loads only tuning-locked
+  confirmation candidates.
+- `algo_crucible.paper_replay.replay_trace()` rebuilds the workload from the
+  frozen candidate and records deterministic bar-level regimes, signals,
+  intended orders, and filled-order deltas.
+- `algo_crucible.paper_replay.compare_traces()` compares the replay trace to the
+  observed paper/live trace and returns structured mismatch counts plus
+  `paper_replay_mismatch` failure evidence.
+- `CrucibleOrchestrator.run_paper_replay_stage()` writes replay and mismatch CSV
+  artifacts and updates the parent MLflow/state-store run with summary metrics.
 
 Quality gates:
 

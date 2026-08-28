@@ -13,6 +13,8 @@ order_manager:
 
 algorithm:
   algorithm: "algo_crucible.testing.BuyAndHoldAlgorithm"
+  evaluation_symbols:
+    - SPY
   params:
     history_length: 2
     market_regime:

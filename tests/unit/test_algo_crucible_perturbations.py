@@ -58,6 +58,7 @@ def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
         "algorithm": {
             "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
             "params": {"history_length": 1, "market_regime": {"enabled": True, "require_full_windows": False}},
         },
         "portfolio": {
@@ -121,8 +122,9 @@ def test_perturbation_stage_rejects_candidate_that_fails_cost_scenario(monkeypat
     monkeypatch.setattr(orchestrator_module, "run_validation_backtest", fake_validation)
     result = CrucibleOrchestrator(platform_path, workload_path).run_perturbation_stage(rerun=True, use_ray=False)
     run_dir = Path(result["run_dir"])
-    summary = pd.read_csv(run_dir / "summaries" / "perturbation_summary.csv")
-    scenarios = pd.read_csv(run_dir / "summaries" / "perturbation_scenario_summary.csv")
+    stage_dir = run_dir / "stages" / "07_perturbation"
+    summary = pd.read_csv(stage_dir / "summaries" / "perturbation_summary.csv")
+    scenarios = pd.read_csv(stage_dir / "summaries" / "perturbation_scenario_summary.csv")
 
     assert summary.iloc[0]["candidate_id"] == candidate.candidate_id
     assert summary.iloc[0]["accepted"] == False

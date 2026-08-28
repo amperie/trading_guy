@@ -20,7 +20,7 @@ def run_validation_backtest(payload: dict[str, Any]) -> dict[str, Any]:
 
     dp, al, om, pf = build_components(workload, candidate)
     ticks = list(dp.iterate())
-    engine = BacktestingEngine({"status_line_enabled": False}, dp, al, om, pf)
+    engine = BacktestingEngine({"status_line_enabled": False, "state_store": {"enabled": False}}, dp, al, om, pf)
     engine.run()
 
     metrics = overall_scorecard(AnalysisEngine(pf, om).calculate_metrics())

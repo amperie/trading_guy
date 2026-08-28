@@ -36,14 +36,27 @@ def test_mlflow_state_store_logs_parent_run_and_artifacts(tmp_path: Path):
 
     client = MlflowClient(tracking_uri=(tmp_path / "mlruns").as_uri())
     run = client.get_run(result["mlflow_run_id"])
-    artifacts = {item.path for item in client.list_artifacts(result["mlflow_run_id"], "summaries")}
+    artifacts = _artifact_paths(client, result["mlflow_run_id"])
 
     assert result["status"] == "complete"
     assert run.data.tags["crucible.run_id"] == result["crucible_run_id"]
     assert run.data.tags["crucible.status"] == "complete"
+    assert run.data.params["algorithm.evaluation_symbols"] == "SPY"
+    assert run.data.params["data_provider.class"] == "trading.data_providers.test_data_provider.TestDataProvider"
     assert "milestone1.total_return_pct" in run.data.metrics
-    assert "summaries/candidate_summary.csv" in artifacts
-    assert "summaries/regime_summary.csv" in artifacts
+    assert "configs/resolved_config.yaml" in artifacts
+    assert "stages/01_single_candidate/summaries/candidate_summary.csv" in artifacts
+    assert "stages/01_single_candidate/summaries/regime_summary.csv" in artifacts
+
+
+def _artifact_paths(client: MlflowClient, run_id: str, path: str | None = None) -> set[str]:
+    paths = set()
+    for item in client.list_artifacts(run_id, path):
+        if item.is_dir:
+            paths.update(_artifact_paths(client, run_id, item.path))
+        else:
+            paths.add(item.path)
+    return paths
 
 
 def test_mlflow_state_store_refuses_completed_duplicate(tmp_path: Path):

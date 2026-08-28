@@ -36,6 +36,7 @@ def resolve_configs(platform_path: str | Path, workload_path: str | Path) -> Res
 def resolve_config_dicts(platform: dict[str, Any], workload: dict[str, Any]) -> ResolvedCrucibleConfig:
     platform = copy.deepcopy(platform)
     workload = copy.deepcopy(workload)
+    _normalize_evaluation_symbols(workload)
     run_name = (
         workload.get("workload", {}).get("run_name")
         or platform.get("crucible", {}).get("run_name")
@@ -69,3 +70,33 @@ def resolve_config_dicts(platform: dict[str, Any], workload: dict[str, Any]) -> 
         run_name=run_name,
         crucible_run_id=crucible_run_id,
     )
+
+
+def _normalize_evaluation_symbols(workload: dict[str, Any]) -> None:
+    algorithm = workload.get("algorithm", {})
+    symbols = _symbols(
+        algorithm.get("evaluation_symbols")
+        or algorithm.get("required_symbols")
+        or algorithm.get("input_symbols")
+    )
+    if not symbols:
+        raise ValueError("algorithm.evaluation_symbols is required")
+    algorithm["evaluation_symbols"] = symbols
+    workload.setdefault("fixed_assumptions", {})["evaluation_symbols"] = symbols
+    data_symbols = _symbols(
+        workload.get("data_provider", {}).get("symbols")
+        or workload.get("data_provider", {}).get("symbols_to_subscribe")
+    )
+    missing = sorted(set(symbols) - set(data_symbols)) if data_symbols else []
+    if missing:
+        raise ValueError(f"data_provider.symbols missing algorithm evaluation symbols: {missing}")
+
+
+def _symbols(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw = [value]
+    else:
+        raw = list(value)
+    return sorted({str(symbol).strip().upper() for symbol in raw if str(symbol).strip()})

@@ -52,6 +52,7 @@ def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
         "algorithm": {
             "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
             "params": {"history_length": 1, "market_regime": {"enabled": True, "require_full_windows": False}},
         },
         "portfolio": {
@@ -114,7 +115,8 @@ def test_plateau_stage_rejects_spike_and_accepts_broad_plateau(monkeypatch, tmp_
     monkeypatch.setattr(orchestrator_module, "run_validation_backtest", fake_validation)
     result = CrucibleOrchestrator(platform_path, workload_path).run_plateau_stage(rerun=True, use_ray=False)
     run_dir = Path(result["run_dir"])
-    summary = pd.read_csv(run_dir / "summaries" / "plateau_summary.csv")
+    stage_dir = run_dir / "stages" / "06_plateau"
+    summary = pd.read_csv(stage_dir / "summaries" / "plateau_summary.csv")
     accepted = summary[summary["accepted"] == True]
     rejected = summary[summary["accepted"] == False]
 
@@ -122,11 +124,11 @@ def test_plateau_stage_rejects_spike_and_accepts_broad_plateau(monkeypatch, tmp_
     assert len(accepted) == 1
     assert len(rejected) == 1
     assert "plateau_pass_rate_too_low" in rejected.iloc[0]["failure_reason"]
-    assert (run_dir / "summaries" / "plateau_seed_summary.csv").exists()
-    assert (run_dir / "summaries" / "plateau_neighbor_summary.csv").exists()
-    assert (run_dir / "summaries" / "plateau_artifact_index.json").exists()
-    assert (run_dir / "plots" / "plateau_distance_decay_seed_001.svg").exists()
-    assert "gate" in (run_dir / "plots" / "plateau_distance_decay_seed_001.svg").read_text(encoding="utf-8")
+    assert (stage_dir / "summaries" / "plateau_seed_summary.csv").exists()
+    assert (stage_dir / "summaries" / "plateau_neighbor_summary.csv").exists()
+    assert (stage_dir / "summaries" / "plateau_artifact_index.json").exists()
+    assert (stage_dir / "plots" / "plateau_distance_decay_seed_001.svg").exists()
+    assert "gate" in (stage_dir / "plots" / "plateau_distance_decay_seed_001.svg").read_text(encoding="utf-8")
     assert result["metrics"]["plateau.accepted_plateaus"] == 1.0
 
 

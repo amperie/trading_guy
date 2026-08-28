@@ -40,6 +40,7 @@ def _configs(tmp_path: Path, data_path: Path, run_name: str = "tiny_v1") -> tupl
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
         "algorithm": {
             "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
             "params": {
                 "history_length": 2,
                 "market_regime": {
@@ -76,7 +77,7 @@ def test_run_and_candidate_ids_are_deterministic():
     platform = {"crucible": {"run_name": "same"}}
     workload = {
         "workload": {"run_name": "same"},
-        "algorithm": {"algorithm": "a.A", "params": {"x": 1}},
+        "algorithm": {"algorithm": "a.A", "evaluation_symbols": ["SPY"], "params": {"x": 1}},
         "portfolio": {"portfolio": "p.P", "params": {"y": 2}},
     }
     first = resolve_config_dicts(platform, workload)
@@ -84,6 +85,47 @@ def test_run_and_candidate_ids_are_deterministic():
 
     assert first.crucible_run_id == second.crucible_run_id
     assert first.resolved_config_hash == second.resolved_config_hash
+
+
+def test_algorithm_evaluation_symbols_are_normalized_into_resolved_config():
+    resolved = resolve_config_dicts(
+        {"crucible": {"run_name": "symbols_v1"}},
+        {
+            "workload": {"run_name": "symbols_v1"},
+            "data_provider": {"provider": "p.Provider", "symbols": ["SPY", "QQQ"]},
+            "algorithm": {"algorithm": "a.A", "evaluation_symbols": ["qqq", "SPY", "spy"], "params": {}},
+            "portfolio": {"portfolio": "p.P", "params": {"symbol": "SPY"}},
+        },
+    )
+
+    assert resolved.workload["algorithm"]["evaluation_symbols"] == ["QQQ", "SPY"]
+    assert resolved.workload["fixed_assumptions"]["evaluation_symbols"] == ["QQQ", "SPY"]
+
+
+def test_data_provider_symbols_must_cover_algorithm_evaluation_symbols():
+    with pytest.raises(ValueError, match="missing algorithm evaluation symbols"):
+        resolve_config_dicts(
+            {"crucible": {"run_name": "symbols_v1"}},
+            {
+                "workload": {"run_name": "symbols_v1"},
+                "data_provider": {"provider": "p.Provider", "symbols": ["UPRO"]},
+                "algorithm": {"algorithm": "a.A", "evaluation_symbols": ["SPY", "UPRO"], "params": {}},
+                "portfolio": {"portfolio": "p.P", "params": {"symbol": "UPRO"}},
+            },
+        )
+
+
+def test_algorithm_evaluation_symbols_are_required():
+    with pytest.raises(ValueError, match="algorithm.evaluation_symbols is required"):
+        resolve_config_dicts(
+            {"crucible": {"run_name": "symbols_v1"}},
+            {
+                "workload": {"run_name": "symbols_v1"},
+                "data_provider": {"provider": "p.Provider"},
+                "algorithm": {"algorithm": "a.A", "params": {}},
+                "portfolio": {"portfolio": "p.P", "params": {"symbol": "SPY"}},
+            },
+        )
 
 
 def test_milestone1_single_candidate_outputs(tmp_path: Path):
@@ -97,9 +139,10 @@ def test_milestone1_single_candidate_outputs(tmp_path: Path):
     assert result["status"] == "complete"
     assert result["summary"]["backtest_count"] == 1
     assert (run_dir / "resolved_config.yaml").exists()
-    assert (run_dir / "summaries" / "stage_summary.json").exists()
-    assert (run_dir / "summaries" / "candidate_summary.csv").read_text(encoding="utf-8").count("\n") == 2
-    assert "regime" in (run_dir / "summaries" / "regime_summary.csv").read_text(encoding="utf-8")
+    stage_dir = run_dir / "stages" / "01_single_candidate"
+    assert (stage_dir / "summaries" / "stage_summary.json").exists()
+    assert (stage_dir / "summaries" / "candidate_summary.csv").read_text(encoding="utf-8").count("\n") == 2
+    assert "regime" in (stage_dir / "summaries" / "regime_summary.csv").read_text(encoding="utf-8")
     assert result["metrics"]["milestone1.total_trades"] >= 0
 
 

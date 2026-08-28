@@ -90,3 +90,14 @@ confirmation:
 promotion:
   create_promoted_folder: false
   output_dir: trading/promoted
+
+paper_replay:
+  observed_trace_path:
+  data_path:
+  candidate_id:
+  max_missing_timestamps: 0
+  max_regime_mismatches: 0
+  max_signal_mismatches: 0
+  max_order_mismatches: 0
+  max_fill_mismatches: 0
+  fill_price_tolerance_pct: 0.01

@@ -57,8 +57,9 @@ def test_confirmation_stage_writes_frozen_candidate_and_packets(monkeypatch, tmp
     monkeypatch.setattr("algo_crucible.orchestrator.run_validation_backtest", fake_validation)
     result = CrucibleOrchestrator(platform_path, workload_path).run_confirmation_stage(use_ray=False)
     run_dir = Path(result["run_dir"])
-    packet = json.loads((run_dir / "promotion" / "promotion_packet.json").read_text(encoding="utf-8"))
-    summary = pd.read_csv(run_dir / "summaries" / "confirmation_summary.csv")
+    stage_dir = run_dir / "stages" / "08_confirmation"
+    packet = json.loads((stage_dir / "promotion" / "promotion_packet.json").read_text(encoding="utf-8"))
+    summary = pd.read_csv(stage_dir / "summaries" / "confirmation_summary.csv")
 
     assert captured["window"]["validation_start"] == "2024-04-01"
     assert captured["window"]["validation_end"] == "2024-04-30"
@@ -68,9 +69,9 @@ def test_confirmation_stage_writes_frozen_candidate_and_packets(monkeypatch, tmp
     assert result["summary"]["paper_trading_started"] is False
     assert result["metrics"]["confirmation.promoted_candidates"] == 1.0
     assert summary.iloc[0]["candidate_id"] == candidate.candidate_id
-    assert (run_dir / "frozen_candidates" / f"{candidate.candidate_id}.json").exists()
-    assert (run_dir / "promotion" / "promotion_packet.yaml").exists()
-    assert (run_dir / "promotion" / "promotion_packet.md").exists()
+    assert (stage_dir / "frozen_candidates" / f"{candidate.candidate_id}.json").exists()
+    assert (stage_dir / "promotion" / "promotion_packet.yaml").exists()
+    assert (stage_dir / "promotion" / "promotion_packet.md").exists()
     assert packet["decision"] == "promote_to_paper"
     assert packet["paper_trading_started"] is False
     assert packet["approval_required"] is True
@@ -137,7 +138,7 @@ def test_confirmation_resume_requires_packet_artifact(monkeypatch, tmp_path: Pat
     _write_inputs(orchestrator, Path(run["run_dir"]))
     orchestrator.state_store.write_artifact_json(
         orchestrator.resolved_cfg.crucible_run_id,
-        "summaries/stage_08_summary.json",
+        "stages/08_confirmation/summaries/stage_summary.json",
         {"partial": True},
     )
 
@@ -145,7 +146,7 @@ def test_confirmation_resume_requires_packet_artifact(monkeypatch, tmp_path: Pat
     result = CrucibleOrchestrator(platform_path, workload_path).run_confirmation_stage(use_ray=False)
 
     assert result["summary"]["confirmed_candidates"] == 1
-    assert (Path(result["run_dir"]) / "promotion" / "promotion_packet.json").exists()
+    assert (Path(result["run_dir"]) / "stages" / "08_confirmation" / "promotion" / "promotion_packet.json").exists()
 
 
 def test_confirmation_handles_no_accepted_perturbation_candidates(tmp_path: Path):
@@ -159,7 +160,7 @@ def test_confirmation_handles_no_accepted_perturbation_candidates(tmp_path: Path
     (run_dir / "summaries" / "perturbation_summary.csv").write_text("", encoding="utf-8")
 
     result = CrucibleOrchestrator(platform_path, workload_path).run_confirmation_stage(use_ray=False)
-    packet = json.loads((run_dir / "promotion" / "promotion_packet.json").read_text(encoding="utf-8"))
+    packet = json.loads((run_dir / "stages" / "08_confirmation" / "promotion" / "promotion_packet.json").read_text(encoding="utf-8"))
 
     assert result["summary"]["confirmed_candidates"] == 0
     assert result["metrics"]["confirmation.candidates_total"] == 0.0
@@ -187,7 +188,11 @@ def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
         "workload": {"name": "confirmation", "run_name": "confirmation_v1"},
         "data_provider": {"provider": "trading.data_providers.test_data_provider.TestDataProvider", "path": str(data_path)},
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
-        "algorithm": {"algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm", "params": {"history_length": 1}},
+        "algorithm": {
+            "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
+            "params": {"history_length": 1},
+        },
         "portfolio": {
             "portfolio": "trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio",
             "params": {"cash": 100000, "keep_history": True, "symbol": "SPY"},

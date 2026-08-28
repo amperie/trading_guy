@@ -24,6 +24,14 @@ from algo_crucible.config import resolve_configs
 from algo_crucible.gates import evaluate_regime_aware_gates, gate_summary_metrics
 from algo_crucible.hpo import run_hpo_search
 from algo_crucible.jobs import CrucibleJob, RayJobRunner
+from algo_crucible.paper_replay import (
+    compare_traces,
+    load_frozen_candidate,
+    load_observed_trace,
+    mismatch_rows,
+    replay_trace,
+    trace_to_csv,
+)
 from algo_crucible.plateau import (
     build_plateau_neighbors,
     distance_decay_svg,
@@ -48,6 +56,15 @@ from utils.logger import Logger
 
 logger = Logger().get_logger(__name__)
 
+STAGE_01 = "stages/01_single_candidate"
+STAGE_03 = "stages/03_walk_forward_oos"
+STAGE_04 = "stages/04_hpo"
+STAGE_05 = "stages/05_regime_gate"
+STAGE_06 = "stages/06_plateau"
+STAGE_07 = "stages/07_perturbation"
+STAGE_08 = "stages/08_confirmation"
+STAGE_09 = "stages/09_paper_replay"
+
 
 class CrucibleOrchestrator:
     def __init__(self, platform_config: str | Path, workload_config: str | Path, state_store=None):
@@ -64,7 +81,7 @@ class CrucibleOrchestrator:
         candidate = build_candidate(cfg)
         dp, al, om, pf = build_components(cfg.workload, candidate)
         ticks = list(dp.iterate())
-        engine = BacktestingEngine({"status_line_enabled": False}, dp, al, om, pf)
+        engine = BacktestingEngine({"status_line_enabled": False, "state_store": {"enabled": False}}, dp, al, om, pf)
         engine.run()
 
         analysis = AnalysisEngine(pf, om)
@@ -90,10 +107,10 @@ class CrucibleOrchestrator:
             "regime_count": len(regimes),
         }
         artifacts = {
-            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_summary.json", summary),
-            "candidate_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/candidate_summary.csv", rows_to_csv([candidate_row])),
-            "regime_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/regime_summary.csv", rows_to_csv(regimes)),
-            "candidate": self.state_store.write_artifact_json(cfg.crucible_run_id, f"candidates/{candidate.candidate_id}.json", {
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_01}/summaries/stage_summary.json", summary),
+            "candidate_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_01}/summaries/candidate_summary.csv", rows_to_csv([candidate_row])),
+            "regime_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_01}/summaries/regime_summary.csv", rows_to_csv(regimes)),
+            "candidate": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_01}/candidates/{candidate.candidate_id}.json", {
                 "candidate_id": candidate.candidate_id,
                 "algorithm_class": candidate.algorithm_class,
                 "portfolio_class": candidate.portfolio_class,
@@ -113,7 +130,7 @@ class CrucibleOrchestrator:
     def run_walk_forward_oos(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
-        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_03_summary.json") and not rerun:
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_03}/summaries/stage_summary.json") and not rerun:
             return run
         candidate = build_candidate(cfg)
         dp, _, _, _ = build_components(cfg.workload, candidate)
@@ -173,19 +190,19 @@ class CrucibleOrchestrator:
             "distribution_stats": distributions,
         }
         artifacts = {
-            "window_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/window_summary.csv", rows_to_csv(window_rows)),
-            "oos_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/oos_summary.csv", rows_to_csv(oos_rows)),
+            "window_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_03}/summaries/window_summary.csv", rows_to_csv(window_rows)),
+            "oos_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_03}/summaries/oos_summary.csv", rows_to_csv(oos_rows)),
             "validation_regime_summary": self.state_store.write_artifact_text(
                 cfg.crucible_run_id,
-                "summaries/validation_regime_summary.csv",
+                f"{STAGE_03}/summaries/validation_regime_summary.csv",
                 rows_to_csv(regime_rows),
             ),
             "oos_distribution_chart": self.state_store.write_artifact_text(
                 cfg.crucible_run_id,
-                "charts/walk_forward_oos_distributions.svg",
+                f"{STAGE_03}/charts/walk_forward_oos_distributions.svg",
                 distribution_svg(oos_rows, "Walk-forward OOS metric distributions"),
             ),
-            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_03_summary.json", summary),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_03}/summaries/stage_summary.json", summary),
         }
         metrics = {
             "walk_forward_oos.jobs_total": batch.jobs_total,
@@ -210,7 +227,7 @@ class CrucibleOrchestrator:
     def run_hpo_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
-        existing = self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/hpo_stage_summary.json")
+        existing = self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_04}/summaries/stage_summary.json")
         if existing and not rerun:
             return run
 
@@ -233,10 +250,10 @@ class CrucibleOrchestrator:
             **hpo["metrics"],
         }
         artifacts = {
-            "hpo_stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/hpo_stage_summary.json", summary),
-            "hpo_trial_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/hpo_trial_summary.csv", rows_to_csv(trial_rows)),
-            "hpo_failed_trials": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/hpo_failed_trials.csv", rows_to_csv(hpo["failed_trials"])),
-            "hpo_candidate_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/hpo_candidate_summary.csv", rows_to_csv(candidate_rows)),
+            "hpo_stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_04}/summaries/stage_summary.json", summary),
+            "hpo_trial_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_04}/summaries/hpo_trial_summary.csv", rows_to_csv(trial_rows)),
+            "hpo_failed_trials": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_04}/summaries/hpo_failed_trials.csv", rows_to_csv(hpo["failed_trials"])),
+            "hpo_candidate_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_04}/summaries/hpo_candidate_summary.csv", rows_to_csv(candidate_rows)),
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
             "status": "running",
@@ -250,11 +267,11 @@ class CrucibleOrchestrator:
     def run_regime_gate_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
-        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_05_summary.json") and not rerun:
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_05}/summaries/stage_summary.json") and not rerun:
             return run
         run_dir = Path(run["run_dir"])
-        oos_path = run_dir / "summaries" / "oos_summary.csv"
-        regime_path = run_dir / "summaries" / "validation_regime_summary.csv"
+        oos_path = _existing_path(run_dir, f"{STAGE_03}/summaries/oos_summary.csv", "summaries/oos_summary.csv")
+        regime_path = _existing_path(run_dir, f"{STAGE_03}/summaries/validation_regime_summary.csv", "summaries/validation_regime_summary.csv")
         if not oos_path.exists() or not regime_path.exists():
             raise FileNotFoundError("run_walk_forward_oos must produce OOS and regime summaries before regime gates can run")
 
@@ -275,12 +292,12 @@ class CrucibleOrchestrator:
         artifacts = {
             "regime_gate_summary": self.state_store.write_artifact_text(
                 cfg.crucible_run_id,
-                "summaries/regime_gate_summary.csv",
+                f"{STAGE_05}/summaries/regime_gate_summary.csv",
                 rows_to_csv(decision_rows),
             ),
             "stage_summary": self.state_store.write_artifact_json(
                 cfg.crucible_run_id,
-                "summaries/stage_05_summary.json",
+                f"{STAGE_05}/summaries/stage_summary.json",
                 summary,
             ),
         }
@@ -296,7 +313,7 @@ class CrucibleOrchestrator:
     def run_plateau_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
-        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_06_summary.json") and not rerun:
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_06}/summaries/stage_summary.json") and not rerun:
             return run
         run_dir = Path(run["run_dir"])
         logger.info(f"Starting plateau stage for {cfg.crucible_run_id}")
@@ -360,7 +377,7 @@ class CrucibleOrchestrator:
         chart_artifacts = {}
         for seed in seeds:
             rows = [row for row in neighbor_rows if row["seed_id"] == seed["seed_id"]]
-            path = f"plots/plateau_distance_decay_{seed['seed_id']}.svg"
+            path = f"{STAGE_06}/plots/plateau_distance_decay_{seed['seed_id']}.svg"
             chart_artifacts[seed["seed_id"]] = self.state_store.write_artifact_text(
                 cfg.crucible_run_id,
                 path,
@@ -381,11 +398,11 @@ class CrucibleOrchestrator:
             "rejected_peaks": int(metrics["plateau.rejected_peaks"]),
         }
         artifacts = {
-            "plateau_seed_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/plateau_seed_summary.csv", rows_to_csv(seed_rows)),
-            "plateau_neighbor_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/plateau_neighbor_summary.csv", rows_to_csv(neighbor_rows)),
-            "plateau_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/plateau_summary.csv", rows_to_csv(plateau_rows)),
-            "plateau_artifact_index": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/plateau_artifact_index.json", artifact_index),
-            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_06_summary.json", summary),
+            "plateau_seed_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_06}/summaries/plateau_seed_summary.csv", rows_to_csv(seed_rows)),
+            "plateau_neighbor_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_06}/summaries/plateau_neighbor_summary.csv", rows_to_csv(neighbor_rows)),
+            "plateau_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_06}/summaries/plateau_summary.csv", rows_to_csv(plateau_rows)),
+            "plateau_artifact_index": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_06}/summaries/plateau_artifact_index.json", artifact_index),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_06}/summaries/stage_summary.json", summary),
             **chart_artifacts,
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
@@ -406,7 +423,7 @@ class CrucibleOrchestrator:
     def run_perturbation_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
-        if self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_07_summary.json") and not rerun:
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_07}/summaries/stage_summary.json") and not rerun:
             return run
         run_dir = Path(run["run_dir"])
         logger.info(f"Starting perturbation stage for {cfg.crucible_run_id}")
@@ -484,10 +501,10 @@ class CrucibleOrchestrator:
             "rejected_candidates": int(metrics["perturbation.rejected_candidates"]),
         }
         artifacts = {
-            "perturbation_scenarios": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/perturbation_scenarios.csv", rows_to_csv(scenario_rows)),
-            "perturbation_scenario_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/perturbation_scenario_summary.csv", rows_to_csv(scored["scenario_rows"])),
-            "perturbation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/perturbation_summary.csv", rows_to_csv(scored["summary_rows"])),
-            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_07_summary.json", summary),
+            "perturbation_scenarios": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_scenarios.csv", rows_to_csv(scenario_rows)),
+            "perturbation_scenario_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_scenario_summary.csv", rows_to_csv(scored["scenario_rows"])),
+            "perturbation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_summary.csv", rows_to_csv(scored["summary_rows"])),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_07}/summaries/stage_summary.json", summary),
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
             "status": "running",
@@ -513,8 +530,8 @@ class CrucibleOrchestrator:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
         if (
-            self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_08_summary.json")
-            and self.state_store.read_artifact_json(cfg.crucible_run_id, "promotion/promotion_packet.json")
+            self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_08}/summaries/stage_summary.json")
+            and self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_08}/promotion/promotion_packet.json")
             and not rerun
         ):
             return run
@@ -553,8 +570,8 @@ class CrucibleOrchestrator:
         confirmation_rows = summarize_confirmation(candidates, batch.results, cfg.platform)
         metrics = confirmation_metrics(confirmation_rows, batch.jobs_total, batch.jobs_complete, batch.jobs_failed)
         artifacts = {
-            "confirmation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/confirmation_summary.csv", rows_to_csv(confirmation_rows)),
-            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_08_summary.json", {
+            "confirmation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_08}/summaries/confirmation_summary.csv", rows_to_csv(confirmation_rows)),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_08}/summaries/stage_summary.json", {
                 "crucible_run_id": cfg.crucible_run_id,
                 "run_name": cfg.run_name,
                 "candidate_count": len(candidates),
@@ -565,7 +582,7 @@ class CrucibleOrchestrator:
         for item in frozen:
             artifacts[f"frozen_{item['candidate']['candidate_id']}"] = self.state_store.write_artifact_json(
                 cfg.crucible_run_id,
-                f"frozen_candidates/{item['candidate']['candidate_id']}.json",
+                f"{STAGE_08}/frozen_candidates/{item['candidate']['candidate_id']}.json",
                 item,
             )
 
@@ -577,9 +594,9 @@ class CrucibleOrchestrator:
             mlflow_run_url=run.get("mlflow_run_url"),
         )
         artifacts.update({
-            "promotion_packet_json": self.state_store.write_artifact_json(cfg.crucible_run_id, "promotion/promotion_packet.json", packet),
-            "promotion_packet_yaml": self.state_store.write_artifact_text(cfg.crucible_run_id, "promotion/promotion_packet.yaml", yaml.safe_dump(packet, sort_keys=True)),
-            "promotion_packet_md": self.state_store.write_artifact_text(cfg.crucible_run_id, "promotion/promotion_packet.md", packet_markdown(packet)),
+            "promotion_packet_json": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_08}/promotion/promotion_packet.json", packet),
+            "promotion_packet_yaml": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_08}/promotion/promotion_packet.yaml", yaml.safe_dump(packet, sort_keys=True)),
+            "promotion_packet_md": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_08}/promotion/promotion_packet.md", packet_markdown(packet)),
         })
         should_create = bool(cfg.platform.get("promotion", {}).get("create_promoted_folder", False))
         if create_promoted_folder is not None:
@@ -593,7 +610,7 @@ class CrucibleOrchestrator:
             "candidate_count": len(candidates),
             "confirmed_candidates": int(metrics["confirmation.promoted_candidates"]),
             "rejected_candidates": int(metrics["confirmation.rejected_candidates"]),
-            "promotion_packet": "promotion/promotion_packet.json",
+            "promotion_packet": f"{STAGE_08}/promotion/promotion_packet.json",
             "paper_trading_started": False,
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
@@ -609,6 +626,48 @@ class CrucibleOrchestrator:
                 f"return={row.get('total_return_pct')} reason={row.get('failure_reason')}"
             )
         logger.info(f"Completed confirmation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_paper_replay_stage(self, rerun: bool = False) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=True)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_09}/summaries/stage_summary.json") and not rerun:
+            return run
+        paper_cfg = cfg.platform.get("paper_replay", {})
+        observed_trace_path = paper_cfg.get("observed_trace_path")
+        if not observed_trace_path:
+            raise ValueError("paper_replay.observed_trace_path is required")
+
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting paper replay stage for {cfg.crucible_run_id}")
+        candidate = load_frozen_candidate(run_dir, paper_cfg.get("candidate_id"))
+        replay_rows = replay_trace(cfg, candidate, paper_cfg.get("data_path"))
+        observed_rows = load_observed_trace(observed_trace_path)
+        compared = compare_traces(replay_rows, observed_rows, cfg.platform)
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_id": candidate.candidate_id,
+            "passed": compared["passed"],
+            "failure_reason": compared["failure_reason"],
+            "mismatches_total": int(compared["metrics"]["paper_replay.mismatches_total"]),
+            "paper_trace_path": str(observed_trace_path),
+        }
+        artifacts = {
+            "paper_replay_trace": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_09}/summaries/paper_replay_trace.csv", trace_to_csv(replay_rows)),
+            "paper_replay_mismatches": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_09}/summaries/paper_replay_mismatches.csv", rows_to_csv(mismatch_rows(compared["mismatches"]))),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_09}/summaries/stage_summary.json", summary),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "paper_replay_passed" if compared["passed"] else "paper_replay_failed",
+            "summary": summary,
+            "metrics": compared["metrics"],
+            "artifacts": artifacts,
+        })
+        logger.info(
+            f"Completed paper replay stage for {cfg.crucible_run_id}: "
+            f"passed={compared['passed']} mismatches={summary['mismatches_total']}"
+        )
         return manifest
 
 
@@ -647,3 +706,11 @@ def _pct(flags: list[bool]) -> float | None:
 def _pct_threshold(value) -> float:
     value = float(value)
     return value * 100.0 if abs(value) <= 1.0 else value
+
+
+def _existing_path(run_dir: Path, *relative_paths: str) -> Path:
+    for relative_path in relative_paths:
+        path = run_dir / relative_path
+        if path.exists():
+            return path
+    return run_dir / relative_paths[0]

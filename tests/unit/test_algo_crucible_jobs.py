@@ -18,7 +18,7 @@ def _resolved(run_name: str = "jobs_v1"):
         },
         {
             "workload": {"run_name": run_name},
-            "algorithm": {"algorithm": "algo.A", "params": {}},
+            "algorithm": {"algorithm": "algo.A", "evaluation_symbols": ["SPY"], "params": {}},
             "portfolio": {"portfolio": "pf.P", "params": {}},
         },
     )

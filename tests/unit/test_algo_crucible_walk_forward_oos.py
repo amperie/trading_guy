@@ -40,6 +40,7 @@ def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
         "algorithm": {
             "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
             "params": {
                 "history_length": 1,
                 "market_regime": {
@@ -81,9 +82,10 @@ def test_walk_forward_oos_runs_validation_windows_and_reuses_results(tmp_path: P
     first = orchestrator.run_walk_forward_oos(use_ray=False)
     second = CrucibleOrchestrator(platform_path, workload_path).run_walk_forward_oos(rerun=True, use_ray=False)
     run_dir = Path(first["run_dir"])
-    windows = pd.read_csv(run_dir / "summaries" / "window_summary.csv")
-    oos = pd.read_csv(run_dir / "summaries" / "oos_summary.csv")
-    regimes = pd.read_csv(run_dir / "summaries" / "validation_regime_summary.csv")
+    stage_dir = run_dir / "stages" / "03_walk_forward_oos"
+    windows = pd.read_csv(stage_dir / "summaries" / "window_summary.csv")
+    oos = pd.read_csv(stage_dir / "summaries" / "oos_summary.csv")
+    regimes = pd.read_csv(stage_dir / "summaries" / "validation_regime_summary.csv")
 
     assert first["summary"]["window_count"] == 4
     assert len(oos) == 4
@@ -91,7 +93,7 @@ def test_walk_forward_oos_runs_validation_windows_and_reuses_results(tmp_path: P
     assert "total_return_pct_std_dev" in first["summary"]["distribution_stats"]
     assert "walk_forward_oos.total_return_pct_std_dev" in first["metrics"]
     assert "walk_forward_oos.max_drawdown_pct_min" in first["metrics"]
-    assert (run_dir / "charts" / "walk_forward_oos_distributions.svg").exists()
+    assert (stage_dir / "charts" / "walk_forward_oos_distributions.svg").exists()
     assert not regimes.empty
     assert all(pd.to_datetime(windows["validation_start"]) >= pd.to_datetime(windows["train_end"]) + pd.Timedelta(days=3))
     assert set(oos["window_id"]) == set(windows["window_id"])

@@ -18,8 +18,8 @@ from algo_crucible.models import Candidate
 
 def load_confirmation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict[str, Any]]:
     run_dir = Path(run_dir)
-    perturbation_path = run_dir / "summaries" / "perturbation_summary.csv"
-    hpo_path = run_dir / "summaries" / "hpo_trial_summary.csv"
+    perturbation_path = _existing_path(run_dir, "stages/07_perturbation/summaries/perturbation_summary.csv", "summaries/perturbation_summary.csv")
+    hpo_path = _existing_path(run_dir, "stages/04_hpo/summaries/hpo_trial_summary.csv", "summaries/hpo_trial_summary.csv")
     if not perturbation_path.exists():
         raise FileNotFoundError("run_perturbation_stage must produce perturbation_summary.csv before confirmation can run")
     if not hpo_path.exists():
@@ -263,3 +263,11 @@ def _pct_threshold(value: Any) -> float:
 
 def _slug(value: Any) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in str(value).lower()).strip("_") or "promotion"
+
+
+def _existing_path(run_dir: Path, *relative_paths: str) -> Path:
+    for relative_path in relative_paths:
+        path = run_dir / relative_path
+        if path.exists():
+            return path
+    return run_dir / relative_paths[0]

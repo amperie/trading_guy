@@ -9,6 +9,7 @@ import pytest
 
 from algo_crucible.jobs import CrucibleJob, RayJobRunner
 from algo_crucible.orchestrator import CrucibleOrchestrator
+from algo_crucible.paper_replay import load_frozen_candidate, replay_trace, trace_to_csv
 from trading.launchers.run_backtest_ray import objective_score
 from tests.unit.test_algo_crucible_milestone1 import _write_yaml
 from tests.unit.test_algo_crucible_walk_forward_oos import _write_daily_data
@@ -31,8 +32,14 @@ def test_full_local_crucible_pipeline_runs_through_perturbations(monkeypatch, tm
     plateau = CrucibleOrchestrator(platform_path, workload_path).run_plateau_stage(use_ray=False)
     perturbation = CrucibleOrchestrator(platform_path, workload_path).run_perturbation_stage(use_ray=False)
     confirmation = CrucibleOrchestrator(platform_path, workload_path).run_confirmation_stage(use_ray=False)
+    candidate = load_frozen_candidate(confirmation["run_dir"])
+    (tmp_path / "paper_trace.csv").write_text(
+        trace_to_csv(replay_trace(CrucibleOrchestrator(platform_path, workload_path).resolved_cfg, candidate, data_path)),
+        encoding="utf-8",
+    )
+    paper_replay = CrucibleOrchestrator(platform_path, workload_path).run_paper_replay_stage()
 
-    run_dir = Path(confirmation["run_dir"])
+    run_dir = Path(paper_replay["run_dir"])
     assert hpo["metrics"]["hpo.trials_complete"] == 2
     assert oos["metrics"]["walk_forward_oos.jobs_failed"] == 0
     assert gate["metrics"]["regime_gate.passed"] == 1.0
@@ -40,17 +47,20 @@ def test_full_local_crucible_pipeline_runs_through_perturbations(monkeypatch, tm
     assert perturbation["metrics"]["perturbation.accepted_candidates"] >= 1.0
     assert confirmation["metrics"]["confirmation.promoted_candidates"] >= 1.0
     assert confirmation["summary"]["paper_trading_started"] is False
+    assert paper_replay["metrics"]["paper_replay.passed"] == 1.0
     for artifact in (
-        "summaries/hpo_trial_summary.csv",
-        "summaries/oos_summary.csv",
-        "summaries/regime_gate_summary.csv",
-        "summaries/plateau_summary.csv",
-        "summaries/perturbation_summary.csv",
-        "summaries/confirmation_summary.csv",
-        "charts/walk_forward_oos_distributions.svg",
-        "promotion/promotion_packet.json",
-        "promotion/promotion_packet.yaml",
-        "promotion/promotion_packet.md",
+        "stages/04_hpo/summaries/hpo_trial_summary.csv",
+        "stages/03_walk_forward_oos/summaries/oos_summary.csv",
+        "stages/05_regime_gate/summaries/regime_gate_summary.csv",
+        "stages/06_plateau/summaries/plateau_summary.csv",
+        "stages/07_perturbation/summaries/perturbation_summary.csv",
+        "stages/08_confirmation/summaries/confirmation_summary.csv",
+        "stages/03_walk_forward_oos/charts/walk_forward_oos_distributions.svg",
+        "stages/08_confirmation/promotion/promotion_packet.json",
+        "stages/08_confirmation/promotion/promotion_packet.yaml",
+        "stages/08_confirmation/promotion/promotion_packet.md",
+        "stages/09_paper_replay/summaries/paper_replay_trace.csv",
+        "stages/09_paper_replay/summaries/paper_replay_mismatches.csv",
     ):
         assert (run_dir / artifact).exists(), artifact
     assert not (tmp_path / "promoted").exists()
@@ -101,8 +111,8 @@ def test_hpo_objective_compatibility_stage_outputs(tmp_path: Path, monkeypatch):
 
     default = CrucibleOrchestrator(no_objective_platform, no_objective_workload).run_hpo_stage()
     composite = CrucibleOrchestrator(composite_platform, composite_workload).run_hpo_stage()
-    default_trials = pd.read_csv(Path(default["run_dir"]) / "summaries" / "hpo_trial_summary.csv")
-    composite_trials = pd.read_csv(Path(composite["run_dir"]) / "summaries" / "hpo_trial_summary.csv")
+    default_trials = pd.read_csv(Path(default["run_dir"]) / "stages" / "04_hpo" / "summaries" / "hpo_trial_summary.csv")
+    composite_trials = pd.read_csv(Path(composite["run_dir"]) / "stages" / "04_hpo" / "summaries" / "hpo_trial_summary.csv")
 
     assert captured[0] is None
     assert captured[1]["metric"] == "composite_v1"
@@ -188,6 +198,7 @@ def _configs(
         },
         "confirmation": {"start_date": "2024-04-01", "end_date": "2024-04-30", "min_return_pct": 0.0},
         "promotion": {"create_promoted_folder": False, "output_dir": str(tmp_path / "promoted")},
+        "paper_replay": {"observed_trace_path": str(tmp_path / "paper_trace.csv"), "data_path": str(data_path)},
     }
     if include_objective:
         platform["hpo"]["objective"] = {
@@ -200,6 +211,7 @@ def _configs(
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
         "algorithm": {
             "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
             "params": {
                 "history_length": 1,
                 "market_regime": {

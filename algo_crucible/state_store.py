@@ -179,12 +179,8 @@ class MLflowCrucibleStateStore(CrucibleStateStore):
             tags=tags,
         ) as active:
             run_id = active.info.run_id
-            self.mlflow.log_params({
-                "crucible.run_name": resolved_cfg.run_name,
-                "crucible.run_id": resolved_cfg.crucible_run_id,
-                "crucible.resolved_config_hash": resolved_cfg.resolved_config_hash,
-            })
-            self.mlflow.log_artifact(str(run_dir / "resolved_config.yaml"))
+            self.mlflow.log_params(_run_params(resolved_cfg))
+            self.mlflow.log_artifact(str(run_dir / "resolved_config.yaml"), artifact_path="configs")
         manifest = {
             "run_name": resolved_cfg.run_name,
             "crucible_run_id": resolved_cfg.crucible_run_id,
@@ -205,8 +201,6 @@ class MLflowCrucibleStateStore(CrucibleStateStore):
         status = patch.get("status")
         if status:
             self.client.set_tag(mlflow_run_id, self.tag_status, status)
-        if "summary" in patch:
-            self.client.log_dict(mlflow_run_id, patch["summary"], "summaries/stage_summary.json")
         for key, value in (patch.get("metrics") or {}).items():
             if isinstance(value, (int, float)) and value is not None:
                 self.client.log_metric(mlflow_run_id, key, float(value))
@@ -326,3 +320,26 @@ def create_state_store(platform: dict[str, Any]) -> CrucibleStateStore:
 
 def _escape_mlflow_filter(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _run_params(resolved_cfg) -> dict[str, Any]:
+    workload = resolved_cfg.workload
+    hpo = {**resolved_cfg.platform.get("hpo", {}), **workload.get("search_space", {})}
+    params = {
+        "crucible.run_name": resolved_cfg.run_name,
+        "crucible.run_id": resolved_cfg.crucible_run_id,
+        "crucible.resolved_config_hash": resolved_cfg.resolved_config_hash,
+        "crucible.platform_config_hash": resolved_cfg.platform_hash,
+        "crucible.workload_config_hash": resolved_cfg.workload_hash,
+        "workload.name": workload.get("workload", {}).get("name", ""),
+        "algorithm.class": workload.get("algorithm", {}).get("algorithm", ""),
+        "algorithm.evaluation_symbols": ",".join(map(str, workload.get("algorithm", {}).get("evaluation_symbols", []))),
+        "portfolio.class": workload.get("portfolio", {}).get("portfolio", ""),
+        "portfolio.symbol": workload.get("portfolio", {}).get("params", {}).get("symbol", ""),
+        "data_provider.class": workload.get("data_provider", {}).get("provider", ""),
+        "data_provider.symbols": ",".join(map(str, workload.get("data_provider", {}).get("symbols", []))),
+        "hpo.objective_metric": (hpo.get("objective") or {}).get("metric", ""),
+        "hpo.algorithm_param_keys": ",".join(map(str, hpo.get("algorithm_param_keys", []))),
+        "hpo.portfolio_param_keys": ",".join(map(str, hpo.get("portfolio_param_keys", []))),
+    }
+    return {key: str(value)[:500] for key, value in params.items() if value is not None}

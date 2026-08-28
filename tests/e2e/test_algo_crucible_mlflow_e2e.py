@@ -11,6 +11,7 @@ import yaml
 from mlflow.tracking import MlflowClient
 
 from algo_crucible.orchestrator import CrucibleOrchestrator
+from algo_crucible.paper_replay import load_frozen_candidate, replay_trace, trace_to_csv
 from tests.unit.test_algo_crucible_milestone1 import _write_yaml
 from tests.unit.test_algo_crucible_walk_forward_oos import _write_daily_data
 
@@ -42,13 +43,17 @@ def test_crucible_populates_representative_mlflow_parent_run(monkeypatch, tmp_pa
     plateau_result = CrucibleOrchestrator(platform_path, workload_path).run_plateau_stage(rerun=True, use_ray=False)
     perturbation_result = CrucibleOrchestrator(platform_path, workload_path).run_perturbation_stage(rerun=True, use_ray=False)
     confirmation_result = CrucibleOrchestrator(platform_path, workload_path).run_confirmation_stage(rerun=True, use_ray=False)
+    candidate = load_frozen_candidate(confirmation_result["run_dir"])
+    (tmp_path / "paper_trace.csv").write_text(
+        trace_to_csv(replay_trace(CrucibleOrchestrator(platform_path, workload_path).resolved_cfg, candidate, data_path)),
+        encoding="utf-8",
+    )
+    paper_replay_result = CrucibleOrchestrator(platform_path, workload_path).run_paper_replay_stage(rerun=True)
 
     client = MlflowClient(tracking_uri=_tracking_uri())
     experiment = client.get_experiment_by_name("e2e-crucible")
-    run = client.get_run(confirmation_result["mlflow_run_id"])
-    summary_artifacts = {item.path for item in client.list_artifacts(oos_result["mlflow_run_id"], "summaries")}
-    chart_artifacts = {item.path for item in client.list_artifacts(oos_result["mlflow_run_id"], "charts")}
-    promotion_artifacts = {item.path for item in client.list_artifacts(oos_result["mlflow_run_id"], "promotion")}
+    run = client.get_run(paper_replay_result["mlflow_run_id"])
+    artifacts = _artifact_paths(client, oos_result["mlflow_run_id"])
 
     assert experiment is not None
     assert hpo_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
@@ -56,9 +61,12 @@ def test_crucible_populates_representative_mlflow_parent_run(monkeypatch, tmp_pa
     assert plateau_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
     assert perturbation_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
     assert confirmation_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
+    assert paper_replay_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
     assert run.info.experiment_id == experiment.experiment_id
     assert run.data.tags["crucible.run_name"] == run_name
-    assert run.data.tags["crucible.status"] == "complete"
+    assert run.data.tags["crucible.status"] == "paper_replay_passed"
+    assert run.data.params["algorithm.evaluation_symbols"] == "SPY"
+    assert run.data.params["hpo.objective_metric"] == "composite_v1"
     assert "hpo.trials_complete" in run.data.metrics
     assert "walk_forward_oos.jobs_complete" in run.data.metrics
     assert "walk_forward_oos.total_return_pct_std_dev" in run.data.metrics
@@ -70,17 +78,31 @@ def test_crucible_populates_representative_mlflow_parent_run(monkeypatch, tmp_pa
     assert "plateau.accepted_plateaus" in run.data.metrics
     assert "perturbation.accepted_candidates" in run.data.metrics
     assert "confirmation.promoted_candidates" in run.data.metrics
-    assert "summaries/hpo_trial_summary.csv" in summary_artifacts
-    assert "summaries/oos_summary.csv" in summary_artifacts
-    assert "summaries/validation_regime_summary.csv" in summary_artifacts
-    assert "summaries/regime_gate_summary.csv" in summary_artifacts
-    assert "summaries/plateau_summary.csv" in summary_artifacts
-    assert "summaries/perturbation_summary.csv" in summary_artifacts
-    assert "summaries/confirmation_summary.csv" in summary_artifacts
-    assert "charts/walk_forward_oos_distributions.svg" in chart_artifacts
-    assert "promotion/promotion_packet.json" in promotion_artifacts
-    assert "promotion/promotion_packet.yaml" in promotion_artifacts
-    assert "promotion/promotion_packet.md" in promotion_artifacts
+    assert "paper_replay.passed" in run.data.metrics
+    assert "configs/resolved_config.yaml" in artifacts
+    assert "stages/04_hpo/summaries/hpo_trial_summary.csv" in artifacts
+    assert "stages/03_walk_forward_oos/summaries/oos_summary.csv" in artifacts
+    assert "stages/03_walk_forward_oos/summaries/validation_regime_summary.csv" in artifacts
+    assert "stages/05_regime_gate/summaries/regime_gate_summary.csv" in artifacts
+    assert "stages/06_plateau/summaries/plateau_summary.csv" in artifacts
+    assert "stages/07_perturbation/summaries/perturbation_summary.csv" in artifacts
+    assert "stages/08_confirmation/summaries/confirmation_summary.csv" in artifacts
+    assert "stages/09_paper_replay/summaries/paper_replay_trace.csv" in artifacts
+    assert "stages/09_paper_replay/summaries/paper_replay_mismatches.csv" in artifacts
+    assert "stages/03_walk_forward_oos/charts/walk_forward_oos_distributions.svg" in artifacts
+    assert "stages/08_confirmation/promotion/promotion_packet.json" in artifacts
+    assert "stages/08_confirmation/promotion/promotion_packet.yaml" in artifacts
+    assert "stages/08_confirmation/promotion/promotion_packet.md" in artifacts
+
+
+def _artifact_paths(client: MlflowClient, run_id: str, path: str | None = None) -> set[str]:
+    paths = set()
+    for item in client.list_artifacts(run_id, path):
+        if item.is_dir:
+            paths.update(_artifact_paths(client, run_id, item.path))
+        else:
+            paths.add(item.path)
+    return paths
 
 
 def _configs(tmp_path: Path, data_path: Path, run_name: str, tracking_uri: str) -> tuple[Path, Path]:
@@ -146,6 +168,7 @@ def _configs(tmp_path: Path, data_path: Path, run_name: str, tracking_uri: str) 
         },
         "confirmation": {"start_date": "2024-04-01", "end_date": "2024-04-30", "min_return_pct": 0.0},
         "promotion": {"create_promoted_folder": False, "output_dir": str(tmp_path / "promoted")},
+        "paper_replay": {"observed_trace_path": str(tmp_path / "paper_trace.csv"), "data_path": str(data_path)},
     }
     workload = {
         "workload": {"name": "e2e", "run_name": run_name},
@@ -156,6 +179,7 @@ def _configs(tmp_path: Path, data_path: Path, run_name: str, tracking_uri: str) 
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
         "algorithm": {
             "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
             "params": {
                 "history_length": 1,
                 "market_regime": {

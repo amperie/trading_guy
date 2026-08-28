@@ -34,6 +34,7 @@ def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
         "order_manager": {"order_manager": "trading.core.om.backtesting_om.BacktestingOrderManager"},
         "algorithm": {
             "algorithm": "algo_crucible.testing.BuyAndHoldAlgorithm",
+            "evaluation_symbols": ["SPY"],
             "params": {
                 "history_length": 1,
                 "market_regime": {"enabled": True, "require_full_windows": False},
@@ -65,7 +66,7 @@ def test_build_hpo_summary_creates_candidates_and_failed_trials():
         {"crucible": {"run_name": "hpo_summary"}},
         {
             "workload": {"run_name": "hpo_summary"},
-            "algorithm": {"algorithm": "algo.A", "params": {"history_length": 1}},
+            "algorithm": {"algorithm": "algo.A", "evaluation_symbols": ["SPY"], "params": {"history_length": 1}},
             "portfolio": {"portfolio": "pf.P", "params": {"cash": 100}},
         },
     )
@@ -112,8 +113,9 @@ def test_hpo_stage_writes_full_trial_and_candidate_summaries(monkeypatch, tmp_pa
 
     result = CrucibleOrchestrator(platform_path, workload_path).run_hpo_stage()
     run_dir = Path(result["run_dir"])
-    trials = pd.read_csv(run_dir / "summaries" / "hpo_trial_summary.csv")
-    candidates = pd.read_csv(run_dir / "summaries" / "hpo_candidate_summary.csv")
+    stage_dir = run_dir / "stages" / "04_hpo"
+    trials = pd.read_csv(stage_dir / "summaries" / "hpo_trial_summary.csv")
+    candidates = pd.read_csv(stage_dir / "summaries" / "hpo_candidate_summary.csv")
 
     assert result["summary"]["hpo.trials_total"] == 2
     assert result["summary"]["hpo.best_metric"] == 10.0
