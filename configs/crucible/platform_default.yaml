@@ -79,3 +79,14 @@ perturbations:
         tx_cost: 2.0
         transaction_cost: 2.0
         slippage_bps: 2.0
+
+confirmation:
+  start_date:
+  end_date:
+  min_return_pct: 0.0
+  max_drawdown_pct: 25.0
+  min_trades: 0
+
+promotion:
+  create_promoted_folder: false
+  output_dir: trading/promoted

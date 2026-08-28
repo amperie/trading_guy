@@ -152,6 +152,11 @@ perturbations:
 confirmation:
   enabled: true
   untouched_period_required: true
+  start_date: null
+  end_date: null
+  min_return_pct: 0.0
+  max_drawdown_pct: 25.0
+  min_trades: 0
 
 promotion:
   write_json: true
@@ -160,6 +165,8 @@ promotion:
   log_to_mlflow: true
   parent_run_summary_metrics: true
   link_detail_runs: true
+  create_promoted_folder: false
+  output_dir: trading/promoted
 
 mlflow:
   parent_experiment_name: "Algo Crucible"
@@ -972,21 +979,21 @@ primary_risks:
 
 ## Implementation Shape
 
-The crucible workflow should live outside `trading.engines`:
+The crucible workflow lives outside `trading.engines`:
 
 ```text
-trading/
-  crucible/
+algo_crucible/
     __init__.py
     orchestrator.py
     config.py
     models.py
     gates.py
-    ray_tasks.py
-    regime_scoring.py
-    stability.py
+    jobs.py
+    scoring.py
+    plateau.py
     perturbations.py
-    promotion.py
+    confirmation.py
+    state_store.py
 ```
 
 Suggested responsibility split:
@@ -997,11 +1004,12 @@ Suggested responsibility split:
   promotion result objects.
 - `gates.py`: applies generalist, specialist, defensive, plateau, perturbation,
   and paper-trading gates.
-- `ray_tasks.py`: contains Ray remote wrappers for independent work units.
-- `regime_scoring.py`: builds total and per-regime scorecards.
-- `stability.py`: generates parameter neighborhoods and summarizes plateaus.
+- `jobs.py`: contains local/Ray wrappers for independent work units.
+- `scoring.py`: builds total and per-regime scorecards.
+- `plateau.py`: generates parameter neighborhoods and summarizes plateaus.
 - `perturbations.py`: generates scenario patches and summarizes robustness.
-- `promotion.py`: writes JSON/YAML/Markdown promotion packets.
+- `confirmation.py`: runs untouched confirmation and writes
+  JSON/YAML/Markdown promotion packets.
 - `state_store.py`: defines the `CrucibleStateStore` interface plus concrete
   implementations such as `MlflowCrucibleStateStore`, future
   `MongoCrucibleStateStore`, and optional `CompositeCrucibleStateStore`.

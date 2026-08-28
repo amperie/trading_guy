@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pandas.errors import EmptyDataError
 
 from algo_crucible.builders import build_candidate_from_params
 from utils.utils import merge_nested_config
@@ -22,11 +23,11 @@ def load_perturbation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict
         raise FileNotFoundError("run_hpo_stage must produce hpo_trial_summary.csv before perturbation analysis can run")
     accepted = {
         str(row["candidate_id"]): row
-        for row in pd.read_csv(plateau_path).to_dict(orient="records")
+        for row in _read_csv_rows(plateau_path)
         if str(row.get("accepted")).lower() in {"true", "1"}
     }
     candidates = []
-    for row in pd.read_csv(hpo_path).to_dict(orient="records"):
+    for row in _read_csv_rows(hpo_path):
         candidate_id = str(row.get("candidate_id"))
         if candidate_id not in accepted:
             continue
@@ -222,6 +223,13 @@ def _decode(value: Any) -> Any:
         return json.loads(text)
     except Exception:
         return ast.literal_eval(text)
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    try:
+        return pd.read_csv(path).to_dict(orient="records")
+    except EmptyDataError:
+        return []
 
 
 def _slug(value: Any) -> str:

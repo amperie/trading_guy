@@ -9,6 +9,7 @@ import algo_crucible.orchestrator as orchestrator_module
 from algo_crucible.builders import build_candidate_from_params
 from algo_crucible.orchestrator import CrucibleOrchestrator
 from algo_crucible.perturbations import apply_scenario
+from algo_crucible.perturbations import load_perturbation_candidates
 from algo_crucible.scoring import rows_to_csv
 from tests.unit.test_algo_crucible_milestone1 import _write_yaml
 from tests.unit.test_algo_crucible_walk_forward_oos import _write_daily_data
@@ -149,6 +150,20 @@ def test_scenario_patch_updates_executed_candidate_params(tmp_path: Path):
     )
 
     assert perturbed.portfolio_params["tx_cost"] == 7.0
+
+
+def test_load_perturbation_candidates_handles_empty_plateau_summary(tmp_path: Path):
+    data_path = tmp_path / "daily.csv"
+    _write_daily_data(data_path)
+    platform_path, workload_path = _configs(tmp_path, data_path)
+    orchestrator = CrucibleOrchestrator(platform_path, workload_path)
+    run = orchestrator.state_store.start_or_resume(orchestrator.resolved_cfg, rerun=True)
+    run_dir = Path(run["run_dir"])
+    (run_dir / "summaries").mkdir(exist_ok=True)
+    (run_dir / "summaries" / "plateau_summary.csv").write_text("", encoding="utf-8")
+    (run_dir / "summaries" / "hpo_trial_summary.csv").write_text("", encoding="utf-8")
+
+    assert load_perturbation_candidates(run_dir, orchestrator.resolved_cfg) == []
 
 
 def _write_inputs(orchestrator: CrucibleOrchestrator, run_dir: Path):

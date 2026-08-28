@@ -21,7 +21,9 @@ def load_plateau_seeds(run_dir: str | Path, resolved_cfg, platform: dict[str, An
         raise FileNotFoundError("run_hpo_stage must produce hpo_trial_summary.csv before plateau analysis can run")
     rows = pd.read_csv(hpo_path).to_dict(orient="records")
     accepted = _accepted_candidates(run_dir)
-    rows = [row for row in rows if not accepted or str(row.get("candidate_id")) in accepted]
+    hpo_candidate_ids = {str(row.get("candidate_id")) for row in rows}
+    if accepted and hpo_candidate_ids & accepted:
+        rows = [row for row in rows if str(row.get("candidate_id")) in accepted]
     rows.sort(key=lambda row: _num(row.get("metric")) or float("-inf"), reverse=True)
 
     cfg = platform.get("plateau", {})

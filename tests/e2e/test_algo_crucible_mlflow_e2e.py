@@ -25,7 +25,7 @@ def _tracking_uri() -> str:
         return yaml.safe_load(handle)["mlflow"]["tracking_uri"]
 
 
-def test_crucible_populates_representative_mlflow_parent_run(tmp_path: Path):
+def test_crucible_populates_representative_mlflow_parent_run(monkeypatch, tmp_path: Path):
     if os.environ.get("RUN_CRUCIBLE_E2E_MLFLOW") != "1":
         pytest.skip("Set RUN_CRUCIBLE_E2E_MLFLOW=1 to write a representative run to MLflow")
 
@@ -33,21 +33,33 @@ def test_crucible_populates_representative_mlflow_parent_run(tmp_path: Path):
     data_path = tmp_path / "daily.csv"
     _write_daily_data(data_path)
     platform_path, workload_path = _configs(tmp_path, data_path, run_name, _tracking_uri())
+    monkeypatch.setattr("trading.launchers.run_backtest_ray.tune_backtest_hyperparameters", _fake_tune)
+    monkeypatch.setattr("algo_crucible.orchestrator.run_validation_backtest", _stable_validation_worker)
 
+    hpo_result = CrucibleOrchestrator(platform_path, workload_path).run_hpo_stage()
     oos_result = CrucibleOrchestrator(platform_path, workload_path).run_walk_forward_oos(use_ray=False)
     gate_result = CrucibleOrchestrator(platform_path, workload_path).run_regime_gate_stage(rerun=True)
+    plateau_result = CrucibleOrchestrator(platform_path, workload_path).run_plateau_stage(rerun=True, use_ray=False)
+    perturbation_result = CrucibleOrchestrator(platform_path, workload_path).run_perturbation_stage(rerun=True, use_ray=False)
+    confirmation_result = CrucibleOrchestrator(platform_path, workload_path).run_confirmation_stage(rerun=True, use_ray=False)
 
     client = MlflowClient(tracking_uri=_tracking_uri())
     experiment = client.get_experiment_by_name("e2e-crucible")
-    run = client.get_run(oos_result["mlflow_run_id"])
+    run = client.get_run(confirmation_result["mlflow_run_id"])
     summary_artifacts = {item.path for item in client.list_artifacts(oos_result["mlflow_run_id"], "summaries")}
     chart_artifacts = {item.path for item in client.list_artifacts(oos_result["mlflow_run_id"], "charts")}
+    promotion_artifacts = {item.path for item in client.list_artifacts(oos_result["mlflow_run_id"], "promotion")}
 
     assert experiment is not None
+    assert hpo_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
     assert gate_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
+    assert plateau_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
+    assert perturbation_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
+    assert confirmation_result["mlflow_run_id"] == oos_result["mlflow_run_id"]
     assert run.info.experiment_id == experiment.experiment_id
     assert run.data.tags["crucible.run_name"] == run_name
-    assert run.data.tags["crucible.status"] == "running"
+    assert run.data.tags["crucible.status"] == "complete"
+    assert "hpo.trials_complete" in run.data.metrics
     assert "walk_forward_oos.jobs_complete" in run.data.metrics
     assert "walk_forward_oos.total_return_pct_std_dev" in run.data.metrics
     assert "walk_forward_oos.total_return_pct_min" in run.data.metrics
@@ -55,10 +67,20 @@ def test_crucible_populates_representative_mlflow_parent_run(tmp_path: Path):
     assert "walk_forward_oos.max_drawdown_pct_std_dev" in run.data.metrics
     assert "walk_forward_oos.volatility_std_dev" in run.data.metrics
     assert "regime_gate.passed" in run.data.metrics
+    assert "plateau.accepted_plateaus" in run.data.metrics
+    assert "perturbation.accepted_candidates" in run.data.metrics
+    assert "confirmation.promoted_candidates" in run.data.metrics
+    assert "summaries/hpo_trial_summary.csv" in summary_artifacts
     assert "summaries/oos_summary.csv" in summary_artifacts
     assert "summaries/validation_regime_summary.csv" in summary_artifacts
     assert "summaries/regime_gate_summary.csv" in summary_artifacts
+    assert "summaries/plateau_summary.csv" in summary_artifacts
+    assert "summaries/perturbation_summary.csv" in summary_artifacts
+    assert "summaries/confirmation_summary.csv" in summary_artifacts
     assert "charts/walk_forward_oos_distributions.svg" in chart_artifacts
+    assert "promotion/promotion_packet.json" in promotion_artifacts
+    assert "promotion/promotion_packet.yaml" in promotion_artifacts
+    assert "promotion/promotion_packet.md" in promotion_artifacts
 
 
 def _configs(tmp_path: Path, data_path: Path, run_name: str, tracking_uri: str) -> tuple[Path, Path]:
@@ -68,6 +90,17 @@ def _configs(tmp_path: Path, data_path: Path, run_name: str, tracking_uri: str) 
         "state_store": {"backend": "mlflow"},
         "mlflow": {"tracking_uri": tracking_uri, "parent_experiment_name": "e2e-crucible"},
         "ray": {"enabled": False, "max_concurrent_trials": 2},
+        "hpo": {
+            "num_samples": 2,
+            "objective": {
+                "metric": "composite_v1",
+                "weights": {
+                    "annualized_return": 1.0,
+                    "max_drawdown_pct": -1.5,
+                    "volatility": -0.25,
+                },
+            },
+        },
         "walk_forward": {
             "optimization_window_days": 20,
             "validation_window_days": 10,
@@ -90,6 +123,29 @@ def _configs(tmp_path: Path, data_path: Path, run_name: str, tracking_uri: str) 
                 "max_regime_drawdown": 0.20,
             },
         },
+        "plateau": {
+            "max_seeds": 1,
+            "min_seed_distance": 0.10,
+            "neighborhood_radius_pct": 0.08,
+            "max_neighbors_per_seed": 3,
+            "min_neighbor_trials": 1,
+            "min_neighbor_pass_rate": 50,
+            "max_peak_to_median_degradation": 500.0,
+        },
+        "perturbations": {
+            "max_required_failures": 0,
+            "min_scenario_pass_rate": 50,
+            "scenarios": [
+                {"name": "baseline", "required": True, "patch": {}},
+                {
+                    "name": "cost_slippage_2x",
+                    "required": True,
+                    "portfolio_param_multipliers": {"tx_cost": 2.0},
+                },
+            ],
+        },
+        "confirmation": {"start_date": "2024-04-01", "end_date": "2024-04-30", "min_return_pct": 0.0},
+        "promotion": {"create_promoted_folder": False, "output_dir": str(tmp_path / "promoted")},
     }
     workload = {
         "workload": {"name": "e2e", "run_name": run_name},
@@ -121,15 +177,76 @@ def _configs(tmp_path: Path, data_path: Path, run_name: str, tracking_uri: str) 
                 "symbol": "SPY",
                 "stop_pct": 50.0,
                 "profit_pct": 50.0,
+                "tx_cost": 1.0,
             },
         },
         "fixed_assumptions": {"starting_cash": 100000},
+        "search_space": {
+            "space": {"stop_pct": {"type": "uniform", "low": 5.0, "high": 15.0}},
+            "algorithm_param_keys": [],
+            "portfolio_param_keys": ["stop_pct"],
+        },
     }
     platform_path = tmp_path / "platform.yaml"
     workload_path = tmp_path / "workload.yaml"
     _write_yaml(platform_path, platform)
     _write_yaml(workload_path, workload)
     return platform_path, workload_path
+
+
+def _fake_tune(**kwargs):
+    objective = kwargs["base_backtest_config"].get("objective")
+    details = {"_objective_annualized_return": 6.0}
+    if objective:
+        details.update({"_objective_max_drawdown_pct": 2.0, "_objective_volatility": 1.0})
+    return (
+        {"stop_pct": 8.0},
+        [
+            {"config": {"stop_pct": 8.0}, "metric": 6.0, "objective_details": details},
+            {"config": {"stop_pct": 12.0}, "metric": 4.0, "objective_details": details},
+        ],
+    )
+
+
+def _stable_validation_worker(payload):
+    candidate = payload["candidate"]
+    stop_pct = float(candidate["portfolio_params"].get("stop_pct", 10.0))
+    ret = 4.0 if 7.0 <= stop_pct <= 13.0 else 1.0
+    if "scenario_id" in payload and payload["scenario_id"].endswith("cost_slippage_2x"):
+        ret = 2.0
+    return {
+        "seed_id": payload.get("seed_id"),
+        "neighbor_id": payload.get("neighbor_id"),
+        "scenario_id": payload.get("scenario_id"),
+        "source_candidate_id": payload.get("source_candidate_id"),
+        "candidate_id": candidate["candidate_id"],
+        "window_id": payload["window"]["window_id"],
+        "window": payload["window"],
+        "overall_scorecard": {
+            "total_return_pct": ret,
+            "annualized_return": ret,
+            "sharpe_ratio": ret,
+            "sortino_ratio": ret,
+            "max_drawdown_pct": -2.0,
+            "win_rate": 100.0,
+            "profit_factor": 1.0,
+            "total_trades": 1,
+            "final_equity": 100000 + ret,
+            "initial_equity": 100000,
+            "trading_days": 10,
+            "volatility": 1.0,
+        },
+        "regime_scorecard": [
+            {
+                "regime": "RANGE_LOW_VOL",
+                "bars": 10,
+                "total_return_pct": ret,
+                "annualized_return": ret,
+                "max_drawdown_pct": -1.0,
+                "total_trades": 1,
+            }
+        ],
+    }
 
 
 def teardown_module():

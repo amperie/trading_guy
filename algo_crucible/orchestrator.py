@@ -5,9 +5,21 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import yaml
 
 from algo_crucible.backtests import run_validation_backtest
 from algo_crucible.builders import build_candidate, build_components
+from algo_crucible.confirmation import (
+    build_promotion_packet,
+    confirmation_metrics,
+    confirmation_window,
+    confirmation_workload,
+    freeze_candidate,
+    load_confirmation_candidates,
+    packet_markdown,
+    summarize_confirmation,
+    write_promoted_packet,
+)
 from algo_crucible.config import resolve_configs
 from algo_crucible.gates import evaluate_regime_aware_gates, gate_summary_metrics
 from algo_crucible.hpo import run_hpo_search
@@ -490,6 +502,113 @@ class CrucibleOrchestrator:
                 f"pass_rate={row.get('scenario_pass_rate')} reason={row.get('failure_reason')}"
             )
         logger.info(f"Completed perturbation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_confirmation_stage(
+        self,
+        rerun: bool = False,
+        use_ray: bool | None = None,
+        create_promoted_folder: bool | None = None,
+    ) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if (
+            self.state_store.read_artifact_json(cfg.crucible_run_id, "summaries/stage_08_summary.json")
+            and self.state_store.read_artifact_json(cfg.crucible_run_id, "promotion/promotion_packet.json")
+            and not rerun
+        ):
+            return run
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting confirmation stage for {cfg.crucible_run_id}")
+        candidates = load_confirmation_candidates(run_dir, cfg)
+        window = confirmation_window(cfg.platform)
+        workload = confirmation_workload(cfg, window)
+        logger.info(
+            f"Prepared confirmation stage run_id={cfg.crucible_run_id} "
+            f"candidates={len(candidates)} start={window['validation_start']} end={window['validation_end']}"
+        )
+
+        frozen = [freeze_candidate(item["candidate"], cfg) for item in candidates]
+        jobs = [
+            CrucibleJob("08_confirmation", "confirmation_backtest", {
+                "crucible_run_id": cfg.crucible_run_id,
+                "candidate": item["candidate"].to_dict(),
+                "window": window,
+                "workload": workload,
+            })
+            for item in candidates
+        ]
+        ray_cfg = cfg.platform.get("ray", {})
+        batch = RayJobRunner(
+            use_ray=bool(ray_cfg.get("enabled", True) if use_ray is None else use_ray),
+            max_concurrent_jobs=ray_cfg.get("max_concurrent_trials"),
+        ).run_jobs(
+            run_id=cfg.crucible_run_id,
+            jobs=jobs,
+            worker=run_validation_backtest,
+            state_store=self.state_store,
+            rerun_failed_jobs=bool(cfg.platform.get("resume", {}).get("rerun_failed_jobs", True)),
+        )
+
+        confirmation_rows = summarize_confirmation(candidates, batch.results, cfg.platform)
+        metrics = confirmation_metrics(confirmation_rows, batch.jobs_total, batch.jobs_complete, batch.jobs_failed)
+        artifacts = {
+            "confirmation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, "summaries/confirmation_summary.csv", rows_to_csv(confirmation_rows)),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, "summaries/stage_08_summary.json", {
+                "crucible_run_id": cfg.crucible_run_id,
+                "run_name": cfg.run_name,
+                "candidate_count": len(candidates),
+                "confirmed_candidates": int(metrics["confirmation.promoted_candidates"]),
+                "rejected_candidates": int(metrics["confirmation.rejected_candidates"]),
+            }),
+        }
+        for item in frozen:
+            artifacts[f"frozen_{item['candidate']['candidate_id']}"] = self.state_store.write_artifact_json(
+                cfg.crucible_run_id,
+                f"frozen_candidates/{item['candidate']['candidate_id']}.json",
+                item,
+            )
+
+        packet = build_promotion_packet(
+            resolved_cfg=cfg,
+            confirmation_rows=confirmation_rows,
+            frozen_candidates=frozen,
+            artifact_paths=artifacts,
+            mlflow_run_url=run.get("mlflow_run_url"),
+        )
+        artifacts.update({
+            "promotion_packet_json": self.state_store.write_artifact_json(cfg.crucible_run_id, "promotion/promotion_packet.json", packet),
+            "promotion_packet_yaml": self.state_store.write_artifact_text(cfg.crucible_run_id, "promotion/promotion_packet.yaml", yaml.safe_dump(packet, sort_keys=True)),
+            "promotion_packet_md": self.state_store.write_artifact_text(cfg.crucible_run_id, "promotion/promotion_packet.md", packet_markdown(packet)),
+        })
+        should_create = bool(cfg.platform.get("promotion", {}).get("create_promoted_folder", False))
+        if create_promoted_folder is not None:
+            should_create = bool(create_promoted_folder)
+        if should_create:
+            artifacts.update(write_promoted_packet(packet, cfg.platform))
+
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_count": len(candidates),
+            "confirmed_candidates": int(metrics["confirmation.promoted_candidates"]),
+            "rejected_candidates": int(metrics["confirmation.rejected_candidates"]),
+            "promotion_packet": "promotion/promotion_packet.json",
+            "paper_trading_started": False,
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "complete",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        for row in confirmation_rows:
+            logger.info(
+                f"Confirmation decision run_id={cfg.crucible_run_id} "
+                f"candidate_id={row.get('candidate_id')} confirmed={row.get('confirmed')} "
+                f"return={row.get('total_return_pct')} reason={row.get('failure_reason')}"
+            )
+        logger.info(f"Completed confirmation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
 
