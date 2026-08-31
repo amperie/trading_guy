@@ -128,7 +128,7 @@ ray.init(address="ray://192.168.1.100:10001")
 
 3. **MLflow Configuration:**
    - MLflow tracking server should be accessible from remote cluster
-   - Use network-accessible tracking URI: `http://hp.lan:8899`
+   - Use network-accessible tracking URI: `http://z440.lan:5000`
    - Avoid `file://` paths unless using shared filesystem
 
 ## Option 3: Ray Job Submission API
@@ -204,7 +204,7 @@ run_ray_spy_trend_macd()
 - Shows: Running trials, resource usage, logs
 
 ### MLflow UI
-- View results: `http://hp.lan:8899`
+- View results: `http://z440.lan:5000`
 - All trials logged automatically
 - Compare parameters and metrics
 
@@ -311,7 +311,7 @@ python run_remote.py
 
 # 3. Monitor in browser
 # Ray Dashboard: http://remote-ip:8265
-# MLflow UI: http://hp.lan:8899
+# MLflow UI: http://z440.lan:5000
 ```
 
 ## Summary

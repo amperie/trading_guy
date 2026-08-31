@@ -483,7 +483,7 @@ def test_live_mongodb_session():
     Load a real MongoDB session, run full analysis, and log results to MLflow.
 
     Connection URI and database are read from config.yaml state_store section
-    (mongodb://hp.lan:27017 / trading_z_desktop by default).
+    (mongodb://z440.lan:27017 / trading_z_desktop by default).
 
     Pytest usage::
         pytest scratch/test_portfolio_analyzer.py::test_live_mongodb_session -s

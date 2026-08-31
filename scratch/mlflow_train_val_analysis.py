@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 
-TRACKING_URI = "http://hp.lan:8899"
+TRACKING_URI = "http://z440.lan:5000"
 EXPERIMENT_ID = "915448476991171828"
 OUT_DIR = Path("output/mlflow_train_val_915448476991171828")
 PHASE_COL = "params.config.analysis.split_validation.phase"

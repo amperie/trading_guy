@@ -137,7 +137,7 @@ MLflow settings are in `config.yaml`:
 ```yaml
 mlflow:
   enabled: true  # Enable/disable MLflow tracking
-  tracking_uri: "http://hp.lan:8899"  # MLflow server
+  tracking_uri: "http://z440.lan:5000"  # MLflow server
   experiment_name: "Trading Backtest"  # Default experiment
   artifact_location: null  # Custom artifact storage (optional)
   run_name_prefix: ""  # Prefix for run names (optional)
@@ -157,7 +157,7 @@ See `examples/analysis_with_mlflow_example.py` for comprehensive examples:
 ## Viewing Results
 
 After running analysis, view results in the MLflow UI:
-- **URL:** http://hp.lan:8899
+- **URL:** http://z440.lan:5000
 - Compare multiple runs
 - View charts and artifacts
 - Track metrics over time
@@ -178,7 +178,7 @@ results = engine.run_full_analysis(
 )
 
 # 3. View in MLflow UI
-# http://hp.lan:8899
+# http://z440.lan:5000
 ```
 
 ## Benefits
@@ -211,6 +211,6 @@ pip install plotly  # For interactive charts
 ```
 
 **Notes:**
-- MLflow tracking server must be running at the configured URI (http://hp.lan:8899)
+- MLflow tracking server must be running at the configured URI (http://z440.lan:5000)
 - Plotly is optional - if not installed, the interactive chart will be skipped
 - All static charts use matplotlib (already installed)

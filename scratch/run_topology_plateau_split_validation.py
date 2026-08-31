@@ -22,7 +22,7 @@ BASE_CFG = {
     "mode": "backtest",
     "mlflow": {
         "enabled": True,
-        "tracking_uri": "http://hp.lan:8899",
+        "tracking_uri": "http://z440.lan:5000",
         "experiment_name": "Trading Backtest",
         "auto_log_system_info": True,
     },
@@ -35,7 +35,7 @@ BASE_CFG = {
         "retention_days": 7,
         "quiet_loggers": ["websockets.client", "pymongo", "pymongo.connection", "pymongo.serverSelection"],
     },
-    "state_store": {"enabled": False, "connection_uri": "mongodb://hp.lan:27017", "database": "trading_test"},
+    "state_store": {"enabled": False, "connection_uri": "mongodb://z440.lan:27017", "database": "trading_test"},
     "algorithm": {
         "implementation": "TopologyConsensusAlgorithm",
         "class_name": "TopologyConsensusAlgorithm",
@@ -340,7 +340,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preset", choices=["quick", "full"], default="quick")
     parser.add_argument("--account", default="paper")
     parser.add_argument("--experiment-name", default="topology_plateau_split_validation")
-    parser.add_argument("--tracking-uri", default="http://hp.lan:8899")
+    parser.add_argument("--tracking-uri", default="http://z440.lan:5000")
     parser.add_argument("--no-mlflow", action="store_true")
     parser.add_argument("--validation-only", action="store_true", help="Skip the 3-year train-window checks.")
     parser.add_argument("--dry-run", action="store_true", help="Only write configs and print commands.")

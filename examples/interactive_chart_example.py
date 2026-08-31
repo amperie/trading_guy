@@ -118,7 +118,7 @@ def example_with_mlflow():
     print("The interactive chart has been:")
     print("  1. Logged to MLflow as an HTML artifact")
     print("  2. Saved locally to ./analysis_output/interactive_portfolio.html")
-    print("\nView in MLflow UI: http://hp.lan:8899")
+    print("\nView in MLflow UI: http://z440.lan:5000")
     print("="*80)
 
 

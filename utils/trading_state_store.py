@@ -89,7 +89,7 @@ Option A — ``PortfolioAnalyzer.from_mongodb()`` (recommended, no store object 
     # Explicit connection (overrides config.yaml)
     analyzer = PortfolioAnalyzer.from_mongodb(
         sid,
-        connection_uri="mongodb://hp.lan:27017",
+        connection_uri="mongodb://z440.lan:27017",
         database="trading_live",
     )
 

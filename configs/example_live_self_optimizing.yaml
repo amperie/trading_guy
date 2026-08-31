@@ -20,7 +20,7 @@
 # Requirements:
 #   - alpaca-py, ray[tune], optuna
 #   - Alpaca API credentials (set below or via ALPACA_API_KEY / ALPACA_SECRET_KEY env vars)
-#   - MLflow server at http://hp.lan:8899 (for logging optimization events)
+#   - MLflow server at http://z440.lan:5000 (for logging optimization events)
 #
 # Thread safety:
 #   - A threading.Lock prevents ticks from being processed mid-reconfigure

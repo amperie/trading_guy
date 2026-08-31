@@ -42,7 +42,7 @@
 # ---------------------------------------------------------------------------
 state_store:
   enabled: false            # Not used for replay; just provides connection params
-  connection_uri: "mongodb://hp.lan:27017"
+  connection_uri: "mongodb://z440.lan:27017"
   database: "live_trading"
 
 # ---------------------------------------------------------------------------

@@ -147,7 +147,7 @@ def main():
     futures = [run_single_backtest.remote(params) for params in variations]
 
     logger.info(f"All {len(variations)} jobs submitted.")
-    logger.info("MLflow UI: http://hp.lan:8899")
+    logger.info("MLflow UI: http://z440.lan:5000")
     logger.info("Waiting for all jobs to complete...")
 
     # Wait for all jobs to finish

@@ -16,7 +16,7 @@ debug_on_sigint: true  # true => Ctrl-C opens the debug REPL instead of interrup
 
 mlflow:
   enabled: true
-  tracking_uri: "http://hp.lan:8899"
+  tracking_uri: "http://z440.lan:5000"
   experiment_name: "Trading Backtest"
   auto_log_system_info: true
 
@@ -44,7 +44,7 @@ pipeline:
 
 state_store:
   enabled: true
-  connection_uri: "mongodb://hp.lan:27017"
+  connection_uri: "mongodb://z440.lan:27017"
   default_live_database: "live_trading"
   database: "live_trading"
   session_id: "live_SPY_UPRO_SPXU"  # null = new UUID each run; paste a UUID to resume a session

@@ -12,7 +12,7 @@ mode: backtest
 data_provider:
   provider: trading.data_providers.mongodb_data_provider.MongoDBDataProvider
   session_id: tom_volatility_filtered_rsi_mean_reversion
-  connection_uri: mongodb://hp.lan:27017
+  connection_uri: mongodb://z440.lan:27017
   database: live_trading
 
 algorithm:
@@ -73,7 +73,7 @@ order_manager:
 
 state_store:
   enabled: false
-  connection_uri: mongodb://hp.lan:27017
+  connection_uri: mongodb://z440.lan:27017
   database: live_trading
 
 analysis:

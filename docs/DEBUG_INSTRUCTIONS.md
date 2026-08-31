@@ -42,7 +42,7 @@ The script will create **3 test runs** in MLflow:
 
 ### Step 3: Verify in MLflow UI
 
-1. Go to: **http://hp.lan:8899**
+1. Go to: **http://z440.lan:5000**
 2. Look for runs starting with "DEBUG:"
 3. Click on each run
 4. Go to **"Artifacts"** tab
@@ -91,7 +91,7 @@ Check `config.yaml`:
 ```yaml
 mlflow:
   enabled: true  # Make sure this is true
-  tracking_uri: "http://hp.lan:8899"
+  tracking_uri: "http://z440.lan:5000"
 ```
 
 ### Issue: HTML files appear in some runs but not others
@@ -114,11 +114,11 @@ If it's too small:
 **Verify MLflow server is running:**
 ```bash
 # Test connection
-curl http://hp.lan:8899
+curl http://z440.lan:5000
 
 # Or in Python
 import requests
-response = requests.get("http://hp.lan:8899")
+response = requests.get("http://z440.lan:5000")
 print(response.status_code)  # Should be 200
 ```
 
@@ -201,7 +201,7 @@ If you've tried all the above and it still doesn't work:
 Run this one-liner to test everything:
 
 ```bash
-python examples/debug_mlflow_html.py && echo "Check http://hp.lan:8899 for DEBUG runs"
+python examples/debug_mlflow_html.py && echo "Check http://z440.lan:5000 for DEBUG runs"
 ```
 
 If all checks pass ✓, the integration is working!

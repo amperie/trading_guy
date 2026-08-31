@@ -262,5 +262,5 @@ if __name__ == "__main__":
     print("ALL EXAMPLES COMPLETE")
     print("="*80)
     print("\nCheck MLflow UI to view logged experiments:")
-    print("http://hp.lan:8899")
+    print("http://z440.lan:5000")
     print("="*80)

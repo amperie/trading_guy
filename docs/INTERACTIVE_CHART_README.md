@@ -108,7 +108,7 @@ engine.log_to_mlflow(
 )
 
 # View in MLflow UI:
-# 1. Go to http://hp.lan:8899
+# 1. Go to http://z440.lan:5000
 # 2. Click on your run
 # 3. Go to "Artifacts" tab
 # 4. Click on "interactive_portfolio.html"

@@ -89,7 +89,7 @@ def base_config(experiment_name: str, run_name: str, params: dict) -> dict:
         "mode": "backtest",
         "mlflow": {
             "enabled": True,
-            "tracking_uri": "http://hp.lan:8899",
+            "tracking_uri": "http://z440.lan:5000",
             "experiment_name": "Trading Backtest",
             "auto_log_system_info": True,
         },
@@ -102,7 +102,7 @@ def base_config(experiment_name: str, run_name: str, params: dict) -> dict:
             "retention_days": 7,
             "quiet_loggers": ["websockets.client", "pymongo", "pymongo.connection", "pymongo.serverSelection"],
         },
-        "state_store": {"enabled": False, "connection_uri": "mongodb://hp.lan:27017", "database": "trading_test"},
+        "state_store": {"enabled": False, "connection_uri": "mongodb://z440.lan:27017", "database": "trading_test"},
         "algorithm": {
             "implementation": "TopologyConsensusAlgorithm",
             "class_name": "TopologyConsensusAlgorithm",

@@ -399,7 +399,7 @@ def run_walk_forward_spy_trend_macd():
         else:
             print(f"  {key}: {val}")
     print("=" * 80)
-    print("MLflow UI: http://hp.lan:8899")
+    print("MLflow UI: http://z440.lan:5000")
     print(f"Experiment: {engine_cfg['experiment_name']}")
     print("=" * 80)
 

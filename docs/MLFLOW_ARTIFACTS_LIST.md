@@ -101,7 +101,7 @@ When you run `engine.run_full_analysis(log_to_mlflow=True)` or `engine.log_to_ml
 
 ## How to View in MLflow
 
-1. **Go to MLflow UI**: http://hp.lan:8899
+1. **Go to MLflow UI**: http://z440.lan:5000
 2. **Find your run** by name or date
 3. **Click on the run** to open details
 4. **Click "Artifacts" tab**

@@ -2754,7 +2754,7 @@ class PortfolioAnalyzer:
             # Explicit connection
             analyzer = PortfolioAnalyzer.from_mongodb(
                 "a1b2c3d4-...",
-                connection_uri="mongodb://hp.lan:27017",
+                connection_uri="mongodb://z440.lan:27017",
                 database="trading_live",
             )
 

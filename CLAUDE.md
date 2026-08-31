@@ -134,7 +134,7 @@ Components are swappable via config using `utils.utils.instantiate_from_string()
 
 - `utils.utils`: `instantiate_from_string()`, `find_pricedata_in_list()`, `find_marketsignal_in_list()`, `aggregate_stock_data(df, interval)`, `parse_search_space()`, `compute_warmup_start_date(warmup_bars, timeframe, reference_dt)` → datetime lookback start
 - `utils/logger.py`: `Logger().get_logger(__name__)` — configured via `config.yaml` logging section. Supports per-call color override: `logger.info("msg", color="magenta")`. Colors: red, bold_red, green, yellow, blue, magenta, cyan, white
-- `utils/mlflow_client.py`: `MLflowClient.from_config()` — tracking at `http://hp.lan:8899`. Context manager `start_run()`, log params/metrics/artifacts/charts/text/json/html
+- `utils/mlflow_client.py`: `MLflowClient.from_config()` — tracking at `http://z440.lan:5000`. Context manager `start_run()`, log params/metrics/artifacts/charts/text/json/html
 - `utils/performance_tracker.py`: Rolling portfolio value tracker used by SelfOptimizingLiveEngine
 
 **HPO search space types** (`parse_search_space()`): `randint`, `uniform`, `choice`, `loguniform`
@@ -261,7 +261,7 @@ run.py                       # Main entry point (backtest / live / hpo / walk-fo
 **Config format (config.yaml):**
 ```yaml
 logging: { level: INFO, console: true, folder: "logs", filename: "trading.log" }
-mlflow: { enabled: true, tracking_uri: "http://hp.lan:8899", experiment_name: "Trading Backtest" }
+mlflow: { enabled: true, tracking_uri: "http://z440.lan:5000", experiment_name: "Trading Backtest" }
 simulator:
   data_provider: { provider: "data_providers.test_data_provider.TestDataProvider", path: "data/test_data.csv" }
   algorithm: { algorithm: "algorithms.test_algorithm.TestAlgorithm", history_length: 10 }
