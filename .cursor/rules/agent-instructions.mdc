@@ -5,7 +5,8 @@ alwaysApply: true
 
 # Agent instructions
 
-Read and follow the files in `agent/` before making changes. That directory is the source of truth for this repo.
+Read `agent/AGENTS.md` first, then `agent/INDEX.md`, then only the topic files that apply.
 
-- Start with `agent/AGENTS.md`
-- Follow its architecture, base-class contracts, config, CLI, and implementation constraints
+- Canonical source: `agent/`
+- New or edited instruction files: follow `agent/authoring.md` (30 lines or less)
+- Standing work: `agent/TODO.md` (no line cap)
