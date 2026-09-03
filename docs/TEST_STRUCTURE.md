@@ -229,4 +229,4 @@ Examples:
 For questions about tests:
 - See `tests/README.md` for detailed test documentation
 - See `ALPACA_SETUP.md` for integration test setup
-- See `CLAUDE.md` for framework architecture
+- See `agent/AGENTS.md` for framework architecture

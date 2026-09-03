@@ -393,4 +393,4 @@ Tests run automatically on:
 
 ## Contact
 
-For test-related questions or issues, see CLAUDE.md for framework documentation.
+For test-related questions or issues, see `agent/AGENTS.md` for framework documentation.

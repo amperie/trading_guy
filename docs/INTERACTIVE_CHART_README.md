@@ -259,4 +259,4 @@ Potential future additions:
 
 ## Questions?
 
-See `examples/interactive_chart_example.py` for working examples or refer to the main documentation in `CLAUDE.md`.
+See `examples/interactive_chart_example.py` for working examples or refer to the main documentation in `agent/AGENTS.md`.

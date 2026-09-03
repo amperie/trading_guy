@@ -1,0 +1,11 @@
+---
+description: Load canonical project agent instructions from the agent/ directory
+alwaysApply: true
+---
+
+# Agent instructions
+
+Read and follow the files in `agent/` before making changes. That directory is the source of truth for this repo.
+
+- Start with `agent/AGENTS.md`
+- Follow its architecture, base-class contracts, config, CLI, and implementation constraints
