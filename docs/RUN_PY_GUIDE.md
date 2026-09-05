@@ -26,6 +26,12 @@ python run.py walk-forward-hpo -h
 python run.py promote -h
 ```
 
+The SaaS worker uses a module entrypoint rather than the interactive CLI:
+
+```bash
+python -m trading.platform.runner -h
+```
+
 ## Command Summary
 
 `run.py` currently supports these subcommands:
@@ -45,6 +51,14 @@ python run.py promote -h
 - `pipeline paper`: materialize a paper bundle from MLflow, log it to the pipeline experiment, and start paper trading
 - `pipeline review`: replay a paper/live session, evaluate review gates, and register an approved live bundle
 - `pipeline live`: launch a local or MLflow-backed promoted bundle
+
+The platform runner supports the UI stage ids directly:
+
+- `smoke`
+- `research`
+- `crucible`
+- `promotion`
+- `monitoring`
 
 ## Shared CLI Model
 
@@ -72,6 +86,57 @@ Important details:
 - `walk-forward-hpo` uses `walk_forward_window_hpo` config keys rather than command-specific trial flags
 - `hpo-from-mlflow`, `hpo-split-from-mlflow`, and `promote` operate from MLflow run URLs instead of local config paths
 - `pipeline live` can also use an MLflow run URL as `--config`
+
+## Platform Runner
+
+`trading.platform.runner` is the contract used by `qc-platform-api` workers. It
+accepts tenant and run identity, receives a serialized strategy config through
+`QC_STRATEGY_CONFIG`, writes artifacts under `--output-dir`, and emits
+newline-delimited JSON progress events on stdout.
+
+Generic shape:
+
+```bash
+python -m trading.platform.runner \
+  --stage smoke \
+  --run-id <run_id> \
+  --strategy-id <strategy_id> \
+  --tenant-id <tenant_id> \
+  --output-dir <output_dir> \
+  --config configs/example_backtest.yaml
+```
+
+Crucible uses the same entrypoint but also accepts platform/workload split
+configuration and milestone selection:
+
+```bash
+python -m trading.platform.runner \
+  --stage crucible \
+  --run-id <run_id> \
+  --strategy-id <strategy_id> \
+  --tenant-id <tenant_id> \
+  --output-dir <output_dir> \
+  --config configs/crucible/platform_local_csv_mlflow.yaml \
+  --workload-config configs/crucible/workloads/spy_5min_local_csv_test.yaml \
+  --crucible-milestone hpo \
+  --crucible-milestone plateau \
+  --rerun-crucible
+```
+
+If `--crucible-milestone` is omitted, the crucible runs its default full
+sequence. `--rerun-crucible` tells the orchestrator the caller intentionally
+wants to rerun the selected milestone outputs instead of only resuming prior
+state.
+
+Progress events use this stable shape:
+
+```json
+{"progressPct": 55, "message": "Running plateau analysis", "crucibleStage": "plateau"}
+```
+
+`crucibleStage` is only set for crucible milestone progress. The platform API
+stores it as `crucibleMilestone` on run events so the UI can show which part of
+the long process is active.
 
 ## Config Loading Rules
 

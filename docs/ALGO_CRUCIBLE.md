@@ -62,6 +62,74 @@ them into one resolved run config. Workload config can override explicitly
 allowed platform fields, but broad platform policy should not be silently
 mutable from workload YAML.
 
+## Platform Runner Contract
+
+The SaaS worker does not call crucible internals directly. It starts the generic
+platform runner and passes the strategy snapshot, run identity, platform config,
+and workload config through command-line arguments:
+
+```bash
+uv run python -m trading.platform.runner \
+  --stage crucible \
+  --run-id <run_id> \
+  --strategy-id <strategy_id> \
+  --tenant-id <tenant_id> \
+  --output-dir <output_dir> \
+  --config configs/crucible/platform_local_csv_mlflow.yaml \
+  --workload-config configs/crucible/workloads/spy_5min_local_csv_test.yaml
+```
+
+For crucible runs, the platform runner delegates to `CrucibleOrchestrator`.
+Normal smoke, research, promotion, and monitoring stages use the same runner
+entrypoint so the API executor can remain stage-agnostic.
+
+Crucible can run the full process or a selected set of milestones. The supported
+milestone ids are:
+
+- `hpo`
+- `walk_forward_oos`
+- `regime_gate`
+- `plateau`
+- `perturbation`
+- `confirmation`
+- `paper_replay`
+
+Run only one milestone after a settings tweak:
+
+```bash
+uv run python -m trading.platform.runner \
+  --stage crucible \
+  --run-id <run_id> \
+  --strategy-id <strategy_id> \
+  --tenant-id <tenant_id> \
+  --output-dir <output_dir> \
+  --config configs/crucible/platform_local_csv_mlflow.yaml \
+  --workload-config configs/crucible/workloads/spy_5min_local_csv_test.yaml \
+  --crucible-milestone plateau \
+  --rerun-crucible
+```
+
+Run multiple milestones by repeating `--crucible-milestone`. If no milestone is
+provided, the orchestrator runs the default full sequence. Use
+`--include-paper-replay` to add the optional paper replay stage to a full run.
+
+The runner emits newline-delimited JSON progress events on stdout. The API
+worker treats these as the progress contract:
+
+```json
+{"progressPct": 30, "message": "Finished HPO", "crucibleStage": "hpo"}
+```
+
+`progressPct` and `message` are required for UI progress updates.
+`crucibleStage` is optional for non-crucible stages and maps to the UI/API
+field `crucibleMilestone` when present.
+
+For platform-managed runs, local run state is rooted under the supplied
+`--output-dir`. Crucible cache state is written under
+`<output_dir>/crucible_runs`; Ray results are written under
+`<output_dir>/ray_results`. MLflow remains enabled as the browsable mirror
+unless the caller passes `--no-mlflow`.
+
 ## Platform Config
 
 Platform config controls how the crucible runs and how candidates are judged.
