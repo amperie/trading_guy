@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import importlib
 import inspect
 import os
@@ -14,7 +15,7 @@ import yaml
 
 from trading.config.service import normalize_config_dict
 from trading.commands.common import flatten_config
-from trading.reporting import ExperimentReporter
+from trading.reporting import ExperimentReporter, LocalRunResultSink, MlflowAnalysisSink
 
 SENSITIVE_KEYS = {"api_key", "secret_key", "password", "token"}
 
@@ -137,7 +138,14 @@ def _collect_config_artifact_paths(cfg: dict, config_path: str | None = None) ->
     return artifact_paths
 
 
-def run_analysis(cfg: dict, pf, om, config_path: str | None = None):
+def run_analysis(
+    cfg: dict,
+    pf,
+    om,
+    config_path: str | None = None,
+    result_output_dir: str | None = None,
+    analysis_sinks: list | None = None,
+):
     analysis_cfg = cfg.get("analysis", {})
     if not analysis_cfg.get("enabled", False):
         return None
@@ -160,12 +168,17 @@ def run_analysis(cfg: dict, pf, om, config_path: str | None = None):
     )
     ExperimentReporter.show_summary(summary)
     summary_dict = ExperimentReporter.summary_to_legacy_dict(summary)
+    sinks = list(analysis_sinks or [])
+    if result_output_dir:
+        sinks.append(LocalRunResultSink(result_output_dir))
     if analysis_cfg.get("log_to_mlflow", True):
-        mlflow_info = ExperimentReporter.log_to_mlflow(report) or {}
+        sinks.append(MlflowAnalysisSink.from_report(report))
+    sink_result = ExperimentReporter.log(report, sinks)
+    mlflow_info = sink_result.sink_runs.get("mlflow") or {}
+    if mlflow_info:
         summary_dict.update(
-            {
-                "mlflow_run_id": mlflow_info.get("run_id"),
-                "mlflow_run_url": mlflow_info.get("run_url"),
-            }
+            {"mlflow_run_id": mlflow_info.get("run_id"), "mlflow_run_url": mlflow_info.get("run_url")}
         )
+    if sink_result.sink_runs or sink_result.artifacts:
+        summary_dict["report_result"] = dataclasses.asdict(sink_result)
     return summary_dict
