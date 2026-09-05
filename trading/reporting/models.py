@@ -48,3 +48,21 @@ class ExperimentReport:
     analyzers: list[AnalyzerReportTarget] = field(default_factory=list)
     config_artifact_paths: list[str] = field(default_factory=list)
     combined_artifacts: list[CombinedArtifactSpec] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ReportArtifact:
+    name: str
+    path: str
+    artifact_path: str | None = None
+    kind: str | None = None
+    size_bytes: int | None = None
+
+
+@dataclass(slots=True)
+class ReportResult:
+    metrics: dict[str, float] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    tags: dict[str, Any] = field(default_factory=dict)
+    artifacts: list[ReportArtifact] = field(default_factory=list)
+    sink_runs: dict[str, dict[str, Any]] = field(default_factory=dict)
