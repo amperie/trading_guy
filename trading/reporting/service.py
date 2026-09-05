@@ -11,8 +11,9 @@ from trading.reporting.models import (
     AnalyzerReportTarget,
     CombinedArtifactSpec,
     ExperimentReport,
+    ReportResult,
 )
-from utils.mlflow_client import MLflowClient
+from trading.reporting.sinks import AnalysisSink, MlflowAnalysisSink, SinkRun
 
 DEFAULT_HEAVY_ARTIFACT_TRADE_LIMIT = 500
 
@@ -106,25 +107,22 @@ class ExperimentReporter:
         _print_summary(summary)
 
     @staticmethod
-    def log_to_mlflow(report: ExperimentReport) -> dict[str, str] | None:
-        if report.tracking_uri:
-            client = MLflowClient(experiment_name=report.experiment_name, tracking_uri=report.tracking_uri)
-        else:
-            client = MLflowClient.from_config(experiment_name=report.experiment_name)
-        if not client.enabled:
-            return None
+    def log(report: ExperimentReport, sinks: list[AnalysisSink]) -> ReportResult:
+        active_sinks = [sink for sink in sinks if getattr(sink, "enabled", True)]
+        if not active_sinks:
+            return ReportResult()
+        sink = active_sinks[0] if len(active_sinks) == 1 else _composite_sink(active_sinks)
 
-        with client.start_run(run_name=report.run_name, description=report.description, tags=report.tags):
-            run_info = {"run_id": client.run_id or "", "run_url": client.get_run_url()}
+        with SinkRun(sink, run_name=report.run_name, description=report.description, tags=report.tags):
             if report.parameters:
-                client.log_params(report.parameters)
+                sink.log_params(report.parameters)
 
             for target in report.analyzers:
-                ExperimentReporter._log_target(client, target)
+                ExperimentReporter._log_target(sink, target)
 
             for path in report.config_artifact_paths:
                 if os.path.isfile(path):
-                    client.log_artifact(path, artifact_path="config")
+                    sink.log_artifact(path, artifact_path="config")
 
             if report.combined_artifacts:
                 temp_dir = _workspace_temp_dir()
@@ -132,15 +130,23 @@ class ExperimentReporter:
                     fpath = os.path.join(temp_dir, spec.filename)
                     try:
                         spec.builder(fpath)
-                        client.log_artifact(fpath)
+                        sink.log_artifact(fpath)
                     except Exception as exc:
-                        target_name = spec.filename
                         from utils.logger import Logger
-                        Logger().get_logger(__name__).warning(f"Failed to log {target_name}: {exc}")
-            return run_info
+
+                        Logger().get_logger(__name__).warning(f"Failed to log {spec.filename}: {exc}")
+        return sink.result()
 
     @staticmethod
-    def _log_target(client: MLflowClient, target: AnalyzerReportTarget) -> None:
+    def log_to_mlflow(report: ExperimentReport) -> dict[str, str] | None:
+        sink = MlflowAnalysisSink.from_report(report)
+        if not sink.enabled:
+            return None
+        result = ExperimentReporter.log(report, [sink])
+        return result.sink_runs.get("mlflow")
+
+    @staticmethod
+    def _log_target(client, target: AnalyzerReportTarget) -> None:
         metrics_dict = {}
         for field in dataclasses.fields(target.summary.metrics):
             value = getattr(target.summary.metrics, field.name)
@@ -207,7 +213,7 @@ class ExperimentReporter:
 
     @staticmethod
     def _log_chart_artifacts(
-        client: MLflowClient,
+        client,
         analyzer,
         tmp: str,
         artifact_prefix: str,
@@ -268,3 +274,9 @@ class ExperimentReporter:
                         client.log_artifact(fpath)
                 except Exception:
                     pass
+
+
+def _composite_sink(sinks: list[AnalysisSink]) -> AnalysisSink:
+    from trading.reporting.sinks import CompositeAnalysisSink
+
+    return CompositeAnalysisSink(sinks)

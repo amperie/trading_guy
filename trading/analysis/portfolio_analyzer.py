@@ -2665,6 +2665,8 @@ class PortfolioAnalyzer:
         show_summary: bool = True,
         artifact_paths: Optional[list] = None,
         benchmark_paths: Optional[dict] = None,
+        result_output_dir: Optional[str] = None,
+        analysis_sinks: Optional[list] = None,
     ) -> dict:
         """
         Full analysis pipeline — same signature and return dict as AnalysisEngine.run_full_analysis().
@@ -2698,11 +2700,20 @@ class PortfolioAnalyzer:
             os.makedirs(output_dir, exist_ok=True)
             self.save_all(output_dir)
 
+        sinks = list(analysis_sinks or [])
+        if result_output_dir:
+            from trading.reporting import LocalRunResultSink
+
+            sinks.append(LocalRunResultSink(result_output_dir))
         if log_to_mlflow:
+            from trading.reporting import MlflowAnalysisSink
+
+            sinks.append(MlflowAnalysisSink.from_report(report_obj))
+        if sinks:
             try:
-                ExperimentReporter.log_to_mlflow(report_obj)
+                ExperimentReporter.log(report_obj, sinks)
             except Exception as e:
-                logger.warning(f"MLflow logging failed: {e}", exc_info=True)
+                logger.warning(f"Analysis reporting failed: {e}", exc_info=True)
 
         return ExperimentReporter.summary_to_legacy_dict(summary)
 

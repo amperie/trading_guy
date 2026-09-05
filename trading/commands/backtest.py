@@ -24,6 +24,23 @@ logger = Logger().get_logger(__name__)
 def cmd_backtest(args: argparse.Namespace):
     raw_cfg = load_raw_config(args.config)
     raw_cfg = apply_cli_overrides(raw_cfg, args)
+    return run_backtest_from_raw_config(
+        raw_cfg,
+        args=args,
+        config_path=args.config,
+        account=args.account,
+        result_output_dir=getattr(args, "result_output_dir", None),
+    )
+
+
+def run_backtest_from_raw_config(
+    raw_cfg: dict,
+    *,
+    args: argparse.Namespace,
+    config_path: str | None,
+    account: str,
+    result_output_dir: str | None = None,
+):
     apply_session_log_file(raw_cfg, args)
     experiment_name_override = getattr(args, "mlflow_experiment_name_override", None)
     if experiment_name_override:
@@ -34,11 +51,10 @@ def cmd_backtest(args: argparse.Namespace):
         force=getattr(args, "mongo_backtest", False),
     )
 
-    creds = load_account_creds(args.account)
-
     dp_section = raw_cfg.get("data_provider", {})
     provider_name = dp_section.get("provider") or dp_section.get("implementation", "")
     if "alpaca" in provider_name.lower():
+        creds = load_account_creds(account)
         fill_data_provider_creds(raw_cfg, creds)
         target = dp_section.setdefault("params", {}) if "implementation" in dp_section else dp_section
         if not target.get("api_key") or not target.get("secret_key"):
@@ -57,7 +73,7 @@ def cmd_backtest(args: argparse.Namespace):
         sys.exit(1)
 
     logger.info(
-        f"Starting backtest with profile: {args.config} "
+        f"Starting backtest with profile: {config_path or '<generated>'} "
         f"(hash={ExperimentService.describe(experiment).config_hash})"
     )
 
@@ -84,7 +100,13 @@ def cmd_backtest(args: argparse.Namespace):
         f"Backtest complete — Value: ${built.portfolio.total_value:,.2f}, "
         f"Cash: ${built.portfolio.cash:,.2f}, Positions: {list(built.portfolio.positions.keys())}"
     )
-    analysis = run_analysis(raw_cfg, built.portfolio, built.order_manager, config_path=args.config)
+    analysis = run_analysis(
+        raw_cfg,
+        built.portfolio,
+        built.order_manager,
+        config_path=config_path,
+        result_output_dir=result_output_dir,
+    )
     return {
         "analysis": analysis,
         "final_value": built.portfolio.total_value,
