@@ -707,6 +707,7 @@ def tune_backtest_hyperparameters(
     log_ray_worker_output: bool = True,
     return_trial_summaries: bool = False,
     warmup_data_provider_config: dict | None = None,
+    ray_storage_path: str | None = None,
 ) -> dict | tuple[dict, list[dict]]:
     """
     Generic hyperparameter optimization using Ray Tune with Optuna.
@@ -795,6 +796,7 @@ def tune_backtest_hyperparameters(
             param_space=search_space,
             run_config=air.RunConfig(
                 name="hpo",
+                storage_path=ray_storage_path,
                 callbacks=[status_callback],
             ),
             tune_config=tune.TuneConfig(

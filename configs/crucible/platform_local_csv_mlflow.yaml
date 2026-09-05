@@ -1,0 +1,120 @@
+# Local CSV crucible profile for platform-managed runs.
+crucible:
+  name: local_csv_crucible
+  run_name: spy_5min_local_csv_crucible_v1
+  output_dir: scratch/crucible_runs
+
+logging:
+  level: INFO
+  structured_events: true
+  log_stage_transitions: true
+  log_job_lifecycle: true
+  log_gate_decisions: true
+  log_every_n_completed_jobs: 10
+  suppress_per_bar_logs: true
+  persist_logs_to_mlflow: true
+
+resume:
+  enabled: true
+  system_of_record: mlflow
+  local_cache_dir: scratch/crucible_runs
+  rerun_failed_jobs: true
+  reuse_completed_jobs: true
+
+state_store:
+  backend: mlflow
+  allow_backends:
+    - local
+    - mlflow
+
+mlflow:
+  tracking_uri: http://z440.lan:5000
+  parent_experiment_name: Algo Crucible Remote CSV
+  artifact_location: mlflow-artifacts:/algo-crucible-remote-csv
+
+ray:
+  enabled: false
+  max_concurrent_trials: 2
+  log_worker_output: false
+
+walk_forward:
+  optimization_window_days: 90
+  validation_window_days: 20
+  embargo_days: 2
+  step_days: 30
+  min_windows: 2
+
+hpo:
+  num_samples: 3
+  max_concurrent_trials: 2
+  log_trials_to_mlflow: false
+  objective:
+    metric: composite_v1
+    weights:
+      annualized_return: 1.0
+      max_drawdown_pct: -1.5
+      volatility: -0.25
+      sortino_ratio: 3.0
+      calmar_ratio: 1.0
+    gates:
+      min_trades: 0
+      max_drawdown_pct: 35
+    low_trade_penalty: 1000
+    drawdown_gate_penalty: 100
+
+gates:
+  generalist:
+    min_trades: 0
+    min_median_oos_return: -5.0
+    min_profitable_windows_pct: 0.0
+    max_drawdown: 0.35
+  specialist:
+    min_regime_bars: 5
+    min_regime_windows: 1
+    min_regime_median_oos_return: -5.0
+    min_regime_profitable_windows_pct: 0.0
+    max_regime_drawdown: 0.35
+
+plateau:
+  max_seeds: 1
+  min_seed_distance: 0.10
+  neighborhood_radius_pct: 0.08
+  max_neighbors_per_seed: 3
+  min_neighbor_trials: 1
+  min_neighbor_pass_rate: 0.0
+  max_peak_to_median_degradation: 500.0
+
+perturbations:
+  max_scenarios: 2
+  max_required_failures: 1
+  min_scenario_pass_rate: 0.0
+  scenarios:
+    - name: baseline
+      required: true
+      patch: {}
+    - name: cost_2x
+      required: false
+      portfolio_param_multipliers:
+        tx_cost: 2.0
+
+confirmation:
+  start_date: "2021-09-01"
+  end_date: "2021-10-29"
+  min_return_pct: -10.0
+  max_drawdown_pct: 35.0
+  min_trades: 0
+
+promotion:
+  create_promoted_folder: false
+  output_dir: trading/promoted
+
+paper_replay:
+  observed_trace_path:
+  data_path: data/SPY_5min.csv
+  candidate_id:
+  max_missing_timestamps: 0
+  max_regime_mismatches: 0
+  max_signal_mismatches: 0
+  max_order_mismatches: 0
+  max_fill_mismatches: 0
+  fill_price_tolerance_pct: 0.01

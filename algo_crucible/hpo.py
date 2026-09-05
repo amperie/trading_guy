@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import copy
-import importlib
 import math
 from typing import Any
 
-from algo_crucible.builders import build_candidate_from_params
+from algo_crucible.builders import build_candidate_from_params, component_class, component_params
 from utils.utils import apply_tunable_config, parse_search_space
 
 
@@ -18,8 +17,7 @@ def run_hpo_search(resolved_cfg) -> dict[str, Any]:
     portfolio_param_keys = hpo_cfg.get("portfolio_param_keys", [])
     base_algorithm_config = copy.deepcopy(workload.get("algorithm", {}).get("params", {}))
     base_portfolio_config = copy.deepcopy(workload.get("portfolio", {}).get("params", {}))
-    base_data_provider_config = copy.deepcopy(workload["data_provider"])
-    base_data_provider_config.pop("provider", None)
+    base_data_provider_config = component_params(workload["data_provider"], "data_provider")
     base_backtest_config = {
         "symbol": base_portfolio_config.get("symbol") or base_portfolio_config.get("upro_symbol", ""),
         "starting_cash": float(base_portfolio_config.get("cash", workload.get("fixed_assumptions", {}).get("starting_cash", 0.0))),
@@ -30,10 +28,10 @@ def run_hpo_search(resolved_cfg) -> dict[str, Any]:
     }
     best_config, trial_summaries = tune_backtest_hyperparameters(
         symbol=base_backtest_config["symbol"],
-        algorithm_class=_import_class(workload["algorithm"]["algorithm"]),
-        portfolio_class=_import_class(workload["portfolio"]["portfolio"]),
-        data_provider_class=_import_class(workload["data_provider"]["provider"]),
-        order_manager_class=_import_class(workload["order_manager"]["order_manager"]),
+        algorithm_class=component_class(workload["algorithm"], "algorithm"),
+        portfolio_class=component_class(workload["portfolio"], "portfolio"),
+        data_provider_class=component_class(workload["data_provider"], "data_provider"),
+        order_manager_class=component_class(workload["order_manager"], "order_manager"),
         base_algorithm_config=base_algorithm_config,
         base_portfolio_config=base_portfolio_config,
         base_data_provider_config=base_data_provider_config,
@@ -46,6 +44,7 @@ def run_hpo_search(resolved_cfg) -> dict[str, Any]:
         log_to_mlflow=bool(hpo_cfg.get("log_trials_to_mlflow", False)),
         log_ray_worker_output=bool(hpo_cfg.get("log_ray_worker_output", resolved_cfg.platform.get("ray", {}).get("log_worker_output", False))),
         return_trial_summaries=True,
+        ray_storage_path=hpo_cfg.get("ray_storage_path"),
     )
     return build_hpo_summary(
         resolved_cfg=resolved_cfg,
@@ -117,11 +116,6 @@ def _hpo_cfg(resolved_cfg) -> dict[str, Any]:
     workload_space = resolved_cfg.workload.get("search_space", {})
     platform_hpo = resolved_cfg.platform.get("hpo", {})
     return {**platform_hpo, **workload_space}
-
-
-def _import_class(path: str):
-    module, name = path.rsplit(".", 1)
-    return getattr(importlib.import_module(module), name)
 
 
 def _median(values: list[float]) -> float | None:

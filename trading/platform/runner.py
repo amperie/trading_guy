@@ -8,14 +8,14 @@ import os
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+from algo_crucible.orchestrator import CrucibleOrchestrator
 from trading.commands.backtest import run_backtest_from_raw_config
 from trading.commands.common import (
     apply_cli_overrides,
-    fill_data_provider_creds,
-    load_account_creds,
     load_raw_config,
 )
-from trading.commands.hpo import run_hpo_split_from_raw_config
 from trading.reporting import LocalRunResultSink
 from trading.reporting.sinks import SinkRun
 
@@ -24,10 +24,20 @@ DEFAULT_CONFIG_BY_STAGE = {
     "idea": "platform:backtest",
     "smoke": "platform:backtest",
     "research": "platform:backtest",
-    "crucible": "platform:crucible",
+    "crucible": "configs/crucible/platform_local_csv_mlflow.yaml",
     "promotion": "platform:backtest",
     "monitoring": "platform:backtest",
 }
+DEFAULT_CRUCIBLE_WORKLOAD = "configs/crucible/workloads/spy_5min_local_csv_test.yaml"
+CRUCIBLE_STAGES = (
+    ("hpo", "Running HPO candidate search"),
+    ("walk_forward_oos", "Running walk-forward OOS validation"),
+    ("regime_gate", "Evaluating regime-aware gates"),
+    ("plateau", "Testing parameter plateau stability"),
+    ("perturbation", "Running perturbation scenarios"),
+    ("confirmation", "Running final confirmation"),
+)
+CRUCIBLE_STAGE_NAMES = tuple(stage[0] for stage in CRUCIBLE_STAGES) + ("paper_replay",)
 
 
 def emit(progress_pct: float, message: str, **extra: Any) -> None:
@@ -152,6 +162,47 @@ def _platform_crucible_config(args: argparse.Namespace) -> dict[str, Any]:
     return cfg
 
 
+def _load_yaml(path: str | Path) -> dict[str, Any]:
+    with Path(path).open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
+    output_dir = Path(args.output_dir)
+    platform_config = (
+        "configs/crucible/platform_local_csv_mlflow.yaml"
+        if args.config == "platform:crucible"
+        else args.config
+    )
+    platform = _load_yaml(platform_config)
+    workload = _load_yaml(args.workload_config or DEFAULT_CRUCIBLE_WORKLOAD)
+    run_name = args.run_name or f"{args.stage}_{args.run_id}"
+
+    platform.setdefault("crucible", {})["run_name"] = run_name
+    workload.setdefault("workload", {})["run_name"] = run_name
+    platform.setdefault("resume", {})["local_cache_dir"] = str(output_dir / "crucible_runs")
+    platform.setdefault("hpo", {})["num_samples"] = args.hpo_samples
+    platform.setdefault("hpo", {})["max_concurrent_trials"] = args.hpo_concurrency
+    platform.setdefault("hpo", {})["validation_period_days"] = args.validation_period_days
+    platform.setdefault("hpo", {})["ray_storage_path"] = str((output_dir / "ray_results").resolve())
+    platform.setdefault("ray", {})["enabled"] = bool(args.use_ray)
+    if args.no_mlflow:
+        platform.setdefault("state_store", {})["backend"] = "local"
+    if args.experiment_name:
+        platform.setdefault("mlflow", {})["parent_experiment_name"] = args.experiment_name
+
+    effective_platform = output_dir / "crucible_platform.yaml"
+    effective_workload = output_dir / "crucible_workload.yaml"
+    _write_yaml(effective_platform, platform)
+    _write_yaml(effective_workload, workload)
+    return effective_platform, effective_workload
+
+
 def _load_stage_config(args: argparse.Namespace) -> dict[str, Any]:
     if args.config == "platform:backtest":
         raw_cfg = _platform_backtest_config(args)
@@ -237,44 +288,97 @@ def execute_backtest_stage(args: argparse.Namespace, *, smoke: bool) -> dict[str
 
 
 def execute_crucible(args: argparse.Namespace) -> dict[str, Any]:
-    emit(10, "Loading crucible HPO config")
-    raw_cfg = _load_stage_config(args)
-    raw_cfg.setdefault("hpo", {})["num_samples"] = args.hpo_samples
-    raw_cfg.setdefault("hpo", {})["max_concurrent_trials"] = args.hpo_concurrency
-    raw_cfg.setdefault("hpo", {})["validation_period_days"] = args.validation_period_days
-    provider_name = raw_cfg.get("data_provider", {}).get("provider", "")
-    if "alpaca" in provider_name.lower():
-        creds = load_account_creds(args.account)
-        fill_data_provider_creds(raw_cfg, creds)
-    emit(30, "Starting split HPO and validation backtests")
-    details = run_hpo_split_from_raw_config(
-        raw_cfg,
-        config_artifact_path=args.config,
-        num_samples_override=args.hpo_samples,
-        max_concurrent_override=args.hpo_concurrency,
-        validation_period_days_override=args.validation_period_days,
-        return_details=True,
-    )
-    emit(85, "Persisting crucible result")
-    train_metrics = _metric_payload(details.get("train_results"))
-    val_metrics = _metric_payload(details.get("val_results"))
-    metrics = {
-        **{f"train.{k}": v for k, v in train_metrics.items()},
-        **{f"validation.{k}": v for k, v in val_metrics.items()},
-        "robustnessScore": float(details.get("objective_value") or 0.0),
-        "computeCostUsd": 0.0,
-    }
+    emit(8, "Preparing crucible platform and workload configs")
+    platform_path, workload_path = _crucible_config_paths(args)
+    orchestrator = CrucibleOrchestrator(platform_path, workload_path)
+    result: dict[str, Any] | None = None
+    requested = _requested_crucible_stages(args)
+    progress_plan = _crucible_progress_plan(requested)
+    for name, message in requested:
+        start_pct, end_pct = progress_plan[name]
+        emit(start_pct, message, crucibleStage=name)
+        if name == "hpo":
+            result = orchestrator.run_hpo_stage(rerun=args.rerun_crucible)
+        elif name == "walk_forward_oos":
+            result = orchestrator.run_walk_forward_oos(rerun=args.rerun_crucible, use_ray=args.use_ray)
+        elif name == "regime_gate":
+            result = orchestrator.run_regime_gate_stage(rerun=args.rerun_crucible)
+        elif name == "plateau":
+            result = orchestrator.run_plateau_stage(rerun=args.rerun_crucible, use_ray=args.use_ray)
+        elif name == "perturbation":
+            result = orchestrator.run_perturbation_stage(rerun=args.rerun_crucible, use_ray=args.use_ray)
+        elif name == "confirmation":
+            result = orchestrator.run_confirmation_stage(
+                rerun=args.rerun_crucible,
+                use_ray=args.use_ray,
+                create_promoted_folder=False,
+            )
+        elif name == "paper_replay":
+            result = orchestrator.run_paper_replay_stage(rerun=args.rerun_crucible)
+        emit(end_pct, f"Completed {name.replace('_', ' ')}", crucibleStage=name)
+    assert result is not None
+    metrics = _flat_numeric_metrics(result.get("metrics") or {})
+    metrics["robustnessScore"] = _robustness_score(metrics)
+    metrics["computeCostUsd"] = 0.0
     summary = {
         "stage": "crucible",
-        "status": "succeeded",
-        "verdict": "robust",
-        "message": "Crucible split-HPO validation completed",
+        "status": "succeeded" if result.get("status") == "complete" else str(result.get("status", "succeeded")),
+        "verdict": _crucible_verdict(result),
+        "message": "Crucible process completed",
         "metrics": metrics,
-        "details": _jsonable(details),
+        "crucibleRunId": result.get("crucible_run_id"),
+        "runDir": result.get("run_dir"),
+        "mlflowRunUrl": result.get("mlflow_run_url"),
+        "details": _jsonable(result),
     }
     _record_simple_result(args, summary)
     _write_manifest(Path(args.output_dir), summary)
     return summary
+
+
+def _requested_crucible_stages(args: argparse.Namespace) -> list[tuple[str, str]]:
+    messages = {name: message for name, message in CRUCIBLE_STAGES}
+    messages["paper_replay"] = "Running paper replay"
+    selected = args.crucible_milestone or [name for name, _ in CRUCIBLE_STAGES]
+    if args.include_paper_replay and "paper_replay" not in selected:
+        selected = [*selected, "paper_replay"]
+    ordered = [name for name in CRUCIBLE_STAGE_NAMES if name in set(selected)]
+    if not ordered:
+        raise ValueError("At least one crucible milestone must be selected")
+    return [(name, messages[name]) for name in ordered]
+
+
+def _crucible_progress_plan(stages: list[tuple[str, str]]) -> dict[str, tuple[float, float]]:
+    start = 12.0
+    span = 82.0 / max(len(stages), 1)
+    return {
+        name: (start + idx * span, min(94.0, start + (idx + 1) * span))
+        for idx, (name, _) in enumerate(stages)
+    }
+
+
+def _flat_numeric_metrics(metrics: dict[str, Any]) -> dict[str, float]:
+    return {
+        str(key): float(value)
+        for key, value in metrics.items()
+        if isinstance(value, (int, float)) and math.isfinite(float(value))
+    }
+
+
+def _robustness_score(metrics: dict[str, float]) -> float:
+    for key in ("confirmation.promoted_candidates", "perturbation.accepted_candidates", "plateau.accepted_seeds"):
+        if key in metrics:
+            return float(metrics[key])
+    return 0.0
+
+
+def _crucible_verdict(result: dict[str, Any]) -> str:
+    metrics = result.get("metrics") or {}
+    if float(metrics.get("confirmation.promoted_candidates") or 0) > 0:
+        return "robust"
+    if result.get("status") == "complete":
+        return "fragile"
+    return str(result.get("status") or "pending")
 
 
 def execute_promotion(args: argparse.Namespace) -> dict[str, Any]:
@@ -327,6 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--config")
+    parser.add_argument("--workload-config")
     parser.add_argument("--account", default="secondary_paper3")
     parser.add_argument("--run-name")
     parser.add_argument("--experiment-name", default="Quant Crucible Platform")
@@ -344,6 +449,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hpo-samples", type=int, default=4)
     parser.add_argument("--hpo-concurrency", type=int, default=1)
     parser.add_argument("--validation-period-days", type=int, default=30)
+    parser.add_argument("--crucible-milestone", action="append", choices=CRUCIBLE_STAGE_NAMES)
+    parser.add_argument("--use-ray", action="store_true")
+    parser.add_argument("--rerun-crucible", action="store_true")
+    parser.add_argument("--include-paper-replay", action="store_true")
     return parser
 
 
