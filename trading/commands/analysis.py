@@ -156,12 +156,14 @@ def run_analysis(
     parameters.update(flatten_config(cfg))
 
     analyzer = PortfolioAnalyzer(pf, om)
+    tags = get_git_info()
+    tags.update(analysis_cfg.get("mlflow_tags") or {})
     report, summary = ExperimentReporter.build_single_report(
         analyzer=analyzer,
         experiment_name=analysis_cfg.get("experiment_name"),
         run_name=analysis_cfg.get("run_name"),
         description=analysis_cfg.get("description"),
-        tags=get_git_info() or None,
+        tags=tags or None,
         benchmark_paths=analysis_cfg.get("benchmarks") or None,
         parameters=parameters,
         config_artifact_paths=_collect_config_artifact_paths(cfg, config_path=config_path),

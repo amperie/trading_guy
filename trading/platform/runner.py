@@ -85,6 +85,23 @@ def _ui_metrics(metrics: dict[str, float]) -> dict[str, float]:
     return {ui_key: float(metrics[source]) for source, ui_key in mapping.items() if source in metrics}
 
 
+def tenant_mlflow_experiment_name(tenant_id: str) -> str:
+    return f"QC_tenant_{tenant_id}"
+
+
+def _apply_tenant_mlflow_grouping(raw_cfg: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    tenant_id = str(args.tenant_id)
+    experiment_name = tenant_mlflow_experiment_name(tenant_id)
+    analysis = raw_cfg.setdefault("analysis", {})
+    analysis["experiment_name"] = experiment_name
+    mlflow_tags = dict(analysis.get("mlflow_tags") or {})
+    mlflow_tags["tenant_id"] = tenant_id
+    mlflow_tags["platform.tenant_id"] = tenant_id
+    analysis["mlflow_tags"] = mlflow_tags
+    raw_cfg.setdefault("mlflow", {})["parent_experiment_name"] = experiment_name
+    return raw_cfg
+
+
 def _namespace(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
     values = {
         "config": args.config,
@@ -101,7 +118,7 @@ def _namespace(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace
         "alpaca_override_url": None,
         "session_id": args.session_id,
         "agg_period": args.agg_period,
-        "mlflow_experiment_name_override": args.experiment_name,
+        "mlflow_experiment_name_override": tenant_mlflow_experiment_name(args.tenant_id),
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -135,7 +152,7 @@ def _platform_backtest_config(args: argparse.Namespace) -> dict[str, Any]:
         "analysis": {
             "enabled": True,
             "log_to_mlflow": not args.no_mlflow,
-            "experiment_name": args.experiment_name,
+            "experiment_name": tenant_mlflow_experiment_name(args.tenant_id),
             "run_name": args.run_name or f"{args.stage}_{args.run_id}",
             "description": "Platform-managed backtest run",
             "benchmarks": {},
@@ -185,6 +202,7 @@ def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     run_name = args.run_name or f"{args.stage}_{args.run_id}"
 
     platform.setdefault("crucible", {})["run_name"] = run_name
+    platform["tenant_id"] = str(args.tenant_id)
     workload.setdefault("workload", {})["run_name"] = run_name
     platform.setdefault("resume", {})["local_cache_dir"] = str(output_dir / "crucible_runs")
     platform.setdefault("hpo", {})["num_samples"] = args.hpo_samples
@@ -194,8 +212,7 @@ def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     platform.setdefault("ray", {})["enabled"] = bool(args.use_ray)
     if args.no_mlflow:
         platform.setdefault("state_store", {})["backend"] = "local"
-    if args.experiment_name:
-        platform.setdefault("mlflow", {})["parent_experiment_name"] = args.experiment_name
+    platform.setdefault("mlflow", {})["parent_experiment_name"] = tenant_mlflow_experiment_name(args.tenant_id)
 
     effective_platform = output_dir / "crucible_platform.yaml"
     effective_workload = output_dir / "crucible_workload.yaml"
@@ -214,8 +231,7 @@ def _load_stage_config(args: argparse.Namespace) -> dict[str, Any]:
     raw_cfg = apply_cli_overrides(raw_cfg, _namespace(args))
     raw_cfg.setdefault("analysis", {})["enabled"] = True
     raw_cfg.setdefault("analysis", {})["run_name"] = args.run_name or f"{args.stage}_{args.run_id}"
-    if args.experiment_name:
-        raw_cfg.setdefault("analysis", {})["experiment_name"] = args.experiment_name
+    _apply_tenant_mlflow_grouping(raw_cfg, args)
     return raw_cfg
 
 

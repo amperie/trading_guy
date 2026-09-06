@@ -2,7 +2,106 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from trading.platform.runner import _equity_chart_points, _write_chart_artifacts
+import trading.platform.runner as platform_runner
+from trading.platform.runner import (
+    _apply_tenant_mlflow_grouping,
+    _equity_chart_points,
+    _namespace,
+    _platform_backtest_config,
+    _crucible_config_paths,
+    _write_chart_artifacts,
+    tenant_mlflow_experiment_name,
+)
+
+
+def _args(**overrides):
+    values = {
+        "stage": "smoke",
+        "run_id": "run-1",
+        "strategy_id": "strategy-1",
+        "tenant_id": "tenant-abc",
+        "config": "platform:backtest",
+        "account": "paper",
+        "symbol": "SPY",
+        "cash": 100000.0,
+        "algorithm": None,
+        "algorithm_url": None,
+        "portfolio": None,
+        "portfolio_url": None,
+        "data": None,
+        "no_mlflow": False,
+        "run_name": None,
+        "session_id": None,
+        "agg_period": None,
+        "experiment_name": "Ignored Platform Default",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_tenant_mlflow_experiment_name_is_stable():
+    assert tenant_mlflow_experiment_name("tenant-abc") == "QC_tenant_tenant-abc"
+
+
+def test_platform_backtest_uses_tenant_mlflow_experiment():
+    cfg = _platform_backtest_config(_args())
+
+    assert cfg["analysis"]["experiment_name"] == "QC_tenant_tenant-abc"
+
+
+def test_tenant_mlflow_grouping_overrides_loaded_config_and_tags():
+    cfg = {
+        "analysis": {
+            "experiment_name": "Old Experiment",
+            "mlflow_tags": {"source": "test"},
+        },
+        "mlflow": {"parent_experiment_name": "Old Parent"},
+    }
+
+    grouped = _apply_tenant_mlflow_grouping(cfg, _args())
+
+    assert grouped["analysis"]["experiment_name"] == "QC_tenant_tenant-abc"
+    assert grouped["mlflow"]["parent_experiment_name"] == "QC_tenant_tenant-abc"
+    assert grouped["analysis"]["mlflow_tags"] == {
+        "source": "test",
+        "tenant_id": "tenant-abc",
+        "platform.tenant_id": "tenant-abc",
+    }
+
+
+def test_platform_namespace_passes_tenant_experiment_override():
+    args = _namespace(_args())
+
+    assert args.mlflow_experiment_name_override == "QC_tenant_tenant-abc"
+
+
+def test_crucible_config_uses_tenant_parent_experiment(monkeypatch):
+    written: dict[str, dict] = {}
+    monkeypatch.setattr(
+        platform_runner,
+        "_load_yaml",
+        lambda path: {"mlflow": {"parent_experiment_name": "Old Parent"}} if "platform" in str(path) else {},
+    )
+    monkeypatch.setattr(
+        platform_runner,
+        "_write_yaml",
+        lambda path, payload: written.__setitem__(path.name, payload),
+    )
+
+    _crucible_config_paths(
+        _args(
+            stage="crucible",
+            output_dir="output",
+            workload_config="workload.yaml",
+            hpo_samples=4,
+            hpo_concurrency=1,
+            validation_period_days=30,
+            use_ray=False,
+        )
+    )
+
+    assert written["crucible_platform.yaml"]["tenant_id"] == "tenant-abc"
+    assert written["crucible_platform.yaml"]["mlflow"]["parent_experiment_name"] == "QC_tenant_tenant-abc"
 
 
 def test_write_chart_artifacts_from_portfolio_value_history(monkeypatch):
