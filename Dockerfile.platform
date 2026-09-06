@@ -12,4 +12,7 @@ WORKDIR /workspace/trading_guy
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
+COPY . .
+RUN uv sync --frozen
+
 CMD ["uv", "run", "python", "-m", "trading.platform.runner", "--help"]
