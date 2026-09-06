@@ -354,7 +354,8 @@ def _return_histogram(series: Any, bucket_pct: float = 0.5) -> list[dict[str, An
         return []
     low = math.floor(min(returns) / bucket_pct) * bucket_pct
     high = math.ceil(max(returns) / bucket_pct) * bucket_pct
-    buckets = [round(low + idx * bucket_pct, 1) for idx in range(int((high - low) / bucket_pct) + 1)]
+    bucket_count = int((high - low) / bucket_pct) + 1
+    buckets = [round(low + idx * bucket_pct, 1) for idx in range(bucket_count)]
     counts = {bucket: 0 for bucket in buckets}
     for value in returns:
         bucket = round(round(value / bucket_pct) * bucket_pct, 1)
@@ -384,7 +385,10 @@ def _monthly_returns(series: Any) -> list[dict[str, Any]]:
     return [
         {
             "year": year,
-            "months": [{"month": month, "value": round(values.get(month, 0.0), 2)} for month in months],
+            "months": [
+                {"month": month, "value": round(values.get(month, 0.0), 2)}
+                for month in months
+            ],
         }
         for year, values in sorted(rows.items())
     ]
