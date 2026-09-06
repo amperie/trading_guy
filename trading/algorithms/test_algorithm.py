@@ -26,7 +26,7 @@ class TestAlgorithm(Algorithm):
 
         retval = [MarketSignal(signal, x.symbol, 100) for x in data]
         symbols = [x.symbol for x in data]
-        logger.info(f"Generated {signal.name} signal for {symbols} (r={r})")
+        logger.debug(f"Generated {signal.name} signal for {symbols} (r={r})")
         logger.debug(f"Returning {len(retval)} signals: {[(s.type.name, s.symbol, s.strength) for s in retval]}")
         return retval
 
