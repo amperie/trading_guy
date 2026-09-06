@@ -6,9 +6,13 @@ import trading.platform.runner as platform_runner
 from trading.platform.runner import (
     _apply_tenant_mlflow_grouping,
     _equity_chart_points,
+    _monthly_returns,
     _namespace,
     _platform_backtest_config,
     _crucible_config_paths,
+    _return_histogram,
+    _trade_rows,
+    _write_backtest_evidence_artifact,
     _write_chart_artifacts,
     tenant_mlflow_experiment_name,
 )
@@ -130,6 +134,39 @@ def test_write_chart_artifacts_from_portfolio_value_history(monkeypatch):
     assert "output/charts/equity_curve.json" in written
 
 
+def test_write_backtest_evidence_artifact(monkeypatch):
+    written: dict[str, str] = {}
+    start = datetime(2026, 1, 1)
+    portfolio = SimpleNamespace(value_history={start: 100.0, start + timedelta(days=1): 110.0})
+    trade = SimpleNamespace(
+        entry_time=start,
+        exit_time=start + timedelta(hours=1),
+        quantity=7,
+        pnl=42.5,
+        pnl_pct=1.25,
+        duration=3600,
+    )
+    analysis = {
+        "daily_returns": {start: 0.01, start + timedelta(days=1): -0.005},
+        "monthly_returns": {start: 0.035},
+        "trades": [trade],
+    }
+
+    monkeypatch.setattr(Path, "mkdir", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        Path,
+        "write_text",
+        lambda self, text, **kwargs: written.__setitem__(self.as_posix(), text),
+    )
+
+    evidence = _write_backtest_evidence_artifact(Path("output"), "research", portfolio, analysis, {"sharpe": 1.2})
+
+    assert evidence["tradeCount"] == 1
+    assert evidence["trades"][0]["bars"] == 12
+    assert evidence["monthlyReturns"][0]["months"][0]["value"] == 3.5
+    assert "output/backtest_evidence.json" in written
+
+
 def test_equity_chart_points_include_drawdown():
     start = datetime(2026, 1, 1)
     portfolio = SimpleNamespace(
@@ -145,3 +182,24 @@ def test_equity_chart_points_include_drawdown():
     assert points[-1]["strategy"] == 90.0
     assert points[-1]["benchmark"] == 100.0
     assert points[-1]["drawdown"] == -25.0
+
+
+def test_return_histogram_buckets_percent_returns():
+    histogram = _return_histogram({"a": 0.011, "b": -0.004, "c": 0.002})
+
+    assert histogram[0]["bucket"].endswith("%")
+    assert sum(bucket["count"] for bucket in histogram) == 3
+
+
+def test_monthly_returns_groups_by_year_and_month():
+    rows = _monthly_returns({datetime(2026, 1, 1): 0.01, datetime(2026, 2, 1): -0.02})
+
+    assert rows[0]["year"] == 2026
+    assert rows[0]["months"][0] == {"month": "Jan", "value": 1.0}
+    assert rows[0]["months"][1] == {"month": "Feb", "value": -2.0}
+
+
+def test_trade_rows_are_capped_and_normalized():
+    trades = [SimpleNamespace(entry_time="in", exit_time="out", side="buy", quantity=3, pnl=-5, pnl_pct=-1)]
+
+    assert _trade_rows(trades)[0]["side"] == "long"

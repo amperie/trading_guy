@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 import dataclasses
 import json
 import math
@@ -276,6 +277,30 @@ def _write_chart_artifacts(output_dir: Path, stage: str, portfolio: Any) -> dict
     return manifest
 
 
+def _write_backtest_evidence_artifact(
+    output_dir: Path,
+    stage: str,
+    portfolio: Any,
+    analysis: dict[str, Any] | None,
+    metrics: dict[str, float],
+) -> dict[str, Any]:
+    evidence = {
+        "stage": stage,
+        "metrics": metrics,
+        "equity": _equity_chart_points(portfolio),
+        "returnsHistogram": _return_histogram((analysis or {}).get("daily_returns")),
+        "monthlyReturns": _monthly_returns((analysis or {}).get("monthly_returns")),
+        "trades": _trade_rows((analysis or {}).get("trades")),
+        "tradeCount": len((analysis or {}).get("trades") or []),
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "backtest_evidence.json").write_text(
+        json.dumps(_jsonable(evidence), indent=2),
+        encoding="utf-8",
+    )
+    return evidence
+
+
 def _equity_chart_points(portfolio: Any, max_points: int = 1200) -> list[dict[str, float | str]]:
     history = getattr(portfolio, "value_history", None)
     if not history:
@@ -304,6 +329,102 @@ def _equity_chart_points(portfolio: Any, max_points: int = 1200) -> list[dict[st
             }
         )
     return points
+
+
+def _series_items(series: Any) -> list[tuple[Any, Any]]:
+    if series is None:
+        return []
+    if isinstance(series, dict):
+        return list(series.items())
+    items = getattr(series, "items", None)
+    if callable(items):
+        return list(items())
+    if isinstance(series, list):
+        return list(enumerate(series))
+    return []
+
+
+def _return_histogram(series: Any, bucket_pct: float = 0.5) -> list[dict[str, Any]]:
+    returns = [
+        float(value) * 100.0
+        for _, value in _series_items(series)
+        if isinstance(value, Real) and math.isfinite(float(value))
+    ]
+    if not returns:
+        return []
+    low = math.floor(min(returns) / bucket_pct) * bucket_pct
+    high = math.ceil(max(returns) / bucket_pct) * bucket_pct
+    buckets = [round(low + idx * bucket_pct, 1) for idx in range(int((high - low) / bucket_pct) + 1)]
+    counts = {bucket: 0 for bucket in buckets}
+    for value in returns:
+        bucket = round(round(value / bucket_pct) * bucket_pct, 1)
+        counts[min(max(bucket, buckets[0]), buckets[-1])] += 1
+    return [
+        {
+            "bucket": f"{bucket:+.1f}%",
+            "count": count,
+            "positive": bucket >= 0,
+        }
+        for bucket, count in counts.items()
+    ]
+
+
+def _monthly_returns(series: Any) -> list[dict[str, Any]]:
+    rows: dict[int, dict[str, float]] = {}
+    for raw_date, value in _series_items(series):
+        if not isinstance(value, Real) or not math.isfinite(float(value)):
+            continue
+        date = getattr(raw_date, "to_pydatetime", lambda: raw_date)()
+        year = int(getattr(date, "year", 0) or 0)
+        month = int(getattr(date, "month", 0) or 0)
+        if not year or month < 1 or month > 12:
+            continue
+        rows.setdefault(year, {})[calendar.month_abbr[month]] = float(value) * 100.0
+    months = list(calendar.month_abbr)[1:]
+    return [
+        {
+            "year": year,
+            "months": [{"month": month, "value": round(values.get(month, 0.0), 2)} for month in months],
+        }
+        for year, values in sorted(rows.items())
+    ]
+
+
+def _get_value(item: Any, *names: str) -> Any:
+    for name in names:
+        if isinstance(item, dict) and name in item:
+            return item[name]
+        if hasattr(item, name):
+            return getattr(item, name)
+    return None
+
+
+def _date_label(value: Any) -> str:
+    if value is None:
+        return "-"
+    fmt = getattr(value, "strftime", None)
+    return fmt("%b %d") if callable(fmt) else str(value)
+
+
+def _trade_rows(trades: Any, limit: int = 18) -> list[dict[str, Any]]:
+    rows = []
+    for idx, trade in enumerate(list(trades or [])[:limit], start=1):
+        pnl = float(_get_value(trade, "pnl") or 0.0)
+        duration = float(_get_value(trade, "duration") or 0.0)
+        side = str(_get_value(trade, "side") or "long").lower()
+        rows.append(
+            {
+                "id": idx,
+                "entry": _date_label(_get_value(trade, "entry_time", "entry")),
+                "exit": _date_label(_get_value(trade, "exit_time", "exit")),
+                "side": "short" if side == "short" else "long",
+                "size": int(float(_get_value(trade, "quantity", "size") or 0.0)),
+                "pnl": round(pnl, 2),
+                "ret": round(float(_get_value(trade, "pnl_pct", "ret") or 0.0), 2),
+                "bars": int(round(duration / 300.0)) if duration else 0,
+            }
+        )
+    return rows
 
 
 def _record_simple_result(args: argparse.Namespace, summary: dict[str, Any]) -> None:
@@ -351,24 +472,34 @@ def execute_backtest_stage(args: argparse.Namespace, *, smoke: bool) -> dict[str
         result_output_dir=args.output_dir,
     )
     emit(85, "Collecting analysis result")
-    raw_metrics = _metric_payload((result or {}).get("analysis"))
+    analysis = (result or {}).get("analysis")
+    raw_metrics = _metric_payload(analysis)
     metrics = _ui_metrics(raw_metrics) | {"computeCostUsd": 0.0}
+    stage = "smoke" if smoke else "research"
     chart_manifest = _write_chart_artifacts(
         Path(args.output_dir),
-        "smoke" if smoke else "research",
+        stage,
         (result or {}).get("portfolio"),
     )
+    evidence = _write_backtest_evidence_artifact(
+        Path(args.output_dir),
+        stage,
+        (result or {}).get("portfolio"),
+        analysis,
+        metrics,
+    )
     summary = {
-        "stage": "smoke" if smoke else "research",
+        "stage": stage,
         "status": "succeeded",
         "verdict": "passed-smoke" if smoke else "caution",
         "message": "Smoke backtest completed" if smoke else "Research backtest completed",
         "metrics": metrics,
-        "analysis": _jsonable((result or {}).get("analysis")),
+        "analysis": _jsonable(analysis),
         "finalValue": (result or {}).get("final_value"),
         "cash": (result or {}).get("cash"),
         "positions": (result or {}).get("positions"),
         "charts": chart_manifest.get("charts", []),
+        "evidence": {"artifact": "backtest_evidence.json", "tradeCount": evidence["tradeCount"]},
     }
     _write_manifest(Path(args.output_dir), summary)
     return summary
