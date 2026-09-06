@@ -14,6 +14,7 @@ from trading.platform.runner import (
     _trade_rows,
     _write_backtest_evidence_artifact,
     _write_chart_artifacts,
+    _write_crucible_evidence_artifact,
     tenant_mlflow_experiment_name,
 )
 
@@ -203,3 +204,39 @@ def test_trade_rows_are_capped_and_normalized():
     trades = [SimpleNamespace(entry_time="in", exit_time="out", side="buy", quantity=3, pnl=-5, pnl_pct=-1)]
 
     assert _trade_rows(trades)[0]["side"] == "long"
+
+
+def test_write_crucible_evidence_aggregates_stage_outputs():
+    root = Path("scratch/unit_crucible_evidence")
+    run_dir = root / "crucible_runs" / "run-1"
+    (run_dir / "stages/03_walk_forward_oos/summaries").mkdir(parents=True, exist_ok=True)
+    (run_dir / "stages/05_regime_gate/summaries").mkdir(parents=True, exist_ok=True)
+    (run_dir / "stages/08_confirmation/summaries").mkdir(parents=True, exist_ok=True)
+    (run_dir / "stages/03_walk_forward_oos/summaries/stage_summary.json").write_text(
+        '{"jobs_total": 2, "jobs_complete": 2, "profitable_windows_pct": 50}',
+        encoding="utf-8",
+    )
+    (run_dir / "stages/03_walk_forward_oos/summaries/oos_summary.csv").write_text(
+        "window_id,sharpe_ratio,total_return_pct,max_drawdown_pct\nw1,1.2,3.5,-4.1\n",
+        encoding="utf-8",
+    )
+    (run_dir / "stages/05_regime_gate/summaries/stage_summary.json").write_text(
+        '{"passed_candidate_count": 1, "reject_count": 0}',
+        encoding="utf-8",
+    )
+    (run_dir / "stages/08_confirmation/summaries/stage_summary.json").write_text(
+        '{"confirmed_candidates": 1, "rejected_candidates": 0}',
+        encoding="utf-8",
+    )
+
+    evidence = _write_crucible_evidence_artifact(
+        root / "platform_run",
+        {"status": "complete", "run_dir": str(run_dir), "crucible_run_id": "run-1"},
+        [("walk_forward_oos", "Running walk-forward OOS validation")],
+        {"confirmation.promoted_candidates": 1.0, "walk_forward_oos.profitable_windows_pct": 50.0},
+    )
+
+    assert evidence["milestones"][1]["status"] == "complete"
+    assert evidence["promotionCriteria"][-1]["status"] == "pass"
+    assert evidence["walkForward"][0]["window"] == "w1"
+    assert (root / "platform_run" / "crucible_evidence.json").exists()

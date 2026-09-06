@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import csv
 import dataclasses
 import json
 import math
@@ -301,6 +302,245 @@ def _write_backtest_evidence_artifact(
     return evidence
 
 
+CRUCIBLE_EVIDENCE_STAGES = {
+    "hpo": ("HPO", "stages/04_hpo/summaries/stage_summary.json"),
+    "walk_forward_oos": ("Walk-forward OOS", "stages/03_walk_forward_oos/summaries/stage_summary.json"),
+    "regime_gate": ("Regime gates", "stages/05_regime_gate/summaries/stage_summary.json"),
+    "plateau": ("Plateau", "stages/06_plateau/summaries/stage_summary.json"),
+    "perturbation": ("Perturbation", "stages/07_perturbation/summaries/stage_summary.json"),
+    "confirmation": ("Confirmation", "stages/08_confirmation/summaries/stage_summary.json"),
+    "paper_replay": ("Paper replay", "stages/09_paper_replay/summaries/stage_summary.json"),
+}
+
+
+def _write_crucible_evidence_artifact(
+    output_dir: Path,
+    result: dict[str, Any],
+    requested: list[tuple[str, str]],
+    metrics: dict[str, float],
+) -> dict[str, Any]:
+    run_dir = Path(str(result.get("run_dir") or ""))
+    summaries = {key: _read_json_file(run_dir / rel) for key, (_, rel) in CRUCIBLE_EVIDENCE_STAGES.items()}
+    evidence = {
+        "stage": "crucible",
+        "status": "succeeded" if result.get("status") == "complete" else str(result.get("status", "succeeded")),
+        "verdict": _crucible_verdict(result),
+        "message": "Crucible process completed",
+        "metrics": metrics,
+        "crucibleRunId": result.get("crucible_run_id"),
+        "mlflowRunUrl": result.get("mlflow_run_url"),
+        "milestones": [
+            _crucible_milestone_payload(name, label, summaries.get(name), name in {item[0] for item in requested})
+            for name, (label, _) in CRUCIBLE_EVIDENCE_STAGES.items()
+        ],
+        "promotionCriteria": _promotion_criteria(summaries, metrics),
+        "risks": _crucible_risks(summaries, metrics),
+        "walkForward": _walk_forward_rows(run_dir),
+        "monteCarlo": _monte_carlo_rows(run_dir),
+        "artifacts": _crucible_artifact_index(result),
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "crucible_evidence.json").write_text(
+        json.dumps(_jsonable(evidence), indent=2),
+        encoding="utf-8",
+    )
+    return evidence
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_csv_rows(path: Path, limit: int = 500) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return [_coerce_csv_row(row) for _, row in zip(range(limit), csv.DictReader(handle))]
+
+
+def _coerce_csv_row(row: dict[str, str]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in row.items():
+        if value is None:
+            payload[key] = None
+            continue
+        clean = value.strip()
+        if clean.lower() in {"true", "false"}:
+            payload[key] = clean.lower() == "true"
+            continue
+        try:
+            payload[key] = float(clean)
+            continue
+        except ValueError:
+            payload[key] = clean
+    return payload
+
+
+def _crucible_milestone_payload(
+    name: str,
+    label: str,
+    summary: dict[str, Any] | None,
+    requested: bool,
+) -> dict[str, Any]:
+    return {
+        "id": name,
+        "label": label,
+        "status": "complete" if summary else "pending",
+        "requested": requested,
+        "message": _milestone_message(name, summary),
+        "metrics": _flat_numeric_metrics(summary or {}),
+    }
+
+
+def _milestone_message(name: str, summary: dict[str, Any] | None) -> str:
+    if not summary:
+        return "Not run yet"
+    if name == "walk_forward_oos":
+        return f"{summary.get('jobs_complete', 0)} of {summary.get('jobs_total', 0)} windows complete"
+    if name == "regime_gate":
+        return f"{summary.get('passed_candidate_count', 0)} candidates passed regime gates"
+    if name == "plateau":
+        return f"{summary.get('accepted_plateaus', 0)} plateaus accepted"
+    if name == "perturbation":
+        return f"{summary.get('accepted_candidates', 0)} candidates survived perturbations"
+    if name == "confirmation":
+        return f"{summary.get('confirmed_candidates', 0)} candidates confirmed"
+    return "Stage complete"
+
+
+def _promotion_criteria(
+    summaries: dict[str, dict[str, Any] | None],
+    metrics: dict[str, float],
+) -> list[dict[str, Any]]:
+    return [
+        _criterion(
+            "walk_forward_oos",
+            "OOS profitable windows",
+            metrics.get("walk_forward_oos.profitable_windows_pct")
+            or _num(summaries.get("walk_forward_oos"), "profitable_windows_pct"),
+            "Recorded once walk-forward OOS completes.",
+            summaries.get("walk_forward_oos") is not None,
+        ),
+        _criterion(
+            "regime_gate",
+            "Regime gate pass count",
+            _num(summaries.get("regime_gate"), "passed_candidate_count"),
+            "At least one candidate should pass generalist or specialist gates.",
+            summaries.get("regime_gate") is not None,
+        ),
+        _criterion(
+            "plateau",
+            "Accepted parameter plateaus",
+            _num(summaries.get("plateau"), "accepted_plateaus"),
+            "Stable candidates should not depend on a knife-edge parameter choice.",
+            summaries.get("plateau") is not None,
+        ),
+        _criterion(
+            "perturbation",
+            "Perturbation survivors",
+            _num(summaries.get("perturbation"), "accepted_candidates"),
+            "Candidates should survive required cost and data shocks.",
+            summaries.get("perturbation") is not None,
+        ),
+        _criterion(
+            "confirmation",
+            "Promotion candidates",
+            metrics.get("confirmation.promoted_candidates") or _num(summaries.get("confirmation"), "confirmed_candidates"),
+            "Final confirmation must produce at least one promotion candidate.",
+            summaries.get("confirmation") is not None,
+        ),
+    ]
+
+
+def _criterion(id_: str, label: str, value: float | None, detail: str, complete: bool) -> dict[str, Any]:
+    if not complete:
+        status = "pending"
+    elif value is not None and value > 0:
+        status = "pass"
+    else:
+        status = "fail"
+    return {"id": id_, "label": label, "status": status, "value": value, "detail": detail}
+
+
+def _num(summary: dict[str, Any] | None, key: str) -> float | None:
+    value = (summary or {}).get(key)
+    return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else None
+
+
+def _crucible_risks(
+    summaries: dict[str, dict[str, Any] | None],
+    metrics: dict[str, float],
+) -> list[dict[str, str]]:
+    risks: list[dict[str, str]] = []
+    if _num(summaries.get("regime_gate"), "reject_count"):
+        risks.append({"severity": "warning", "label": "Regime fragility", "detail": "Some candidates failed regime-aware gates."})
+    if (_num(summaries.get("plateau"), "rejected_peaks") or 0) > 0:
+        risks.append({"severity": "warning", "label": "Parameter instability", "detail": "Some peaks did not hold up in plateau testing."})
+    if (_num(summaries.get("perturbation"), "rejected_candidates") or 0) > 0:
+        risks.append({"severity": "blocking", "label": "Perturbation failure", "detail": "One or more candidates failed required perturbation scenarios."})
+    if summaries.get("confirmation") and (metrics.get("confirmation.promoted_candidates") or 0) <= 0:
+        risks.append({"severity": "blocking", "label": "No promotion candidate", "detail": "Confirmation did not produce a candidate ready for promotion."})
+    if not risks:
+        risks.append({"severity": "info", "label": "No recorded blockers", "detail": "No Crucible risks were recorded in completed milestones."})
+    return risks
+
+
+def _walk_forward_rows(run_dir: Path) -> list[dict[str, Any]]:
+    rows = _read_csv_rows(run_dir / "stages/03_walk_forward_oos/summaries/oos_summary.csv", limit=120)
+    return [
+        {
+            "window": str(row.get("window_id") or idx + 1),
+            "isSharpe": _float(row.get("train_sharpe_ratio")) or _float(row.get("sharpe_ratio")) or 0.0,
+            "oosSharpe": _float(row.get("sharpe_ratio")) or 0.0,
+            "returnPct": _float(row.get("total_return_pct")),
+            "maxDrawdownPct": _float(row.get("max_drawdown_pct")),
+            "degradation": _degradation(row),
+        }
+        for idx, row in enumerate(rows)
+    ]
+
+
+def _monte_carlo_rows(run_dir: Path) -> list[dict[str, Any]]:
+    source = run_dir / "stages/07_perturbation/summaries/perturbation_scenario_summary.csv"
+    if not source.exists():
+        source = run_dir / "stages/06_plateau/summaries/plateau_neighbor_summary.csv"
+    rows = _read_csv_rows(source, limit=30)
+    if not rows:
+        return []
+    path: list[dict[str, Any]] = []
+    cumulative = 100.0
+    for idx, row in enumerate(rows):
+        cumulative *= 1.0 + ((_float(row.get("total_return_pct")) or 0.0) / 100.0)
+        path.append({"step": idx + 1, "p0": round(cumulative, 4)})
+    return path
+
+
+def _degradation(row: dict[str, Any]) -> float | None:
+    in_sample = _float(row.get("train_sharpe_ratio"))
+    oos = _float(row.get("sharpe_ratio"))
+    if in_sample in (None, 0) or oos is None:
+        return None
+    return max(0.0, round((in_sample - oos) / abs(in_sample) * 100.0, 2))
+
+
+def _float(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and math.isfinite(float(value)) else None
+
+
+def _crucible_artifact_index(result: dict[str, Any]) -> list[dict[str, str]]:
+    artifacts = result.get("artifacts") or {}
+    if not isinstance(artifacts, dict):
+        return []
+    return [{"name": str(key), "path": str(value)} for key, value in artifacts.items()]
+
+
 def _equity_chart_points(portfolio: Any, max_points: int = 1200) -> list[dict[str, float | str]]:
     history = getattr(portfolio, "value_history", None)
     if not history:
@@ -553,6 +793,8 @@ def execute_crucible(args: argparse.Namespace) -> dict[str, Any]:
         "mlflowRunUrl": result.get("mlflow_run_url"),
         "details": _jsonable(result),
     }
+    evidence = _write_crucible_evidence_artifact(Path(args.output_dir), result, requested, metrics)
+    summary["evidence"] = {"artifact": "crucible_evidence.json", "milestones": len(evidence["milestones"])}
     _record_simple_result(args, summary)
     _write_manifest(Path(args.output_dir), summary)
     return summary
