@@ -112,6 +112,7 @@ def run_backtest_from_raw_config(
         "final_value": built.portfolio.total_value,
         "cash": built.portfolio.cash,
         "positions": list(built.portfolio.positions.keys()),
+        "portfolio": built.portfolio,
     }
 
 

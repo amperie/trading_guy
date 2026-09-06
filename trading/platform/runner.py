@@ -5,6 +5,7 @@ import dataclasses
 import json
 import math
 import os
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -225,6 +226,70 @@ def _write_manifest(output_dir: Path, summary: dict[str, Any]) -> None:
     )
 
 
+def _write_chart_artifacts(output_dir: Path, stage: str, portfolio: Any) -> dict[str, Any]:
+    points = _equity_chart_points(portfolio)
+    if not points:
+        return {}
+    chart_dir = output_dir / "charts"
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    equity = {
+        "id": "equity",
+        "stage": stage,
+        "title": "Equity Curve",
+        "kind": "equity_curve",
+        "format": "chart-series-v1",
+        "points": points,
+    }
+    manifest = {
+        "charts": [
+            {
+                "id": equity["id"],
+                "title": equity["title"],
+                "kind": equity["kind"],
+                "artifact": "charts/equity_curve.json",
+                "pointCount": len(points),
+            }
+        ]
+    }
+    (chart_dir / "equity_curve.json").write_text(
+        json.dumps(_jsonable(equity), indent=2), encoding="utf-8"
+    )
+    (output_dir / "chart_manifest.json").write_text(
+        json.dumps(_jsonable(manifest), indent=2), encoding="utf-8"
+    )
+    return manifest
+
+
+def _equity_chart_points(portfolio: Any, max_points: int = 1200) -> list[dict[str, float | str]]:
+    history = getattr(portfolio, "value_history", None)
+    if not history:
+        return []
+    items = sorted(history.items(), key=lambda item: str(item[0]))
+    if len(items) > max_points:
+        step = max(1, len(items) // max_points)
+        items = items[::step]
+    values = [float(value) for _, value in items if isinstance(value, Real)]
+    if not values:
+        return []
+    peak = values[0]
+    points: list[dict[str, float | str]] = []
+    for raw_date, value in items:
+        if not isinstance(value, Real):
+            continue
+        numeric = float(value)
+        peak = max(peak, numeric)
+        drawdown = ((numeric - peak) / peak * 100.0) if peak else 0.0
+        points.append(
+            {
+                "date": str(raw_date),
+                "strategy": numeric,
+                "benchmark": values[0],
+                "drawdown": drawdown,
+            }
+        )
+    return points
+
+
 def _record_simple_result(args: argparse.Namespace, summary: dict[str, Any]) -> None:
     sink = LocalRunResultSink(args.output_dir)
     with SinkRun(sink, run_name=args.run_name or f"{args.stage}_{args.run_id}"):
@@ -272,6 +337,11 @@ def execute_backtest_stage(args: argparse.Namespace, *, smoke: bool) -> dict[str
     emit(85, "Collecting analysis result")
     raw_metrics = _metric_payload((result or {}).get("analysis"))
     metrics = _ui_metrics(raw_metrics) | {"computeCostUsd": 0.0}
+    chart_manifest = _write_chart_artifacts(
+        Path(args.output_dir),
+        "smoke" if smoke else "research",
+        (result or {}).get("portfolio"),
+    )
     summary = {
         "stage": "smoke" if smoke else "research",
         "status": "succeeded",
@@ -282,6 +352,7 @@ def execute_backtest_stage(args: argparse.Namespace, *, smoke: bool) -> dict[str
         "finalValue": (result or {}).get("final_value"),
         "cash": (result or {}).get("cash"),
         "positions": (result or {}).get("positions"),
+        "charts": chart_manifest.get("charts", []),
     }
     _write_manifest(Path(args.output_dir), summary)
     return summary
