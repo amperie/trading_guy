@@ -84,6 +84,7 @@ def _load_remote_module(source_url: str):
     module_name = f"trading_remote_{hashlib.sha256(source_url.encode('utf-8')).hexdigest()[:16]}"
     module = types.ModuleType(module_name)
     module.__file__ = source_url
+    module.__dict__.update(_component_globals())
     exec(compile(source, source_url, "exec"), module.__dict__)
     return module
 
@@ -103,5 +104,44 @@ def _load_path_module(source_path: str):
     if spec is None or spec.loader is None:
         raise ComponentLoadError(f"Could not load Python module from '{path}'")
     module = importlib.util.module_from_spec(spec)
+    module.__dict__.update(_component_globals())
     spec.loader.exec_module(module)
     return module
+
+
+def _component_globals() -> dict[str, object]:
+    from trading.core.algorithm import Algorithm
+    from trading.core.classes import (
+        BracketOrder,
+        MarketSignal,
+        Order,
+        OrderAction,
+        OrderStatus,
+        OrderTimeInForce,
+        OrderType,
+        Position,
+        PriceData,
+        SignalType,
+        TickResults,
+        TrailingBracketOrder,
+    )
+    from trading.core.multi_timeframe_algorithm import MultiTimeframeAlgorithm
+    from trading.core.portfolio import Portfolio
+
+    return {
+        "Algorithm": Algorithm,
+        "MultiTimeframeAlgorithm": MultiTimeframeAlgorithm,
+        "Portfolio": Portfolio,
+        "BracketOrder": BracketOrder,
+        "MarketSignal": MarketSignal,
+        "Order": Order,
+        "OrderAction": OrderAction,
+        "OrderStatus": OrderStatus,
+        "OrderTimeInForce": OrderTimeInForce,
+        "OrderType": OrderType,
+        "Position": Position,
+        "PriceData": PriceData,
+        "SignalType": SignalType,
+        "TickResults": TickResults,
+        "TrailingBracketOrder": TrailingBracketOrder,
+    }

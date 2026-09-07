@@ -8,6 +8,8 @@ import pytest
 from trading.commands.common import _load_yaml_profile, adapt_live_config_to_mongo_backtest, apply_cli_overrides
 from trading.config import component_loader
 from trading.config import ExperimentService
+from trading.config.models import ComponentConfig
+from trading.core.classes import SignalType
 from trading.experiments import ExperimentRequest, build_runtime, describe_experiment, load_experiment
 
 
@@ -535,6 +537,32 @@ class LocalAlgo:
         assert config.algorithm.source_path == str(source_path)
         assert built.algorithm.cfg["threshold"] == 2.5
         assert built.algorithm.history_length == 18
+    finally:
+        if source_path.exists():
+            source_path.unlink()
+
+
+def test_local_source_path_component_gets_trading_globals():
+    source_path = Path("scratch") / f"bare_algo_{uuid.uuid4().hex}.py"
+    source_path.write_text(
+        """
+class BareAlgo(Algorithm):
+    def on_data_logic(self, data):
+        return [MarketSignal(SignalType.BUY, "SPY", 1)]
+""",
+        encoding="utf-8",
+    )
+    try:
+        cls = component_loader.import_component_class(
+            ComponentConfig(
+                implementation="BareAlgo",
+                source_path=str(source_path),
+                class_name="BareAlgo",
+                params={},
+            )
+        )
+
+        assert cls({}).on_data_logic([])[0].type is SignalType.BUY
     finally:
         if source_path.exists():
             source_path.unlink()
