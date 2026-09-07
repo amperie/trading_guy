@@ -192,6 +192,29 @@ def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
+def _source_tree_data_path(path: str | Path) -> str:
+    raw = Path(path)
+    if raw.is_absolute():
+        return str(raw)
+    trading_root = Path(__file__).resolve().parents[1]
+    return str((trading_root / raw).resolve())
+
+
+def _materialize_local_workload_paths(workload: dict[str, Any], args: argparse.Namespace) -> None:
+    data_provider = workload.get("data_provider")
+    if isinstance(data_provider, dict):
+        if args.data:
+            data_provider["path"] = args.data
+        if data_provider.get("path"):
+            data_provider["path"] = _source_tree_data_path(data_provider["path"])
+
+
+def _materialize_local_platform_paths(platform: dict[str, Any]) -> None:
+    paper_replay = platform.get("paper_replay")
+    if isinstance(paper_replay, dict) and paper_replay.get("data_path"):
+        paper_replay["data_path"] = _source_tree_data_path(paper_replay["data_path"])
+
+
 def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     output_dir = Path(args.output_dir)
     platform_config = (
@@ -215,6 +238,8 @@ def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     if args.no_mlflow:
         platform.setdefault("state_store", {})["backend"] = "local"
     platform.setdefault("mlflow", {})["parent_experiment_name"] = tenant_mlflow_experiment_name(args.tenant_id)
+    _materialize_local_platform_paths(platform)
+    _materialize_local_workload_paths(workload, args)
 
     effective_platform = output_dir / "crucible_platform.yaml"
     effective_workload = output_dir / "crucible_workload.yaml"

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import trading.platform.runner as platform_runner
 from trading.platform.runner import (
@@ -39,6 +40,7 @@ def _args(**overrides):
         "session_id": None,
         "agg_period": None,
         "experiment_name": "Ignored Platform Default",
+        "workload_config": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -85,7 +87,14 @@ def test_crucible_config_uses_tenant_parent_experiment(monkeypatch):
     monkeypatch.setattr(
         platform_runner,
         "_load_yaml",
-        lambda path: {"mlflow": {"parent_experiment_name": "Old Parent"}} if "platform" in str(path) else {},
+        lambda path: (
+            {
+                "mlflow": {"parent_experiment_name": "Old Parent"},
+                "paper_replay": {"data_path": "data/SPY_5min.csv"},
+            }
+            if "platform" in str(path)
+            else {"data_provider": {"path": "../data/SPY_5min.csv"}}
+        ),
     )
     monkeypatch.setattr(
         platform_runner,
@@ -107,6 +116,38 @@ def test_crucible_config_uses_tenant_parent_experiment(monkeypatch):
 
     assert written["crucible_platform.yaml"]["tenant_id"] == "tenant-abc"
     assert written["crucible_platform.yaml"]["mlflow"]["parent_experiment_name"] == "QC_tenant_tenant-abc"
+    assert Path(written["crucible_workload.yaml"]["data_provider"]["path"]).is_absolute()
+    assert Path(written["crucible_platform.yaml"]["paper_replay"]["data_path"]).is_absolute()
+
+
+def test_crucible_config_uses_data_override_for_workload(monkeypatch):
+    written: dict[str, dict] = {}
+    data_path = str((Path.cwd() / "data" / "uploaded.csv").resolve())
+    monkeypatch.setattr(
+        platform_runner,
+        "_load_yaml",
+        lambda path: {"data_provider": {"path": "../data/SPY_5min.csv"}},
+    )
+    monkeypatch.setattr(
+        platform_runner,
+        "_write_yaml",
+        lambda path, payload: written.__setitem__(path.name, payload),
+    )
+
+    _crucible_config_paths(
+        _args(
+            stage="crucible",
+            output_dir="output",
+            config="platform:crucible",
+            data=data_path,
+            hpo_samples=4,
+            hpo_concurrency=1,
+            validation_period_days=30,
+            use_ray=False,
+        )
+    )
+
+    assert written["crucible_workload.yaml"]["data_provider"]["path"] == data_path
 
 
 def test_write_chart_artifacts_from_portfolio_value_history(monkeypatch):
@@ -207,7 +248,7 @@ def test_trade_rows_are_capped_and_normalized():
 
 
 def test_write_crucible_evidence_aggregates_stage_outputs():
-    root = Path("scratch/unit_crucible_evidence")
+    root = Path(".pytest_tmp") / f"unit_crucible_evidence_{uuid4().hex}"
     run_dir = root / "crucible_runs" / "run-1"
     (run_dir / "stages/03_walk_forward_oos/summaries").mkdir(parents=True, exist_ok=True)
     (run_dir / "stages/05_regime_gate/summaries").mkdir(parents=True, exist_ok=True)
