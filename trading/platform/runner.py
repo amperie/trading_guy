@@ -7,6 +7,7 @@ import dataclasses
 import json
 import math
 import os
+from datetime import datetime
 from numbers import Real
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ CRUCIBLE_STAGES = (
     ("confirmation", "Running final confirmation"),
 )
 CRUCIBLE_STAGE_NAMES = tuple(stage[0] for stage in CRUCIBLE_STAGES) + ("paper_replay",)
+MIN_CRUCIBLE_DATA_ROWS = 100
 
 
 def emit(progress_pct: float, message: str, **extra: Any) -> None:
@@ -252,6 +254,7 @@ def _emit_crucible_runtime_diagnostics(platform_path: Path, workload_path: Path)
     platform = _load_yaml(platform_path)
     workload = _load_yaml(workload_path)
     data_provider = workload.get("data_provider") or {}
+    data_diagnostics = _csv_data_diagnostics(data_provider)
     emit(
         9,
         "Crucible runtime diagnostics",
@@ -264,7 +267,68 @@ def _emit_crucible_runtime_diagnostics(platform_path: Path, workload_path: Path)
         portfolioConfig=workload.get("portfolio"),
         runnerConfig=platform,
         runtimeAssets=workload.get("platform_runtime_assets") or [],
+        dataDiagnostics=data_diagnostics,
     )
+
+
+def _csv_data_diagnostics(data_provider: dict[str, Any]) -> dict[str, Any]:
+    path = data_provider.get("path")
+    diagnostics: dict[str, Any] = {
+        "path": path,
+        "startDate": data_provider.get("start_date"),
+        "endDate": data_provider.get("end_date"),
+    }
+    if not path:
+        return diagnostics | {"exists": False, "error": "data_provider.path is missing"}
+    csv_path = Path(path)
+    diagnostics["exists"] = csv_path.exists()
+    if not csv_path.exists():
+        return diagnostics
+
+    total_rows = filtered_rows = 0
+    first_timestamp = last_timestamp = None
+    start = _parse_date(data_provider.get("start_date"))
+    end = _parse_date(data_provider.get("end_date"))
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            total_rows += 1
+            ts = _parse_date(row.get("timestamp"))
+            if ts is not None:
+                first_timestamp = ts if first_timestamp is None else min(first_timestamp, ts)
+                last_timestamp = ts if last_timestamp is None else max(last_timestamp, ts)
+            if (start is None or ts is None or ts >= start) and (
+                end is None or ts is None or ts <= end
+            ):
+                filtered_rows += 1
+    return diagnostics | {
+        "totalRows": total_rows,
+        "filteredRows": filtered_rows,
+        "firstTimestamp": first_timestamp,
+        "lastTimestamp": last_timestamp,
+        "minimumRows": MIN_CRUCIBLE_DATA_ROWS,
+    }
+
+
+def _parse_date(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _validate_crucible_data(data_provider: dict[str, Any], diagnostics: dict[str, Any]) -> None:
+    if not diagnostics.get("exists"):
+        raise FileNotFoundError(f"Crucible data file not found: {data_provider.get('path')}")
+    filtered_rows = diagnostics.get("filteredRows")
+    if isinstance(filtered_rows, int) and filtered_rows < MIN_CRUCIBLE_DATA_ROWS:
+        raise ValueError(
+            "Crucible dataset is too small after date filtering: "
+            f"{filtered_rows} rows at {data_provider.get('path')} "
+            f"from {data_provider.get('start_date')} to {data_provider.get('end_date')}. "
+            f"Upload a real market-data CSV with at least {MIN_CRUCIBLE_DATA_ROWS} rows."
+        )
 
 
 def _load_stage_config(args: argparse.Namespace) -> dict[str, Any]:
@@ -797,6 +861,9 @@ def execute_crucible(args: argparse.Namespace) -> dict[str, Any]:
     emit(8, "Preparing crucible platform and workload configs")
     platform_path, workload_path = _crucible_config_paths(args)
     _emit_crucible_runtime_diagnostics(platform_path, workload_path)
+    workload = _load_yaml(workload_path)
+    data_provider = workload.get("data_provider") or {}
+    _validate_crucible_data(data_provider, _csv_data_diagnostics(data_provider))
     orchestrator = CrucibleOrchestrator(platform_path, workload_path)
     result: dict[str, Any] | None = None
     requested = _requested_crucible_stages(args)

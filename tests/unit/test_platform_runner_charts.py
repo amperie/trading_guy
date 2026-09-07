@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 import trading.platform.runner as platform_runner
 from trading.platform.runner import (
     _apply_tenant_mlflow_grouping,
@@ -10,6 +11,7 @@ from trading.platform.runner import (
     _monthly_returns,
     _namespace,
     _platform_backtest_config,
+    _csv_data_diagnostics,
     _emit_crucible_runtime_diagnostics,
     _crucible_config_paths,
     _return_histogram,
@@ -17,6 +19,7 @@ from trading.platform.runner import (
     _write_backtest_evidence_artifact,
     _write_chart_artifacts,
     _write_crucible_evidence_artifact,
+    _validate_crucible_data,
     tenant_mlflow_experiment_name,
 )
 
@@ -192,6 +195,27 @@ platform_runtime_assets:
     assert payload["algorithmConfig"]["source_path"] == "/workspace/results/components/algo.py"
     assert payload["portfolioConfig"]["source_path"] == "/workspace/results/components/pf.py"
     assert payload["runtimeAssets"][0]["uri"] == "s3://bucket/tenant/uploads/datasets/spy.csv"
+
+
+def test_validate_crucible_data_rejects_tiny_csv(tmp_path):
+    path = tmp_path / "tiny.csv"
+    path.write_text(
+        "timestamp,symbol,open,high,low,close,volume\n"
+        "2015-01-02T09:30:00,SPY,1,1,1,1,100\n"
+        "2015-01-02T09:35:00,SPY,1,1,1,1,100\n",
+        encoding="utf-8",
+    )
+    data_provider = {
+        "path": str(path),
+        "start_date": "2015-01-02",
+        "end_date": "2022-12-30",
+    }
+    diagnostics = _csv_data_diagnostics(data_provider)
+
+    assert diagnostics["totalRows"] == 2
+    assert diagnostics["filteredRows"] == 2
+    with pytest.raises(ValueError, match="Crucible dataset is too small"):
+        _validate_crucible_data(data_provider, diagnostics)
 
 
 def test_write_chart_artifacts_from_portfolio_value_history(monkeypatch):

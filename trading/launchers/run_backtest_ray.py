@@ -30,6 +30,18 @@ _MISSING = object()
 FAILED_TRIAL_METRIC = -1e12
 
 
+class BacktestNoValueHistoryError(RuntimeError):
+    def __init__(self, diagnostics: dict):
+        self.diagnostics = diagnostics
+        super().__init__(
+            "Backtest produced no portfolio value history; "
+            f"data_rows={diagnostics.get('data_rows')} "
+            f"engine_ticks_processed={diagnostics.get('engine_ticks_processed')} "
+            f"portfolio_keep_history={diagnostics.get('portfolio_keep_history')} "
+            f"portfolio_value_history_rows={diagnostics.get('portfolio_value_history_rows')}"
+        )
+
+
 def _safe_ray_shutdown() -> None:
     try:
         ray.shutdown()
@@ -330,13 +342,10 @@ def run_backtest_core(
 
     sim = BacktestingEngine({"state_store": {"enabled": False}}, dp, al, om, pf)
     sim.run()
-    _log_backtest_diagnostics(backtest_cfg, alg_cfg, pf_cfg, dp_cfg, sim)
+    diagnostics = _backtest_diagnostics(backtest_cfg, alg_cfg, pf_cfg, dp_cfg, sim)
+    _log_backtest_diagnostics(diagnostics)
     if not getattr(sim.pf, "value_history", {}):
-        raise RuntimeError(
-            "Backtest produced no portfolio value history; check that the data file "
-            "has rows after date filtering and that the portfolio records history. "
-            f"diagnostics={_backtest_diagnostics(backtest_cfg, alg_cfg, pf_cfg, dp_cfg, sim)}"
-        )
+        raise BacktestNoValueHistoryError(diagnostics)
 
     print(f"\nAnalyzing results for run {run_name}")
     engine = AnalysisEngine(sim.pf, pf.om)
@@ -357,13 +366,8 @@ def run_backtest_core(
     return results
 
 
-def _log_backtest_diagnostics(
-    backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: dict, sim
-) -> None:
-    logger.info(
-        "backtest_runtime_diagnostics %s",
-        _backtest_diagnostics(backtest_cfg, alg_cfg, pf_cfg, dp_cfg, sim),
-    )
+def _log_backtest_diagnostics(diagnostics: dict) -> None:
+    logger.info("backtest_runtime_diagnostics %s", diagnostics)
 
 
 def _backtest_diagnostics(
@@ -387,6 +391,33 @@ def _backtest_diagnostics(
         "portfolio_config": pf_cfg,
         "backtest_config": backtest_cfg,
     }
+
+
+def _failed_trial_metrics(exc: Exception) -> dict:
+    diagnostics = getattr(exc, "diagnostics", None) or {}
+    payload = {
+        "_metric": FAILED_TRIAL_METRIC,
+        "_trial_failed": 1.0,
+        "_failure_reason": str(exc),
+        "_failure_traceback": traceback.format_exc(limit=8),
+    }
+    for key in (
+        "data_rows",
+        "engine_ticks_total",
+        "engine_ticks_processed",
+        "portfolio_keep_history",
+        "portfolio_value_history_rows",
+        "portfolio_tick_history_rows",
+    ):
+        value = diagnostics.get(key)
+        if isinstance(value, bool):
+            value = float(value)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            payload[f"_diagnostic_{key}"] = float(value)
+    for key in ("data_path", "data_start_date", "data_end_date"):
+        if diagnostics.get(key) is not None:
+            payload[f"_diagnostic_{key}"] = str(diagnostics[key])
+    return payload
 
 
 @ray.remote
@@ -532,12 +563,7 @@ def backtest_objective_fn(
         )
     except Exception as exc:
         logger.exception("HPO trial failed before producing an objective metric")
-        return {
-            "_metric": FAILED_TRIAL_METRIC,
-            "_trial_failed": 1.0,
-            "_failure_reason": str(exc),
-            "_failure_traceback": traceback.format_exc(limit=8),
-        }
+        return _failed_trial_metrics(exc)
 
     score, details = objective_score(result["metrics"], backtest_cfg.get("objective"))
     return {"_metric": score, "_trial_failed": 0.0, **details}
@@ -867,6 +893,7 @@ def tune_backtest_hyperparameters(
                     "metric": None,
                     "status": "failed",
                     "failure_reason": result.metrics.get("_failure_reason", "trial_failed"),
+                    "failure_diagnostics": _failure_diagnostics(result.metrics),
                 })
                 continue
             metric = result.metrics.get("_metric")
@@ -891,7 +918,7 @@ def tune_backtest_hyperparameters(
         completed = [trial for trial in trial_summaries if trial.get("status") != "failed"]
         if not completed:
             reasons = sorted({
-                str(trial.get("failure_reason", "missing_or_non_finite_metric"))[:240]
+                _failure_summary(trial)
                 for trial in trial_summaries
             })
             raise RuntimeError(
@@ -914,3 +941,31 @@ def tune_backtest_hyperparameters(
         _restore_env_var("TUNE_DISABLE_SIGINT_HANDLER", previous_sigint_setting)
         if ray.is_initialized():
             _safe_ray_shutdown()
+
+
+def _failure_diagnostics(metrics: dict) -> dict[str, object]:
+    prefix = "_diagnostic_"
+    return {
+        str(key)[len(prefix):]: value
+        for key, value in metrics.items()
+        if str(key).startswith(prefix)
+    }
+
+
+def _failure_summary(trial: dict) -> str:
+    reason = str(trial.get("failure_reason", "missing_or_non_finite_metric"))[:180]
+    diagnostics = trial.get("failure_diagnostics") or {}
+    if not diagnostics:
+        return reason
+    detail = " ".join(
+        f"{key}={diagnostics.get(key)}"
+        for key in (
+            "data_rows",
+            "engine_ticks_processed",
+            "portfolio_keep_history",
+            "portfolio_value_history_rows",
+            "data_path",
+        )
+        if diagnostics.get(key) is not None
+    )
+    return f"{reason} ({detail})" if detail else reason

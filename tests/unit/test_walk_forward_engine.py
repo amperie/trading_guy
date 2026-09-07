@@ -934,6 +934,30 @@ def test_backtest_objective_fn_returns_failed_trial_summary(monkeypatch):
     assert result["_failure_reason"] == "no history"
 
 
+def test_failed_trial_metrics_include_no_history_diagnostics():
+    exc = run_backtest_ray.BacktestNoValueHistoryError(
+        {
+            "data_path": "/workspace/results/inputs/data.csv",
+            "data_start_date": "2015-01-02",
+            "data_end_date": "2022-12-30",
+            "data_rows": 0,
+            "engine_ticks_total": 0,
+            "engine_ticks_processed": 0,
+            "portfolio_keep_history": True,
+            "portfolio_value_history_rows": 0,
+            "portfolio_tick_history_rows": 0,
+        }
+    )
+
+    result = run_backtest_ray._failed_trial_metrics(exc)
+
+    assert result["_trial_failed"] == 1.0
+    assert result["_diagnostic_data_rows"] == 0.0
+    assert result["_diagnostic_engine_ticks_processed"] == 0.0
+    assert result["_diagnostic_portfolio_keep_history"] == 1.0
+    assert result["_diagnostic_data_path"] == "/workspace/results/inputs/data.csv"
+
+
 def test_algorithm_base_reconfigure_syncs_matching_nested_attrs():
     algo = DummyNestedConfigAlgorithm({"alpha": 1, "nested": {"beta": 2}}, history_length=5)
 
