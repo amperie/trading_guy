@@ -834,9 +834,15 @@ def test_run_backtest_core_preserves_history_length(monkeypatch):
 
     class FakeEngine:
         def __init__(self, cfg, dp, al, om, pf):
+            self.dp = dp
             self.pf = pf
+            self._progress_total_ticks = 1
+            self._progress_processed_ticks = 1
 
         def run(self):
+            ts = pd.Timestamp("2024-01-01")
+            self.pf.tick_history[ts] = []
+            self.pf.value_history[ts] = 1000.0
             return None
 
     class FakeAnalysisEngine:
@@ -863,6 +869,69 @@ def test_run_backtest_core_preserves_history_length(monkeypatch):
     assert captured["history_length"] == 11
     assert "history_length" not in captured["cfg"]
     assert captured["cfg"]["alpha"] == 2
+
+
+def test_run_backtest_core_reports_empty_value_history(monkeypatch):
+    class FakeDP:
+        def __init__(self, cfg):
+            self.cfg = cfg
+            self.data = pd.DataFrame()
+
+    class FakeEngine:
+        def __init__(self, cfg, dp, al, om, pf):
+            self.dp = dp
+            self.pf = pf
+            self._progress_total_ticks = 0
+            self._progress_processed_ticks = 0
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr(run_backtest_ray, "BacktestingEngine", FakeEngine)
+
+    with pytest.raises(RuntimeError, match="no portfolio value history"):
+        run_backtest_ray.run_backtest_core(
+            backtest_cfg={
+                "experiment_name": "exp",
+                "starting_cash": 1000.0,
+                "run_name": "run",
+                "description": "desc",
+            },
+            alg_cfg={"history_length": 11, "alpha": 2},
+            pf_cfg={"symbol": "SPY", "cash": 1000.0, "keep_history": True},
+            dp_cfg={"path": "/workspace/results/inputs/spy.csv"},
+            algorithm_class=DummyAlgorithm,
+            portfolio_class=DummyPortfolio,
+            data_provider_class=FakeDP,
+            order_manager_class=DummyOrderManager,
+        )
+
+
+def test_backtest_objective_fn_returns_failed_trial_summary(monkeypatch):
+    monkeypatch.setattr(
+        run_backtest_ray,
+        "run_backtest_local",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no history")),
+    )
+
+    result = run_backtest_ray.backtest_objective_fn(
+        config={"lookback": 14},
+        symbol="SPY",
+        algorithm_class=DummyAlgorithm,
+        portfolio_class=DummyPortfolio,
+        data_provider_class=DummyDataProvider,
+        order_manager_class=DummyOrderManager,
+        base_algorithm_config={},
+        base_portfolio_config={},
+        base_data_provider_config={"path": "/workspace/results/inputs/spy.csv"},
+        base_backtest_config={"run_name": "wf-run"},
+        algorithm_param_keys=[],
+        portfolio_param_keys=[],
+    )
+
+    assert result["_metric"] == run_backtest_ray.FAILED_TRIAL_METRIC
+    assert result["_trial_failed"] == 1.0
+    assert result["_failure_reason"] == "no history"
 
 
 def test_algorithm_base_reconfigure_syncs_matching_nested_attrs():

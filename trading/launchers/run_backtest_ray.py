@@ -2,6 +2,7 @@ import math
 import os
 import signal
 import time
+import traceback
 from numbers import Integral, Real
 from pathlib import Path
 from typing import Type
@@ -26,6 +27,7 @@ from ray.tune.search.optuna import OptunaSearch
 
 logger = Logger().get_logger(__name__)
 _MISSING = object()
+FAILED_TRIAL_METRIC = -1e12
 
 
 def _safe_ray_shutdown() -> None:
@@ -328,6 +330,13 @@ def run_backtest_core(
 
     sim = BacktestingEngine({"state_store": {"enabled": False}}, dp, al, om, pf)
     sim.run()
+    _log_backtest_diagnostics(backtest_cfg, alg_cfg, pf_cfg, dp_cfg, sim)
+    if not getattr(sim.pf, "value_history", {}):
+        raise RuntimeError(
+            "Backtest produced no portfolio value history; check that the data file "
+            "has rows after date filtering and that the portfolio records history. "
+            f"diagnostics={_backtest_diagnostics(backtest_cfg, alg_cfg, pf_cfg, dp_cfg, sim)}"
+        )
 
     print(f"\nAnalyzing results for run {run_name}")
     engine = AnalysisEngine(sim.pf, pf.om)
@@ -346,6 +355,38 @@ def run_backtest_core(
         benchmark_paths=benchmark_paths if benchmark_paths else None,
     )
     return results
+
+
+def _log_backtest_diagnostics(
+    backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: dict, sim
+) -> None:
+    logger.info(
+        "backtest_runtime_diagnostics %s",
+        _backtest_diagnostics(backtest_cfg, alg_cfg, pf_cfg, dp_cfg, sim),
+    )
+
+
+def _backtest_diagnostics(
+    backtest_cfg: dict, alg_cfg: dict, pf_cfg: dict, dp_cfg: dict, sim
+) -> dict:
+    data = getattr(getattr(sim, "dp", None), "data", None)
+    return {
+        "run_name": backtest_cfg.get("run_name"),
+        "data_path": dp_cfg.get("path"),
+        "data_start_date": dp_cfg.get("start_date"),
+        "data_end_date": dp_cfg.get("end_date"),
+        "data_rows": None if data is None else int(len(data)),
+        "engine_ticks_total": getattr(sim, "_progress_total_ticks", None),
+        "engine_ticks_processed": getattr(sim, "_progress_processed_ticks", None),
+        "portfolio_keep_history": getattr(getattr(sim, "pf", None), "keep_history", None),
+        "portfolio_value_history_rows": len(
+            getattr(getattr(sim, "pf", None), "value_history", {})
+        ),
+        "portfolio_tick_history_rows": len(getattr(getattr(sim, "pf", None), "tick_history", {})),
+        "algorithm_config": alg_cfg,
+        "portfolio_config": pf_cfg,
+        "backtest_config": backtest_cfg,
+    }
 
 
 @ray.remote
@@ -483,14 +524,23 @@ def backtest_objective_fn(
     backtest_cfg = base_backtest_config
 
     # Run backtest with merged configurations
-    result = run_backtest_local(
-        backtest_cfg, alg_cfg, pf_cfg, dp_cfg, warmup_data_provider_config,
-        algorithm_class, portfolio_class, data_provider_class, order_manager_class,
-        log_to_mlflow=log_to_mlflow,
-    )
+    try:
+        result = run_backtest_local(
+            backtest_cfg, alg_cfg, pf_cfg, dp_cfg, warmup_data_provider_config,
+            algorithm_class, portfolio_class, data_provider_class, order_manager_class,
+            log_to_mlflow=log_to_mlflow,
+        )
+    except Exception as exc:
+        logger.exception("HPO trial failed before producing an objective metric")
+        return {
+            "_metric": FAILED_TRIAL_METRIC,
+            "_trial_failed": 1.0,
+            "_failure_reason": str(exc),
+            "_failure_traceback": traceback.format_exc(limit=8),
+        }
 
     score, details = objective_score(result["metrics"], backtest_cfg.get("objective"))
-    return {"_metric": score, **details}
+    return {"_metric": score, "_trial_failed": 0.0, **details}
 
 
 def objective_score(metrics, objective: dict | str | None = None) -> tuple[float, dict[str, float]]:
@@ -811,11 +861,19 @@ def tune_backtest_hyperparameters(
         results = tuner.fit()
         trial_summaries = []
         for result in results:
+            if result.metrics.get("_trial_failed"):
+                trial_summaries.append({
+                    "config": result.config,
+                    "metric": None,
+                    "status": "failed",
+                    "failure_reason": result.metrics.get("_failure_reason", "trial_failed"),
+                })
+                continue
             metric = result.metrics.get("_metric")
             if metric is None:
                 continue
             metric_value = float(metric)
-            if not math.isfinite(metric_value):
+            if not math.isfinite(metric_value) or metric_value <= FAILED_TRIAL_METRIC:
                 continue
             objective_details = {}
             for key, value in result.metrics.items():
@@ -824,14 +882,24 @@ def tune_backtest_hyperparameters(
                         objective_details[key] = float(value)
                     except (TypeError, ValueError):
                         continue
-            trial_summaries.append({"config": result.config, "metric": metric_value, "objective_details": objective_details})
-        if not trial_summaries:
+            trial_summaries.append({
+                "config": result.config,
+                "metric": metric_value,
+                "status": "complete",
+                "objective_details": objective_details,
+            })
+        completed = [trial for trial in trial_summaries if trial.get("status") != "failed"]
+        if not completed:
+            reasons = sorted({
+                str(trial.get("failure_reason", "missing_or_non_finite_metric"))[:240]
+                for trial in trial_summaries
+            })
             raise RuntimeError(
                 f"All {num_samples} HPO trials failed or produced no optimization metric. "
-                "Check Ray Tune logs for individual trial errors."
+                f"Failure reasons: {reasons or ['missing_or_non_finite_metric']}"
             )
 
-        best_config = max(trial_summaries, key=lambda trial: trial["metric"])["config"]
+        best_config = max(completed, key=lambda trial: trial["metric"])["config"]
         if return_trial_summaries:
             print(best_config)
             return best_config, trial_summaries
