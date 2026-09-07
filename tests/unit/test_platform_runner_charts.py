@@ -10,6 +10,7 @@ from trading.platform.runner import (
     _monthly_returns,
     _namespace,
     _platform_backtest_config,
+    _emit_crucible_runtime_diagnostics,
     _crucible_config_paths,
     _return_histogram,
     _trade_rows,
@@ -148,6 +149,49 @@ def test_crucible_config_uses_data_override_for_workload(monkeypatch):
     )
 
     assert written["crucible_workload.yaml"]["data_provider"]["path"] == data_path
+
+
+def test_emit_crucible_runtime_diagnostics(tmp_path, monkeypatch):
+    platform_path = tmp_path / "platform.yaml"
+    workload_path = tmp_path / "workload.yaml"
+    platform_path.write_text(
+        """
+crucible:
+  run_name: run-1
+hpo:
+  num_samples: 4
+""",
+        encoding="utf-8",
+    )
+    workload_path.write_text(
+        """
+data_provider:
+  path: /workspace/results/inputs/spy.csv
+algorithm:
+  algorithm: platform_assets.UploadedAlgorithm
+  source_path: /workspace/results/components/algo.py
+portfolio:
+  portfolio: platform_assets.UploadedPortfolio
+  source_path: /workspace/results/components/pf.py
+platform_runtime_assets:
+  - role: dataset
+    uri: s3://bucket/tenant/uploads/datasets/spy.csv
+    host_path: E:/runs/run-1/inputs/spy.csv
+    container_path: /workspace/results/inputs/spy.csv
+""",
+        encoding="utf-8",
+    )
+    events = []
+    monkeypatch.setattr(platform_runner, "emit", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    _emit_crucible_runtime_diagnostics(platform_path, workload_path)
+
+    assert events[0][0] == (9, "Crucible runtime diagnostics")
+    payload = events[0][1]
+    assert payload["dataPath"] == "/workspace/results/inputs/spy.csv"
+    assert payload["algorithmConfig"]["source_path"] == "/workspace/results/components/algo.py"
+    assert payload["portfolioConfig"]["source_path"] == "/workspace/results/components/pf.py"
+    assert payload["runtimeAssets"][0]["uri"] == "s3://bucket/tenant/uploads/datasets/spy.csv"
 
 
 def test_write_chart_artifacts_from_portfolio_value_history(monkeypatch):

@@ -248,6 +248,25 @@ def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     return effective_platform, effective_workload
 
 
+def _emit_crucible_runtime_diagnostics(platform_path: Path, workload_path: Path) -> None:
+    platform = _load_yaml(platform_path)
+    workload = _load_yaml(workload_path)
+    data_provider = workload.get("data_provider") or {}
+    emit(
+        9,
+        "Crucible runtime diagnostics",
+        diagnosticType="crucible_runtime_config",
+        platformConfigPath=platform_path,
+        workloadConfigPath=workload_path,
+        dataPath=data_provider.get("path"),
+        dataProviderConfig=data_provider,
+        algorithmConfig=workload.get("algorithm"),
+        portfolioConfig=workload.get("portfolio"),
+        runnerConfig=platform,
+        runtimeAssets=workload.get("platform_runtime_assets") or [],
+    )
+
+
 def _load_stage_config(args: argparse.Namespace) -> dict[str, Any]:
     if args.config == "platform:backtest":
         raw_cfg = _platform_backtest_config(args)
@@ -777,6 +796,7 @@ def execute_backtest_stage(args: argparse.Namespace, *, smoke: bool) -> dict[str
 def execute_crucible(args: argparse.Namespace) -> dict[str, Any]:
     emit(8, "Preparing crucible platform and workload configs")
     platform_path, workload_path = _crucible_config_paths(args)
+    _emit_crucible_runtime_diagnostics(platform_path, workload_path)
     orchestrator = CrucibleOrchestrator(platform_path, workload_path)
     result: dict[str, Any] | None = None
     requested = _requested_crucible_stages(args)
