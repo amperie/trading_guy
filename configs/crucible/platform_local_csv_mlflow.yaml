@@ -43,6 +43,7 @@ walk_forward:
   embargo_days: 2
   step_days: 30
   min_windows: 2
+  max_candidates: 1
 
 hpo:
   num_samples: 3
@@ -65,14 +66,14 @@ hpo:
 gates:
   generalist:
     min_trades: 0
-    min_median_oos_return: -5.0
-    min_profitable_windows_pct: 0.0
+    min_median_oos_return: 0.0
+    min_profitable_windows_pct: 0.50
     max_drawdown: 0.35
   specialist:
     min_regime_bars: 5
     min_regime_windows: 1
-    min_regime_median_oos_return: -5.0
-    min_regime_profitable_windows_pct: 0.0
+    min_regime_median_oos_return: 0.0
+    min_regime_profitable_windows_pct: 0.50
     max_regime_drawdown: 0.35
 
 plateau:
@@ -81,13 +82,13 @@ plateau:
   neighborhood_radius_pct: 0.08
   max_neighbors_per_seed: 3
   min_neighbor_trials: 1
-  min_neighbor_pass_rate: 0.0
-  max_peak_to_median_degradation: 500.0
+  min_neighbor_pass_rate: 0.50
+  max_peak_to_median_degradation: 0.50
 
 perturbations:
   max_scenarios: 2
-  max_required_failures: 1
-  min_scenario_pass_rate: 0.0
+  max_required_failures: 0
+  min_scenario_pass_rate: 0.50
   date_time_enabled: true
   date_time_scenarios: 0
   max_date_time_range_pct: 0.10
@@ -110,15 +111,15 @@ monte_carlo:
   min_observations: 2
   seed: 42
   ruin_threshold_pct: -50.0
-  max_ruin_probability: 1.0
-  max_loss_probability: 1.0
-  min_p5_terminal_return_pct: -100.0
-  max_p95_drawdown_pct: 100.0
+  max_ruin_probability: 0.05
+  max_loss_probability: 0.40
+  min_p5_terminal_return_pct: -25.0
+  max_p95_drawdown_pct: 35.0
 
 confirmation:
   start_date: "2021-09-01"
   end_date: "2021-10-29"
-  min_return_pct: -10.0
+  min_return_pct: 0.0
   max_drawdown_pct: 35.0
   min_trades: 0
 

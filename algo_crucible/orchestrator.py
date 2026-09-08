@@ -8,7 +8,7 @@ import pandas as pd
 import yaml
 
 from algo_crucible.backtests import run_validation_backtest
-from algo_crucible.builders import build_candidate, build_components
+from algo_crucible.builders import build_candidate, build_candidate_from_params, build_components
 from algo_crucible.confirmation import (
     build_promotion_packet,
     confirmation_metrics,
@@ -140,8 +140,8 @@ class CrucibleOrchestrator:
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
         if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_03}/summaries/stage_summary.json") and not rerun:
             return run
-        candidate = build_candidate(cfg)
-        dp, _, _, _ = build_components(cfg.workload, candidate)
+        candidates = _walk_forward_candidates(cfg, Path(run["run_dir"]))
+        dp, _, _, _ = build_components(cfg.workload, candidates[0])
         dp.load_data()
         data_start, data_end = data_range_from_frame(dp.data)
         wf_cfg = cfg.platform.get("walk_forward", {})
@@ -162,6 +162,7 @@ class CrucibleOrchestrator:
                 "window": row,
                 "workload": cfg.workload,
             })
+            for candidate in candidates
             for row in window_rows
         ]
         ray_cfg = cfg.platform.get("ray", {})
@@ -187,7 +188,9 @@ class CrucibleOrchestrator:
         summary = {
             "crucible_run_id": cfg.crucible_run_id,
             "run_name": cfg.run_name,
-            "candidate_id": candidate.candidate_id,
+            "candidate_id": candidates[0].candidate_id,
+            "candidate_count": len(candidates),
+            "candidate_ids": [candidate.candidate_id for candidate in candidates],
             "window_count": len(windows),
             "jobs_total": batch.jobs_total,
             "jobs_complete": batch.jobs_complete,
@@ -739,6 +742,48 @@ def _window_metric_row(result: dict[str, Any]) -> dict[str, Any]:
         **result["window"],
         **result["overall_scorecard"],
     }
+
+
+def _walk_forward_candidates(cfg, run_dir: Path) -> list[Any]:
+    path = _existing_path(run_dir, f"{STAGE_04}/summaries/hpo_trial_summary.csv", "summaries/hpo_trial_summary.csv")
+    if not path.exists():
+        return [build_candidate(cfg)]
+    try:
+        rows = pd.read_csv(path).to_dict(orient="records")
+    except pd.errors.EmptyDataError as exc:
+        raise RuntimeError("HPO trial summary exists but has no selectable candidates") from exc
+    rows = [
+        row for row in rows
+        if str(row.get("status", "complete")) == "complete" and _number(row.get("metric")) is not None
+    ]
+    if not rows:
+        raise RuntimeError("HPO completed without selectable candidates for walk-forward OOS")
+    rows.sort(key=lambda row: _number(row.get("metric")) or float("-inf"), reverse=True)
+    limit = max(1, int(cfg.platform.get("walk_forward", {}).get("max_candidates", 1)))
+    return [
+        build_candidate_from_params(
+            cfg,
+            _decode_json(row.get("algorithm_params")) or {},
+            _decode_json(row.get("portfolio_params")) or {},
+        )
+        for row in rows[:limit]
+    ]
+
+
+def _decode_json(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if value is None or pd.isna(value):
+        return None
+    return json.loads(str(value))
+
+
+def _number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if pd.notna(number) else None
 
 
 def _json_row(row: dict[str, Any]) -> dict[str, Any]:

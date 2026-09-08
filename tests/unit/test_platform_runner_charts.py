@@ -335,7 +335,11 @@ def test_write_crucible_evidence_aggregates_stage_outputs():
         encoding="utf-8",
     )
     (run_dir / "stages/08_monte_carlo/summaries/stage_summary.json").write_text(
-        '{"accepted_candidates": 1, "rejected_candidates": 0}',
+        '{"accepted_candidates": 1, "rejected_candidates": 0, "input_return_observations": 12}',
+        encoding="utf-8",
+    )
+    (run_dir / "stages/08_monte_carlo/summaries/monte_carlo_path_bands.csv").write_text(
+        "candidate_id,step,p5,p50,p95\ncand_1,1,98,101,104\ncand_1,2,97,102,106\n",
         encoding="utf-8",
     )
     (run_dir / "stages/08_confirmation/summaries/stage_summary.json").write_text(
@@ -354,4 +358,6 @@ def test_write_crucible_evidence_aggregates_stage_outputs():
     assert [item["id"] for item in evidence["milestones"]].index("monte_carlo") > [item["id"] for item in evidence["milestones"]].index("perturbation")
     assert evidence["promotionCriteria"][-1]["status"] == "pass"
     assert evidence["walkForward"][0]["window"] == "w1"
+    assert evidence["milestones"][5]["metrics"]["input_observations"] == 12.0
+    assert evidence["monteCarlo"][0]["p50"] == 101.0
     assert (root / "platform_run" / "crucible_evidence.json").exists()

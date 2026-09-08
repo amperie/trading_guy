@@ -445,8 +445,12 @@ def _write_crucible_evidence_artifact(
         ],
         "promotionCriteria": _promotion_criteria(summaries, metrics),
         "risks": _crucible_risks(summaries, metrics),
+        "hpo": _read_csv_rows(run_dir / "stages/04_hpo/summaries/hpo_trial_summary.csv", limit=250),
+        "regimes": _read_csv_rows(run_dir / "stages/05_regime_gate/summaries/regime_gate_summary.csv", limit=250),
+        "plateau": _read_csv_rows(run_dir / "stages/06_plateau/summaries/plateau_summary.csv", limit=250),
+        "perturbations": _read_csv_rows(run_dir / "stages/07_perturbation/summaries/perturbation_scenario_summary.csv", limit=500),
         "walkForward": _walk_forward_rows(run_dir),
-        "monteCarlo": [],
+        "monteCarlo": _monte_carlo_rows(run_dir),
         "artifacts": _crucible_artifact_index(result),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -505,8 +509,52 @@ def _crucible_milestone_payload(
         "status": "complete" if summary else "pending",
         "requested": requested,
         "message": _milestone_message(name, summary),
-        "metrics": _flat_numeric_metrics(summary or {}),
+        "metrics": _stage_ui_metrics(name, summary or {}),
     }
+
+
+def _stage_ui_metrics(name: str, summary: dict[str, Any]) -> dict[str, float]:
+    metrics = _flat_numeric_metrics(summary)
+    aliases = {
+        "hpo": {
+            "trials_run": "hpo.trials_complete",
+            "valid_candidates": "hpo.candidates_created",
+            "best_objective_score": "hpo.best_metric",
+            "median_objective_score": "hpo.median_metric",
+            "constraint_failures": "hpo.trials_failed",
+        },
+        "walk_forward_oos": {
+            "window_count": "jobs_total",
+            "oos_pass_count": "jobs_complete",
+        },
+        "regime_gate": {
+            "regimes_tested": "candidate_count",
+            "regimes_passed": "passed_candidate_count",
+            "blocking_regimes": "reject_count",
+        },
+        "plateau": {
+            "stable_neighborhood_size": "neighbor_count",
+            "plateau_score": "accepted_plateaus",
+            "warning_count": "rejected_peaks",
+        },
+        "perturbation": {
+            "scenarios_run": "scenario_count",
+            "scenarios_passed": "accepted_candidates",
+            "scenarios_rejected": "rejected_candidates",
+            "blocking_failures": "rejected_candidates",
+        },
+        "monte_carlo": {
+            "input_observations": "input_return_observations",
+        },
+        "confirmation": {
+            "criteria_passed": "confirmed_candidates",
+            "blocking_failures": "rejected_candidates",
+        },
+    }
+    for target, source in aliases.get(name, {}).items():
+        if target not in metrics and source in metrics:
+            metrics[target] = metrics[source]
+    return metrics
 
 
 def _milestone_message(name: str, summary: dict[str, Any] | None) -> str:
@@ -625,6 +673,22 @@ def _walk_forward_rows(run_dir: Path) -> list[dict[str, Any]]:
             "degradation": _degradation(row),
         }
         for idx, row in enumerate(rows)
+    ]
+
+
+def _monte_carlo_rows(run_dir: Path) -> list[dict[str, Any]]:
+    rows = _read_csv_rows(run_dir / "stages/08_monte_carlo/summaries/monte_carlo_path_bands.csv", limit=500)
+    first_candidate = next((row.get("candidate_id") for row in rows), None)
+    return [
+        {
+            "step": int(_float(row.get("step")) or idx + 1),
+            "p0": 100.0,
+            "p5": _float(row.get("p5")) or 0.0,
+            "p50": _float(row.get("p50")) or 0.0,
+            "p95": _float(row.get("p95")) or 0.0,
+        }
+        for idx, row in enumerate(rows)
+        if first_candidate is None or row.get("candidate_id") == first_candidate
     ]
 
 

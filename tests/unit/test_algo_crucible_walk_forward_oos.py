@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
 
+from algo_crucible.builders import build_candidate_from_params
 from algo_crucible.orchestrator import CrucibleOrchestrator
+from algo_crucible.scoring import rows_to_csv
 from tests.unit.test_algo_crucible_milestone1 import _write_yaml
 
 
@@ -97,3 +100,42 @@ def test_walk_forward_oos_runs_validation_windows_and_reuses_results(tmp_path: P
     assert not regimes.empty
     assert all(pd.to_datetime(windows["validation_start"]) >= pd.to_datetime(windows["train_end"]) + pd.Timedelta(days=3))
     assert set(oos["window_id"]) == set(windows["window_id"])
+
+
+def test_walk_forward_oos_uses_top_hpo_candidate(tmp_path: Path):
+    data_path = tmp_path / "daily.csv"
+    _write_daily_data(data_path)
+    platform_path, workload_path = _configs(tmp_path, data_path)
+    orchestrator = CrucibleOrchestrator(platform_path, workload_path)
+    run = orchestrator.state_store.start_or_resume(orchestrator.resolved_cfg, rerun=True)
+    base_algorithm = dict(orchestrator.resolved_cfg.workload["algorithm"]["params"])
+    base_portfolio = dict(orchestrator.resolved_cfg.workload["portfolio"]["params"])
+    low_portfolio = base_portfolio | {"stop_pct": 5.0}
+    top_portfolio = base_portfolio | {"stop_pct": 15.0}
+    low = build_candidate_from_params(orchestrator.resolved_cfg, base_algorithm, low_portfolio)
+    top = build_candidate_from_params(orchestrator.resolved_cfg, base_algorithm, top_portfolio)
+    rows = [
+        _hpo_row("trial_0000", low.candidate_id, 1.0, base_algorithm, low_portfolio),
+        _hpo_row("trial_0001", top.candidate_id, 10.0, base_algorithm, top_portfolio),
+    ]
+    hpo_dir = Path(run["run_dir"]) / "stages" / "04_hpo" / "summaries"
+    hpo_dir.mkdir(parents=True, exist_ok=True)
+    (hpo_dir / "hpo_trial_summary.csv").write_text(rows_to_csv(rows), encoding="utf-8")
+
+    result = CrucibleOrchestrator(platform_path, workload_path).run_walk_forward_oos(rerun=True, use_ray=False)
+    oos = pd.read_csv(Path(result["run_dir"]) / "stages" / "03_walk_forward_oos" / "summaries" / "oos_summary.csv")
+
+    assert result["summary"]["candidate_id"] == top.candidate_id
+    assert set(oos["candidate_id"]) == {top.candidate_id}
+
+
+def _hpo_row(trial_id: str, candidate_id: str, metric: float, algorithm_params: dict, portfolio_params: dict) -> dict:
+    return {
+        "trial_id": trial_id,
+        "candidate_id": candidate_id,
+        "metric": metric,
+        "config": json.dumps({"stop_pct": portfolio_params["stop_pct"]}),
+        "algorithm_params": json.dumps(algorithm_params, sort_keys=True),
+        "portfolio_params": json.dumps(portfolio_params, sort_keys=True),
+        "status": "complete",
+    }
