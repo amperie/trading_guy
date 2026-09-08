@@ -320,6 +320,7 @@ def test_write_crucible_evidence_aggregates_stage_outputs():
     run_dir = root / "crucible_runs" / "run-1"
     (run_dir / "stages/03_walk_forward_oos/summaries").mkdir(parents=True, exist_ok=True)
     (run_dir / "stages/05_regime_gate/summaries").mkdir(parents=True, exist_ok=True)
+    (run_dir / "stages/08_monte_carlo/summaries").mkdir(parents=True, exist_ok=True)
     (run_dir / "stages/08_confirmation/summaries").mkdir(parents=True, exist_ok=True)
     (run_dir / "stages/03_walk_forward_oos/summaries/stage_summary.json").write_text(
         '{"jobs_total": 2, "jobs_complete": 2, "profitable_windows_pct": 50}',
@@ -331,6 +332,10 @@ def test_write_crucible_evidence_aggregates_stage_outputs():
     )
     (run_dir / "stages/05_regime_gate/summaries/stage_summary.json").write_text(
         '{"passed_candidate_count": 1, "reject_count": 0}',
+        encoding="utf-8",
+    )
+    (run_dir / "stages/08_monte_carlo/summaries/stage_summary.json").write_text(
+        '{"accepted_candidates": 1, "rejected_candidates": 0}',
         encoding="utf-8",
     )
     (run_dir / "stages/08_confirmation/summaries/stage_summary.json").write_text(
@@ -346,6 +351,7 @@ def test_write_crucible_evidence_aggregates_stage_outputs():
     )
 
     assert evidence["milestones"][1]["status"] == "complete"
+    assert [item["id"] for item in evidence["milestones"]].index("monte_carlo") > [item["id"] for item in evidence["milestones"]].index("perturbation")
     assert evidence["promotionCriteria"][-1]["status"] == "pass"
     assert evidence["walkForward"][0]["window"] == "w1"
     assert (root / "platform_run" / "crucible_evidence.json").exists()

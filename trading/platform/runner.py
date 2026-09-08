@@ -39,6 +39,7 @@ CRUCIBLE_STAGES = (
     ("regime_gate", "Evaluating regime-aware gates"),
     ("plateau", "Testing parameter plateau stability"),
     ("perturbation", "Running perturbation scenarios"),
+    ("monte_carlo", "Running Monte Carlo path simulation"),
     ("confirmation", "Running final confirmation"),
 )
 CRUCIBLE_STAGE_NAMES = tuple(stage[0] for stage in CRUCIBLE_STAGES) + ("paper_replay",)
@@ -416,6 +417,7 @@ CRUCIBLE_EVIDENCE_STAGES = {
     "regime_gate": ("Regime gates", "stages/05_regime_gate/summaries/stage_summary.json"),
     "plateau": ("Plateau", "stages/06_plateau/summaries/stage_summary.json"),
     "perturbation": ("Perturbation", "stages/07_perturbation/summaries/stage_summary.json"),
+    "monte_carlo": ("Monte Carlo", "stages/08_monte_carlo/summaries/stage_summary.json"),
     "confirmation": ("Confirmation", "stages/08_confirmation/summaries/stage_summary.json"),
     "paper_replay": ("Paper replay", "stages/09_paper_replay/summaries/stage_summary.json"),
 }
@@ -444,7 +446,7 @@ def _write_crucible_evidence_artifact(
         "promotionCriteria": _promotion_criteria(summaries, metrics),
         "risks": _crucible_risks(summaries, metrics),
         "walkForward": _walk_forward_rows(run_dir),
-        "monteCarlo": _monte_carlo_rows(run_dir),
+        "monteCarlo": [],
         "artifacts": _crucible_artifact_index(result),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -518,6 +520,8 @@ def _milestone_message(name: str, summary: dict[str, Any] | None) -> str:
         return f"{summary.get('accepted_plateaus', 0)} plateaus accepted"
     if name == "perturbation":
         return f"{summary.get('accepted_candidates', 0)} candidates survived perturbations"
+    if name == "monte_carlo":
+        return f"{summary.get('accepted_candidates', 0)} candidates passed Monte Carlo simulation"
     if name == "confirmation":
         return f"{summary.get('confirmed_candidates', 0)} candidates confirmed"
     return "Stage complete"
@@ -558,6 +562,13 @@ def _promotion_criteria(
             summaries.get("perturbation") is not None,
         ),
         _criterion(
+            "monte_carlo",
+            "Monte Carlo survivors",
+            _num(summaries.get("monte_carlo"), "accepted_candidates"),
+            "Candidate return streams should survive bootstrapped path simulations.",
+            summaries.get("monte_carlo") is not None,
+        ),
+        _criterion(
             "confirmation",
             "Promotion candidates",
             metrics.get("confirmation.promoted_candidates") or _num(summaries.get("confirmation"), "confirmed_candidates"),
@@ -593,6 +604,8 @@ def _crucible_risks(
         risks.append({"severity": "warning", "label": "Parameter instability", "detail": "Some peaks did not hold up in plateau testing."})
     if (_num(summaries.get("perturbation"), "rejected_candidates") or 0) > 0:
         risks.append({"severity": "blocking", "label": "Perturbation failure", "detail": "One or more candidates failed required perturbation scenarios."})
+    if (_num(summaries.get("monte_carlo"), "rejected_candidates") or 0) > 0:
+        risks.append({"severity": "blocking", "label": "Monte Carlo failure", "detail": "One or more candidates failed bootstrapped path simulation thresholds."})
     if summaries.get("confirmation") and (metrics.get("confirmation.promoted_candidates") or 0) <= 0:
         risks.append({"severity": "blocking", "label": "No promotion candidate", "detail": "Confirmation did not produce a candidate ready for promotion."})
     if not risks:
@@ -613,21 +626,6 @@ def _walk_forward_rows(run_dir: Path) -> list[dict[str, Any]]:
         }
         for idx, row in enumerate(rows)
     ]
-
-
-def _monte_carlo_rows(run_dir: Path) -> list[dict[str, Any]]:
-    source = run_dir / "stages/07_perturbation/summaries/perturbation_scenario_summary.csv"
-    if not source.exists():
-        source = run_dir / "stages/06_plateau/summaries/plateau_neighbor_summary.csv"
-    rows = _read_csv_rows(source, limit=30)
-    if not rows:
-        return []
-    path: list[dict[str, Any]] = []
-    cumulative = 100.0
-    for idx, row in enumerate(rows):
-        cumulative *= 1.0 + ((_float(row.get("total_return_pct")) or 0.0) / 100.0)
-        path.append({"step": idx + 1, "p0": round(cumulative, 4)})
-    return path
 
 
 def _degradation(row: dict[str, Any]) -> float | None:
@@ -881,6 +879,8 @@ def execute_crucible(args: argparse.Namespace) -> dict[str, Any]:
             result = orchestrator.run_plateau_stage(rerun=args.rerun_crucible, use_ray=args.use_ray)
         elif name == "perturbation":
             result = orchestrator.run_perturbation_stage(rerun=args.rerun_crucible, use_ray=args.use_ray)
+        elif name == "monte_carlo":
+            result = orchestrator.run_monte_carlo_stage(rerun=args.rerun_crucible)
         elif name == "confirmation":
             result = orchestrator.run_confirmation_stage(
                 rerun=args.rerun_crucible,
@@ -942,7 +942,7 @@ def _flat_numeric_metrics(metrics: dict[str, Any]) -> dict[str, float]:
 
 
 def _robustness_score(metrics: dict[str, float]) -> float:
-    for key in ("confirmation.promoted_candidates", "perturbation.accepted_candidates", "plateau.accepted_seeds"):
+    for key in ("confirmation.promoted_candidates", "monte_carlo.accepted_candidates", "perturbation.accepted_candidates", "plateau.accepted_seeds"):
         if key in metrics:
             return float(metrics[key])
     return 0.0

@@ -24,6 +24,12 @@ from algo_crucible.config import resolve_configs
 from algo_crucible.gates import evaluate_regime_aware_gates, gate_summary_metrics
 from algo_crucible.hpo import run_hpo_search
 from algo_crucible.jobs import CrucibleJob, RayJobRunner
+from algo_crucible.monte_carlo import (
+    load_monte_carlo_inputs,
+    monte_carlo_metrics,
+    return_stream_rows,
+    simulate_monte_carlo,
+)
 from algo_crucible.paper_replay import (
     compare_traces,
     load_frozen_candidate,
@@ -45,6 +51,7 @@ from algo_crucible.perturbations import (
     build_perturbation_scenarios,
     load_perturbation_candidates,
     perturbation_metrics,
+    perturb_windows,
     summarize_perturbations,
 )
 from algo_crucible.scoring import distribution_stats, distribution_svg, overall_scorecard, prefixed_numeric_metrics, regime_scorecard, rows_to_csv
@@ -62,6 +69,7 @@ STAGE_04 = "stages/04_hpo"
 STAGE_05 = "stages/05_regime_gate"
 STAGE_06 = "stages/06_plateau"
 STAGE_07 = "stages/07_perturbation"
+STAGE_MC = "stages/08_monte_carlo"
 STAGE_08 = "stages/08_confirmation"
 STAGE_09 = "stages/09_paper_replay"
 
@@ -428,15 +436,15 @@ class CrucibleOrchestrator:
         run_dir = Path(run["run_dir"])
         logger.info(f"Starting perturbation stage for {cfg.crucible_run_id}")
         candidates = load_perturbation_candidates(run_dir, cfg)
-        scenarios = build_perturbation_scenarios(cfg.platform)
-        logger.info(
-            f"Prepared perturbation stage run_id={cfg.crucible_run_id} "
-            f"candidates={len(candidates)} scenarios={len(scenarios)}"
-        )
 
         dp, _, _, _ = build_components(cfg.workload, build_candidate(cfg))
         dp.load_data()
         data_start, data_end = data_range_from_frame(dp.data)
+        scenarios = build_perturbation_scenarios(cfg.platform, data_start=data_start, data_end=data_end)
+        logger.info(
+            f"Prepared perturbation stage run_id={cfg.crucible_run_id} "
+            f"candidates={len(candidates)} scenarios={len(scenarios)}"
+        )
         wf_cfg = cfg.platform.get("walk_forward", {})
         windows = windows_to_rows(generate_walk_forward_windows(
             data_start=data_start,
@@ -452,14 +460,17 @@ class CrucibleOrchestrator:
         for candidate in candidates:
             for scenario in scenarios:
                 workload, perturbed = apply_scenario(cfg, candidate["candidate"], scenario)
+                scenario_windows = perturb_windows(windows, scenario, data_start=data_start, data_end=data_end)
                 scenario_rows.append({
                     "candidate_id": candidate["candidate"].candidate_id,
                     "scenario_id": scenario["scenario_id"],
                     "scenario_name": scenario["name"],
                     "required": scenario["required"],
                     "perturbed_candidate_id": perturbed.candidate_id,
+                    "scale": scenario.get("scale", ""),
+                    "date_time_offset_seconds": scenario.get("date_time_offset_seconds", 0),
                 })
-                for window in windows:
+                for window in scenario_windows:
                     jobs.append(CrucibleJob("07_perturbation", "scenario_validation_backtest", {
                         "crucible_run_id": cfg.crucible_run_id,
                         "scenario_id": scenario["scenario_id"],
@@ -492,6 +503,12 @@ class CrucibleOrchestrator:
             platform=cfg.platform,
         )
         metrics = perturbation_metrics(scored["summary_rows"], batch.jobs_total, batch.jobs_complete, batch.jobs_failed)
+        accepted_candidate_ids = {
+            str(row.get("candidate_id"))
+            for row in scored["summary_rows"]
+            if row.get("accepted") is True
+        }
+        stream_rows = return_stream_rows(batch.results, accepted_candidate_ids)
         summary = {
             "crucible_run_id": cfg.crucible_run_id,
             "run_name": cfg.run_name,
@@ -504,6 +521,7 @@ class CrucibleOrchestrator:
             "perturbation_scenarios": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_scenarios.csv", rows_to_csv(scenario_rows)),
             "perturbation_scenario_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_scenario_summary.csv", rows_to_csv(scored["scenario_rows"])),
             "perturbation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_summary.csv", rows_to_csv(scored["summary_rows"])),
+            "perturbation_return_stream": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_return_stream.csv", rows_to_csv(stream_rows)),
             "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_07}/summaries/stage_summary.json", summary),
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
@@ -519,6 +537,49 @@ class CrucibleOrchestrator:
                 f"pass_rate={row.get('scenario_pass_rate')} reason={row.get('failure_reason')}"
             )
         logger.info(f"Completed perturbation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_monte_carlo_stage(self, rerun: bool = False) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_MC}/summaries/stage_summary.json") and not rerun:
+            return run
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting Monte Carlo stage for {cfg.crucible_run_id}")
+        input_rows = load_monte_carlo_inputs(run_dir)
+        simulated = simulate_monte_carlo(input_rows, cfg.platform)
+        summary_rows = simulated["summary_rows"]
+        band_rows = simulated["band_rows"]
+        terminal_rows = simulated["terminal_rows"]
+        metrics = monte_carlo_metrics(summary_rows)
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_count": len(summary_rows),
+            "accepted_candidates": int(metrics["monte_carlo.accepted_candidates"]),
+            "rejected_candidates": int(metrics["monte_carlo.rejected_candidates"]),
+            "path_count": int(cfg.platform.get("monte_carlo", {}).get("num_paths", 1000)),
+            "input_return_observations": len(input_rows),
+        }
+        artifacts = {
+            "monte_carlo_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_MC}/summaries/monte_carlo_summary.csv", rows_to_csv(summary_rows)),
+            "monte_carlo_path_bands": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_MC}/summaries/monte_carlo_path_bands.csv", rows_to_csv(band_rows)),
+            "monte_carlo_terminal_distribution": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_MC}/summaries/monte_carlo_terminal_distribution.csv", rows_to_csv(terminal_rows)),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_MC}/summaries/stage_summary.json", summary),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "running",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        for row in summary_rows:
+            logger.info(
+                f"Monte Carlo decision run_id={cfg.crucible_run_id} "
+                f"candidate_id={row.get('candidate_id')} accepted={row.get('accepted')} "
+                f"ruin_probability={row.get('ruin_probability')} reason={row.get('failure_reason')}"
+            )
+        logger.info(f"Completed Monte Carlo stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
     def run_confirmation_stage(

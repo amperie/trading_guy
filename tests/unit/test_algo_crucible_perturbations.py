@@ -9,7 +9,9 @@ import algo_crucible.orchestrator as orchestrator_module
 from algo_crucible.builders import build_candidate_from_params
 from algo_crucible.orchestrator import CrucibleOrchestrator
 from algo_crucible.perturbations import apply_scenario
+from algo_crucible.perturbations import build_perturbation_scenarios
 from algo_crucible.perturbations import load_perturbation_candidates
+from algo_crucible.perturbations import perturb_windows
 from algo_crucible.scoring import rows_to_csv
 from tests.unit.test_algo_crucible_milestone1 import _write_yaml
 from tests.unit.test_algo_crucible_walk_forward_oos import _write_daily_data
@@ -39,6 +41,7 @@ def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
         "perturbations": {
             "max_required_failures": 0,
             "min_scenario_pass_rate": 80,
+            "date_time_scenarios": 0,
             "scenarios": [
                 {"name": "baseline", "required": True, "patch": {}},
                 {
@@ -152,6 +155,52 @@ def test_scenario_patch_updates_executed_candidate_params(tmp_path: Path):
     )
 
     assert perturbed.portfolio_params["tx_cost"] == 7.0
+
+
+def test_build_perturbation_scenarios_adds_dataset_bounded_date_time_offsets():
+    scenarios = build_perturbation_scenarios(
+        {
+            "perturbations": {
+                "max_scenarios": 8,
+                "date_time_scenarios": 6,
+                "max_date_time_range_pct": 0.10,
+                "date_time_scale_mix": {"small": 0.5, "weeks": 0.25, "months": 0.25},
+                "scenarios": [{"name": "baseline", "required": True, "patch": {}}],
+            }
+        },
+        data_start="2024-01-01T00:00:00",
+        data_end="2024-04-10T00:00:00",
+    )
+
+    temporal = [scenario for scenario in scenarios if scenario["date_time_offset_seconds"]]
+
+    assert len(temporal) == 6
+    assert {scenario["scale"] for scenario in temporal} >= {"small", "weeks", "months"}
+    assert max(abs(scenario["date_time_offset_seconds"]) for scenario in temporal) <= 10 * 24 * 3600
+
+
+def test_perturb_windows_shifts_oos_dates_without_exceeding_data_bounds():
+    windows = [{
+        "window_id": "window_0001",
+        "index": 1,
+        "train_start": "2024-01-10T00:00:00",
+        "train_end": "2024-01-20T00:00:00",
+        "embargo_start": "2024-01-20T00:00:00",
+        "embargo_end": "2024-01-22T00:00:00",
+        "validation_start": "2024-01-22T00:00:00",
+        "validation_end": "2024-02-01T00:00:00",
+    }]
+
+    shifted = perturb_windows(
+        windows,
+        {"date_time_offset_seconds": 5 * 24 * 3600},
+        data_start="2024-01-01T00:00:00",
+        data_end="2024-02-03T00:00:00",
+    )[0]
+
+    assert shifted["date_time_offset_seconds"] == 2 * 24 * 3600
+    assert shifted["validation_start"] == "2024-01-24T00:00:00"
+    assert shifted["validation_end"] == "2024-02-03T00:00:00"
 
 
 def test_load_perturbation_candidates_handles_empty_plateau_summary(tmp_path: Path):

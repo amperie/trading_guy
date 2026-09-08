@@ -4,6 +4,7 @@ import ast
 import copy
 import json
 import math
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,7 @@ def load_perturbation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict
     return candidates
 
 
-def build_perturbation_scenarios(platform: dict[str, Any]) -> list[dict[str, Any]]:
+def build_perturbation_scenarios(platform: dict[str, Any], *, data_start: Any = None, data_end: Any = None) -> list[dict[str, Any]]:
     cfg = platform.get("perturbations", {})
     raw = cfg.get("scenarios") or [
         {"name": "baseline", "required": True, "patch": {}},
@@ -54,8 +55,9 @@ def build_perturbation_scenarios(platform: dict[str, Any]) -> list[dict[str, Any
             "portfolio_param_multipliers": {"tx_cost": 2.0, "transaction_cost": 2.0, "slippage_bps": 2.0},
         },
     ]
+    max_scenarios = int(cfg.get("max_scenarios", 20))
     scenarios = []
-    for idx, scenario in enumerate(raw[: int(cfg.get("max_scenarios", 20))]):
+    for idx, scenario in enumerate(raw[:max_scenarios]):
         scenarios.append({
             "scenario_id": f"scenario_{idx + 1:03d}_{_slug(scenario.get('name', str(idx + 1)))}",
             "name": scenario.get("name", f"scenario_{idx + 1:03d}"),
@@ -64,7 +66,16 @@ def build_perturbation_scenarios(platform: dict[str, Any]) -> list[dict[str, Any
             "algorithm_param_multipliers": copy.deepcopy(scenario.get("algorithm_param_multipliers", {})),
             "portfolio_param_multipliers": copy.deepcopy(scenario.get("portfolio_param_multipliers", {})),
             "data_provider_patch": copy.deepcopy(scenario.get("data_provider_patch", {})),
+            "date_time_offset_seconds": int(scenario.get("date_time_offset_seconds", 0) or 0),
+            "scale": scenario.get("scale", "configured"),
         })
+    scenarios.extend(_date_time_scenarios(
+        cfg,
+        start_idx=len(scenarios),
+        remaining=max_scenarios - len(scenarios),
+        data_start=data_start,
+        data_end=data_end,
+    ))
     return scenarios
 
 
@@ -114,6 +125,8 @@ def summarize_perturbations(
                 "scenario_id": scenario["scenario_id"],
                 "scenario_name": scenario["name"],
                 "required": scenario["required"],
+                "scale": scenario.get("scale", ""),
+                "date_time_offset_seconds": scenario.get("date_time_offset_seconds", 0),
                 **scored,
                 "failure_reason": reason,
             })
@@ -139,6 +152,19 @@ def summarize_perturbations(
             "failure_reason": ",".join(sorted({row["failure_reason"] for row in required_failures if row["failure_reason"]})),
         })
     return {"scenario_rows": scenario_rows, "summary_rows": summary_rows}
+
+
+def perturb_windows(
+    windows: list[dict[str, Any]],
+    scenario: dict[str, Any],
+    *,
+    data_start: Any,
+    data_end: Any,
+) -> list[dict[str, Any]]:
+    offset = int(scenario.get("date_time_offset_seconds") or 0)
+    if not offset:
+        return windows
+    return [_shift_window(window, offset, data_start=data_start, data_end=data_end) for window in windows]
 
 
 def perturbation_metrics(summary_rows: list[dict[str, Any]], jobs_total: int, jobs_complete: int, jobs_failed: int) -> dict[str, float]:
@@ -201,6 +227,89 @@ def _failure_reason(name: str) -> str:
     if "date" in lowered:
         return "date_fragile"
     return "scenario_perturbation_failed"
+
+
+def _date_time_scenarios(
+    cfg: dict[str, Any],
+    *,
+    start_idx: int,
+    remaining: int,
+    data_start: Any,
+    data_end: Any,
+) -> list[dict[str, Any]]:
+    if remaining <= 0 or not bool(cfg.get("date_time_enabled", True)) or data_start is None or data_end is None:
+        return []
+    count = int(cfg.get("date_time_scenarios", remaining))
+    count = max(0, min(count, remaining))
+    dataset_seconds = max(0, int((pd.Timestamp(data_end).to_pydatetime() - pd.Timestamp(data_start).to_pydatetime()).total_seconds()))
+    max_offset_seconds = max(1, int(dataset_seconds * max(0.0, float(cfg.get("max_date_time_range_pct", 0.10)))))
+    mix = cfg.get("date_time_scale_mix", {}) or {}
+    scales = _scale_counts(count, {
+        "small": float(mix.get("small", 0.50)),
+        "weeks": float(mix.get("weeks", 0.30)),
+        "months": float(mix.get("months", 0.20)),
+    })
+    scenarios = []
+    for scale, scale_count in scales.items():
+        for offset in _scale_offsets(scale, scale_count, max_offset_seconds):
+            if not offset:
+                continue
+            idx = start_idx + len(scenarios) + 1
+            direction = "plus" if offset > 0 else "minus"
+            scenarios.append({
+                "scenario_id": f"scenario_{idx:03d}_date_time_{scale}_{direction}_{abs(offset)}s",
+                "name": f"date_time_{scale}_{direction}_{abs(offset)}s",
+                "required": bool(cfg.get("date_time_required", True)),
+                "patch": {},
+                "algorithm_param_multipliers": {},
+                "portfolio_param_multipliers": {},
+                "data_provider_patch": {},
+                "date_time_offset_seconds": offset,
+                "scale": scale,
+            })
+    return scenarios[:remaining]
+
+
+def _scale_counts(total: int, weights: dict[str, float]) -> dict[str, int]:
+    positive = {key: max(0.0, value) for key, value in weights.items()}
+    weight_sum = sum(positive.values()) or 1.0
+    counts = {key: int(total * value / weight_sum) for key, value in positive.items()}
+    while sum(counts.values()) < total:
+        key = max(positive, key=lambda item: (positive[item] / weight_sum) - (counts[item] / max(total, 1)))
+        counts[key] += 1
+    return counts
+
+
+def _scale_offsets(scale: str, count: int, max_offset_seconds: int) -> list[int]:
+    max_seconds = max(1, int(max_offset_seconds))
+    caps = {
+        "small": min(max_seconds, 3 * 24 * 3600),
+        "weeks": min(max_seconds, 8 * 7 * 24 * 3600),
+        "months": min(max_seconds, 6 * 30 * 24 * 3600),
+    }
+    cap = caps.get(scale, max_seconds)
+    if count <= 0 or cap <= 0:
+        return []
+    magnitudes = [max(3600, int(cap * (idx + 1) / max(count, 1))) for idx in range((count + 1) // 2)]
+    offsets = []
+    for magnitude in magnitudes:
+        offsets.extend([-magnitude, magnitude])
+    return offsets[:count]
+
+
+def _shift_window(window: dict[str, Any], offset_seconds: int, *, data_start: Any, data_end: Any) -> dict[str, Any]:
+    shifted = copy.deepcopy(window)
+    keys = ["train_start", "train_end", "embargo_start", "embargo_end", "validation_start", "validation_end"]
+    parsed = {key: pd.Timestamp(shifted[key]).to_pydatetime() for key in keys}
+    low = pd.Timestamp(data_start).to_pydatetime() - parsed["train_start"]
+    high = pd.Timestamp(data_end).to_pydatetime() - parsed["validation_end"]
+    offset = max(int(low.total_seconds()), min(offset_seconds, int(high.total_seconds())))
+    delta = timedelta(seconds=offset)
+    for key in keys:
+        shifted[key] = (parsed[key] + delta).isoformat()
+    shifted["window_id"] = f"{window['window_id']}_dt_{offset:+d}s"
+    shifted["date_time_offset_seconds"] = offset
+    return shifted
 
 
 def _thresholds(platform: dict[str, Any], candidate_type: str) -> dict[str, float]:

@@ -167,6 +167,25 @@ def test_confirmation_handles_no_accepted_perturbation_candidates(tmp_path: Path
     assert packet["decision"] == "reject"
 
 
+def test_confirmation_prefers_monte_carlo_survivors_when_available(tmp_path: Path):
+    data_path = tmp_path / "daily.csv"
+    _write_daily_data(data_path)
+    platform_path, workload_path = _configs(tmp_path, data_path)
+    orchestrator = CrucibleOrchestrator(platform_path, workload_path)
+    run = orchestrator.state_store.start_or_resume(orchestrator.resolved_cfg, rerun=True)
+    run_dir = Path(run["run_dir"])
+    candidate = _write_inputs(orchestrator, run_dir)
+    mc_dir = run_dir / "stages/08_monte_carlo/summaries"
+    mc_dir.mkdir(parents=True, exist_ok=True)
+    (mc_dir / "monte_carlo_summary.csv").write_text(rows_to_csv([{
+        "candidate_id": candidate.candidate_id,
+        "accepted": False,
+        "failure_reason": "ruin_probability_too_high",
+    }]), encoding="utf-8")
+
+    assert load_confirmation_candidates(run_dir, orchestrator.resolved_cfg) == []
+
+
 def _configs(tmp_path: Path, data_path: Path) -> tuple[Path, Path]:
     platform = {
         "crucible": {"name": "test", "run_name": "confirmation_v1"},

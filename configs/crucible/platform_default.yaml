@@ -69,6 +69,13 @@ perturbations:
   max_scenarios: 20
   max_required_failures: 0
   min_scenario_pass_rate: 0.80
+  date_time_enabled: true
+  date_time_scenarios: 12
+  max_date_time_range_pct: 0.10
+  date_time_scale_mix:
+    small: 0.50
+    weeks: 0.30
+    months: 0.20
   scenarios:
     - name: baseline
       required: true
@@ -79,6 +86,17 @@ perturbations:
         tx_cost: 2.0
         transaction_cost: 2.0
         slippage_bps: 2.0
+
+monte_carlo:
+  num_paths: 1000
+  max_path_points: 252
+  min_observations: 20
+  seed: 42
+  ruin_threshold_pct: -50.0
+  max_ruin_probability: 0.05
+  max_loss_probability: 0.40
+  min_p5_terminal_return_pct: -25.0
+  max_p95_drawdown_pct: 35.0
 
 confirmation:
   start_date:

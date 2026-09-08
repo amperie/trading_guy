@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import math
 from typing import Any
+
+import pandas as pd
 
 from algo_crucible.builders import build_components
 from algo_crucible.models import Candidate
@@ -35,4 +38,30 @@ def run_validation_backtest(payload: dict[str, Any]) -> dict[str, Any]:
         "window": window,
         "overall_scorecard": metrics,
         "regime_scorecard": regimes,
+        "return_stream": _return_stream(pf),
     }
+
+
+def _return_stream(portfolio, max_points: int = 1000) -> list[dict[str, Any]]:
+    if not getattr(portfolio, "value_history", None):
+        return []
+    values = pd.Series(portfolio.value_history, dtype=float).sort_index()
+    values.index = pd.to_datetime(list(values.index))
+    if len(values) < 2:
+        return []
+    daily = values.resample("D").last().dropna()
+    source = daily if len(daily) >= 2 else values
+    returns = source.pct_change().dropna()
+    if len(returns) > max_points:
+        step = max(1, math.ceil(len(returns) / max_points))
+        returns = returns.iloc[::step]
+    return [
+        {
+            "step": idx + 1,
+            "timestamp": ts.isoformat(),
+            "return_pct": float(ret * 100.0),
+            "equity": float(source.loc[ts]),
+        }
+        for idx, (ts, ret) in enumerate(returns.items())
+        if math.isfinite(float(ret))
+    ]

@@ -19,15 +19,18 @@ from algo_crucible.models import Candidate
 def load_confirmation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict[str, Any]]:
     run_dir = Path(run_dir)
     perturbation_path = _existing_path(run_dir, "stages/07_perturbation/summaries/perturbation_summary.csv", "summaries/perturbation_summary.csv")
+    monte_carlo_path = _existing_path(run_dir, "stages/08_monte_carlo/summaries/monte_carlo_summary.csv", "summaries/monte_carlo_summary.csv")
     hpo_path = _existing_path(run_dir, "stages/04_hpo/summaries/hpo_trial_summary.csv", "summaries/hpo_trial_summary.csv")
     if not perturbation_path.exists():
         raise FileNotFoundError("run_perturbation_stage must produce perturbation_summary.csv before confirmation can run")
     if not hpo_path.exists():
         raise FileNotFoundError("run_hpo_stage must produce hpo_trial_summary.csv before confirmation can run")
 
+    accepted_path = monte_carlo_path if monte_carlo_path.exists() else perturbation_path
+    perturbation_meta = {str(row["candidate_id"]): row for row in _read_csv_rows(perturbation_path)}
     accepted = {
         str(row["candidate_id"]): row
-        for row in _read_csv_rows(perturbation_path)
+        for row in _read_csv_rows(accepted_path)
         if str(row.get("accepted")).lower() in {"true", "1"}
     }
     candidates = []
@@ -42,9 +45,9 @@ def load_confirmation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict
         )
         candidates.append({
             "candidate": candidate,
-            "seed_id": accepted[candidate_id].get("seed_id"),
-            "candidate_type": accepted[candidate_id].get("candidate_type", "generalist"),
-            "specialist_regimes": accepted[candidate_id].get("specialist_regimes", ""),
+            "seed_id": accepted[candidate_id].get("seed_id") or perturbation_meta.get(candidate_id, {}).get("seed_id"),
+            "candidate_type": accepted[candidate_id].get("candidate_type") or perturbation_meta.get(candidate_id, {}).get("candidate_type", "generalist"),
+            "specialist_regimes": accepted[candidate_id].get("specialist_regimes") or perturbation_meta.get(candidate_id, {}).get("specialist_regimes", ""),
         })
     return candidates
 

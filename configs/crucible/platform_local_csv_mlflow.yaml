@@ -88,6 +88,13 @@ perturbations:
   max_scenarios: 2
   max_required_failures: 1
   min_scenario_pass_rate: 0.0
+  date_time_enabled: true
+  date_time_scenarios: 0
+  max_date_time_range_pct: 0.10
+  date_time_scale_mix:
+    small: 0.50
+    weeks: 0.30
+    months: 0.20
   scenarios:
     - name: baseline
       required: true
@@ -96,6 +103,17 @@ perturbations:
       required: false
       portfolio_param_multipliers:
         tx_cost: 2.0
+
+monte_carlo:
+  num_paths: 100
+  max_path_points: 60
+  min_observations: 2
+  seed: 42
+  ruin_threshold_pct: -50.0
+  max_ruin_probability: 1.0
+  max_loss_probability: 1.0
+  min_p5_terminal_return_pct: -100.0
+  max_p95_drawdown_pct: 100.0
 
 confirmation:
   start_date: "2021-09-01"

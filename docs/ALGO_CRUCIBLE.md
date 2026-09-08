@@ -91,6 +91,7 @@ milestone ids are:
 - `regime_gate`
 - `plateau`
 - `perturbation`
+- `monte_carlo`
 - `confirmation`
 - `paper_replay`
 
