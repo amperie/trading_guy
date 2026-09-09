@@ -5,6 +5,7 @@ import math
 from typing import Any
 
 from algo_crucible.builders import build_candidate_from_params, component_class, component_params
+from algo_crucible.scoring import METRIC_KEYS
 from utils.utils import apply_tunable_config, parse_search_space
 
 
@@ -89,6 +90,7 @@ def build_hpo_summary(
             "trial_id": trial.get("trial_id", f"trial_{idx:04d}"),
             "candidate_id": candidate.candidate_id,
             "metric": float(metric),
+            **_trial_metrics(trial),
             "objective_details": trial.get("objective_details", {}),
             "config": trial_config,
             "algorithm_params": al_cfg,
@@ -116,6 +118,24 @@ def _hpo_cfg(resolved_cfg) -> dict[str, Any]:
     workload_space = resolved_cfg.workload.get("search_space", {})
     platform_hpo = resolved_cfg.platform.get("hpo", {})
     return {**platform_hpo, **workload_space}
+
+
+def _trial_metrics(trial: dict[str, Any]) -> dict[str, float]:
+    details = trial.get("objective_details", {})
+    if not isinstance(details, dict):
+        details = {}
+    row = {}
+    for key in METRIC_KEYS:
+        value = trial.get(key, details.get(key, details.get(f"_objective_{key}")))
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            row[key] = number
+    return row
 
 
 def _median(values: list[float]) -> float | None:

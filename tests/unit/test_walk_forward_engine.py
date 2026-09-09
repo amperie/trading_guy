@@ -1009,6 +1009,7 @@ def test_backtest_objective_fn_supports_nested_algorithm_keys(monkeypatch):
     )
 
     assert result["_metric"] == 1.23
+    assert result["annualized_return"] == 1.23
     assert result["_objective_annualized_return"] == 1.23
     assert captured["alg_cfg"] == {"regime": {"alpha": 8, "beta": 2}}
     assert captured["pf_cfg"] == {"stop_pct": 3.5, "profit_pct": 4.0}
@@ -1056,8 +1057,59 @@ def test_backtest_objective_fn_supports_composite_objective(monkeypatch):
     )
 
     assert result["_metric"] == pytest.approx(17.5)
+    assert result["annualized_return"] == 12.0
+    assert result["max_drawdown_pct"] == -4.0
     assert result["_objective_max_drawdown_pct"] == 4.0
     assert result["_objective_penalty"] == 0.0
+
+
+def test_tune_backtest_hyperparameters_returns_trial_metric_columns(monkeypatch):
+    monkeypatch.setattr(run_backtest_ray.ray, "init", lambda **kwargs: None)
+    monkeypatch.setattr(run_backtest_ray.ray, "is_initialized", lambda: True)
+    monkeypatch.setattr(run_backtest_ray.ray, "shutdown", lambda: None)
+    monkeypatch.setattr(run_backtest_ray.tune, "with_parameters", lambda fn, **kwargs: fn)
+    monkeypatch.setattr(run_backtest_ray, "OptunaSearch", lambda **kwargs: object())
+
+    class FakeTuner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def fit(self):
+            return [
+                SimpleNamespace(
+                    metrics={
+                        "_metric": 9.0,
+                        "annualized_return": 12.0,
+                        "sharpe_ratio": 1.2,
+                        "max_drawdown_pct": -4.0,
+                    },
+                    config={"stop_pct": 3.5},
+                )
+            ]
+
+    monkeypatch.setattr(run_backtest_ray.tune, "Tuner", FakeTuner)
+
+    _, trials = run_backtest_ray.tune_backtest_hyperparameters(
+        symbol="SPY",
+        algorithm_class=DummyAlgorithm,
+        portfolio_class=DummyPortfolio,
+        data_provider_class=DummyDataProvider,
+        order_manager_class=DummyOrderManager,
+        base_algorithm_config={},
+        base_portfolio_config={},
+        base_data_provider_config={},
+        base_backtest_config={},
+        search_space={"stop_pct": run_backtest_ray.tune.uniform(1.0, 5.0)},
+        algorithm_param_keys=[],
+        portfolio_param_keys=["stop_pct"],
+        num_samples=1,
+        max_concurrent_trials=1,
+        return_trial_summaries=True,
+    )
+
+    assert trials[0]["annualized_return"] == 12.0
+    assert trials[0]["sharpe_ratio"] == 1.2
+    assert trials[0]["max_drawdown_pct"] == -4.0
 
 
 def test_tune_backtest_hyperparameters_disables_ray_sigint_handler_and_shuts_down(monkeypatch):

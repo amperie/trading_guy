@@ -75,8 +75,18 @@ def test_build_hpo_summary_creates_candidates_and_failed_trials():
         resolved_cfg=resolved,
         best_config={"history_length": 2},
         trial_summaries=[
-            {"config": {"history_length": 2}, "metric": 2.0},
-            {"config": {"history_length": 1}, "metric": 1.0},
+            {
+                "config": {"history_length": 2},
+                "metric": 2.0,
+                "annualized_return": 11.0,
+                "sharpe_ratio": 1.5,
+                "max_drawdown_pct": -3.0,
+            },
+            {
+                "config": {"history_length": 1},
+                "metric": 1.0,
+                "objective_details": {"_objective_annualized_return": 7.0},
+            },
             {"config": {"history_length": 3}, "metric": float("nan")},
         ],
         algorithm_param_keys=["history_length"],
@@ -89,6 +99,10 @@ def test_build_hpo_summary_creates_candidates_and_failed_trials():
     assert result["metrics"]["hpo.trials_complete"] == 2
     assert result["metrics"]["hpo.trials_failed"] == 1
     assert result["trial_rows"][0]["metric"] == 2.0
+    assert result["trial_rows"][0]["annualized_return"] == 11.0
+    assert result["trial_rows"][0]["sharpe_ratio"] == 1.5
+    assert result["trial_rows"][0]["max_drawdown_pct"] == -3.0
+    assert result["trial_rows"][1]["annualized_return"] == 7.0
     assert result["candidates"][0].candidate_id.startswith("candidate_")
 
 
@@ -103,8 +117,22 @@ def test_hpo_stage_writes_full_trial_and_candidate_summaries(monkeypatch, tmp_pa
         return (
             {"history_length": 2, "stop_pct": 8.0},
             [
-                {"config": {"history_length": 2, "stop_pct": 8.0}, "metric": 10.0, "objective_details": {"_objective_max_drawdown_pct": 3.0}},
-                {"config": {"history_length": 1, "stop_pct": 12.0}, "metric": 5.0, "objective_details": {"_objective_max_drawdown_pct": 4.0}},
+                {
+                    "config": {"history_length": 2, "stop_pct": 8.0},
+                    "metric": 10.0,
+                    "annualized_return": 25.0,
+                    "sharpe_ratio": 1.2,
+                    "max_drawdown_pct": -4.0,
+                    "objective_details": {"_objective_max_drawdown_pct": 4.0},
+                },
+                {
+                    "config": {"history_length": 1, "stop_pct": 12.0},
+                    "metric": 5.0,
+                    "annualized_return": 12.0,
+                    "sharpe_ratio": 0.8,
+                    "max_drawdown_pct": -6.0,
+                    "objective_details": {"_objective_max_drawdown_pct": 6.0},
+                },
             ],
         )
 
@@ -121,6 +149,9 @@ def test_hpo_stage_writes_full_trial_and_candidate_summaries(monkeypatch, tmp_pa
     assert result["summary"]["hpo.best_metric"] == 10.0
     assert len(trials) == 2
     assert "objective_details" in trials.columns
+    assert trials["annualized_return"].tolist() == [25.0, 12.0]
+    assert trials["sharpe_ratio"].tolist() == [1.2, 0.8]
+    assert trials["max_drawdown_pct"].tolist() == [-4.0, -6.0]
     assert len(candidates) == 2
     assert captured["return_trial_summaries"] is True
     assert captured["algorithm_param_keys"] == ["history_length"]

@@ -3,6 +3,7 @@ import os
 import signal
 import time
 import traceback
+from dataclasses import asdict, is_dataclass
 from numbers import Integral, Real
 from pathlib import Path
 from typing import Type
@@ -28,6 +29,20 @@ from ray.tune.search.optuna import OptunaSearch
 logger = Logger().get_logger(__name__)
 _MISSING = object()
 FAILED_TRIAL_METRIC = -1e12
+HPO_TRIAL_METRIC_KEYS = [
+    "total_return_pct",
+    "annualized_return",
+    "sharpe_ratio",
+    "sortino_ratio",
+    "max_drawdown_pct",
+    "win_rate",
+    "profit_factor",
+    "total_trades",
+    "final_equity",
+    "initial_equity",
+    "trading_days",
+    "volatility",
+]
 
 
 class BacktestNoValueHistoryError(RuntimeError):
@@ -565,8 +580,9 @@ def backtest_objective_fn(
         logger.exception("HPO trial failed before producing an objective metric")
         return _failed_trial_metrics(exc)
 
-    score, details = objective_score(result["metrics"], backtest_cfg.get("objective"))
-    return {"_metric": score, "_trial_failed": 0.0, **details}
+    metrics = result["metrics"]
+    score, details = objective_score(metrics, backtest_cfg.get("objective"))
+    return {"_metric": score, "_trial_failed": 0.0, **_performance_metric_snapshot(metrics), **details}
 
 
 def objective_score(metrics, objective: dict | str | None = None) -> tuple[float, dict[str, float]]:
@@ -621,6 +637,25 @@ def _objective_component(metrics, key: str) -> float:
     if key in {"max_drawdown", "max_drawdown_pct", "ulcer_index"}:
         return abs(value)
     return value
+
+
+def _performance_metric_snapshot(metrics) -> dict[str, float]:
+    if isinstance(metrics, dict):
+        raw = metrics
+    else:
+        raw = asdict(metrics) if is_dataclass(metrics) else vars(metrics)
+    snapshot = {}
+    for key in HPO_TRIAL_METRIC_KEYS:
+        value = raw.get(key)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            snapshot[key] = number
+    return snapshot
 
 
 def run_backtest_local(
@@ -913,6 +948,7 @@ def tune_backtest_hyperparameters(
                 "config": result.config,
                 "metric": metric_value,
                 "status": "complete",
+                **_performance_metric_snapshot(result.metrics),
                 "objective_details": objective_details,
             })
         completed = [trial for trial in trial_summaries if trial.get("status") != "failed"]
