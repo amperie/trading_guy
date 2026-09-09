@@ -46,7 +46,7 @@ def overall_scorecard(metrics: Any) -> dict[str, Any]:
     return {key: _scalar(raw.get(key)) for key in METRIC_KEYS}
 
 
-def regime_scorecard(portfolio, ticks: list[list[Any]], regime_cfg: dict[str, Any] | None) -> list[dict[str, Any]]:
+def regime_scorecard(portfolio, ticks: list[list[Any]], regime_cfg: dict[str, Any] | None, trades: list[Any] | None = None) -> list[dict[str, Any]]:
     labels = classify_ticks(ticks, regime_cfg or {})
     values = pd.Series(portfolio.value_history)
     values.index = pd.to_datetime(list(portfolio.value_history.keys()))
@@ -65,16 +65,21 @@ def regime_scorecard(portfolio, ticks: list[list[Any]], regime_cfg: dict[str, An
         "equity": [float(values.loc[ts]) for ts in timestamps],
         "regime": [label_by_ts.get(pd.Timestamp(ts), "UNKNOWN_UNKNOWN") for ts in timestamps],
     })
+    trade_counts = _regime_trade_counts(trades or [], label_by_ts)
     for regime, group in frame.groupby("regime", sort=True):
         equity = group["equity"]
+        returns = group["return"]
         running_max = equity.expanding().max()
         drawdown = ((equity / running_max) - 1.0).min() if len(equity) else 0.0
         rows.append({
             "regime": regime,
             "bars": int(len(group)),
-            "total_return_pct": float(((1.0 + group["return"]).prod() - 1.0) * 100.0),
-            "avg_bar_return_pct": float(group["return"].mean() * 100.0),
+            "total_return_pct": float(((1.0 + returns).prod() - 1.0) * 100.0),
+            "avg_bar_return_pct": float(returns.mean() * 100.0),
+            "sharpe_ratio": _sharpe(returns),
             "max_drawdown_pct": float(drawdown * 100.0),
+            "total_trades": trade_counts.get(regime, 0),
+            "profitable_bars_pct": float((returns > 0).mean() * 100.0) if len(returns) else None,
         })
     return rows
 
@@ -107,6 +112,25 @@ def distribution_stats(rows: list[dict[str, Any]], metric_keys: list[str] | None
 
 def prefixed_numeric_metrics(prefix: str, stats: dict[str, Any]) -> dict[str, float]:
     return {f"{prefix}.{key}": float(value) for key, value in stats.items() if isinstance(value, (int, float))}
+
+
+def _sharpe(returns: pd.Series) -> float | None:
+    if len(returns) < 2:
+        return None
+    std = float(returns.std())
+    return float(returns.mean() / std * math.sqrt(252.0)) if std else 0.0
+
+
+def _regime_trade_counts(trades: list[Any], label_by_ts: dict[pd.Timestamp, str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for trade in trades:
+        ts = getattr(trade, "exit_time", None) or getattr(trade, "entry_time", None)
+        if ts is None:
+            continue
+        regime = label_by_ts.get(pd.Timestamp(ts))
+        if regime:
+            counts[regime] = counts.get(regime, 0) + 1
+    return counts
 
 
 def distribution_svg(rows: list[dict[str, Any]], title: str, metric_keys: list[str] | None = None) -> str:

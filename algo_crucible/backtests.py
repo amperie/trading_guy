@@ -26,8 +26,9 @@ def run_validation_backtest(payload: dict[str, Any]) -> dict[str, Any]:
     engine = BacktestingEngine({"status_line_enabled": False, "state_store": {"enabled": False}}, dp, al, om, pf)
     engine.run()
 
-    metrics = overall_scorecard(AnalysisEngine(pf, om).calculate_metrics())
-    regimes = regime_scorecard(pf, ticks, candidate.algorithm_params.get("market_regime", {}))
+    analysis = AnalysisEngine(pf, om)
+    metrics = overall_scorecard(analysis.calculate_metrics())
+    regimes = regime_scorecard(pf, ticks, candidate.algorithm_params.get("market_regime", {}), analysis.extract_trades())
     return {
         "candidate_id": candidate.candidate_id,
         "seed_id": payload.get("seed_id"),

@@ -116,9 +116,10 @@ class CrucibleOrchestrator:
 
         analysis = AnalysisEngine(pf, om)
         metrics = analysis.calculate_metrics()
+        trades = analysis.extract_trades()
         overall = overall_scorecard(metrics)
         regime_cfg = candidate.algorithm_params.get("market_regime", {})
-        regimes = regime_scorecard(pf, ticks, regime_cfg)
+        regimes = regime_scorecard(pf, ticks, regime_cfg, trades)
 
         candidate_row = {
             "candidate_id": candidate.candidate_id,

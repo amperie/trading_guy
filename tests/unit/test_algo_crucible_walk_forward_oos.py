@@ -98,6 +98,7 @@ def test_walk_forward_oos_runs_validation_windows_and_reuses_results(tmp_path: P
     assert "walk_forward_oos.max_drawdown_pct_min" in first["metrics"]
     assert (stage_dir / "charts" / "walk_forward_oos_distributions.svg").exists()
     assert not regimes.empty
+    assert {"sharpe_ratio", "total_trades", "profitable_bars_pct"}.issubset(regimes.columns)
     assert all(pd.to_datetime(windows["validation_start"]) >= pd.to_datetime(windows["train_end"]) + pd.Timedelta(days=3))
     assert set(oos["window_id"]) == set(windows["window_id"])
 
