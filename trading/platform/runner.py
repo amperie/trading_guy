@@ -465,9 +465,13 @@ def _write_crucible_evidence_artifact(
         "hpo": _read_csv_rows(run_dir / "stages/04_hpo/summaries/hpo_trial_summary.csv", limit=250),
         "regimes": _read_csv_rows(run_dir / "stages/05_regime_gate/summaries/regime_gate_summary.csv", limit=250),
         "plateau": _read_csv_rows(run_dir / "stages/06_plateau/summaries/plateau_summary.csv", limit=250),
+        "plateauNeighbors": _read_csv_rows(run_dir / "stages/06_plateau/summaries/plateau_neighbor_summary.csv", limit=500),
         "perturbations": _read_csv_rows(run_dir / "stages/07_perturbation/summaries/perturbation_scenario_summary.csv", limit=500),
         "walkForward": _walk_forward_rows(run_dir),
+        "monteCarloSummary": _read_csv_rows(run_dir / "stages/08_monte_carlo/summaries/monte_carlo_summary.csv", limit=250),
         "monteCarlo": _monte_carlo_rows(run_dir),
+        "monteCarloTerminalDistribution": _read_csv_rows(run_dir / "stages/08_monte_carlo/summaries/monte_carlo_terminal_distribution.csv", limit=2000),
+        "confirmation": _read_csv_rows(run_dir / "stages/08_confirmation/summaries/confirmation_summary.csv", limit=250),
         "artifacts": _crucible_artifact_index(result),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
