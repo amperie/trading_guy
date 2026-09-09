@@ -1,0 +1,173 @@
+# Heavy local-CSV Crucible profile for the promoted topology UPRO strategy.
+# Run milestones in order:
+#   python -m algo_crucible.cli --platform-config configs/crucible/platform_topology_upro_ray4_heavy.yaml --workload-config configs/crucible/workloads/topology_upro_single_symbol_heavy.yaml --milestone 4
+#   python -m algo_crucible.cli --platform-config configs/crucible/platform_topology_upro_ray4_heavy.yaml --workload-config configs/crucible/workloads/topology_upro_single_symbol_heavy.yaml --milestone 3
+#   python -m algo_crucible.cli --platform-config configs/crucible/platform_topology_upro_ray4_heavy.yaml --workload-config configs/crucible/workloads/topology_upro_single_symbol_heavy.yaml --milestone 5
+#   python -m algo_crucible.cli --platform-config configs/crucible/platform_topology_upro_ray4_heavy.yaml --workload-config configs/crucible/workloads/topology_upro_single_symbol_heavy.yaml --milestone 6
+#   python -m algo_crucible.cli --platform-config configs/crucible/platform_topology_upro_ray4_heavy.yaml --workload-config configs/crucible/workloads/topology_upro_single_symbol_heavy.yaml --milestone 7
+#   python -m algo_crucible.cli --platform-config configs/crucible/platform_topology_upro_ray4_heavy.yaml --workload-config configs/crucible/workloads/topology_upro_single_symbol_heavy.yaml --milestone 8
+crucible:
+  name: topology_upro_ray4_heavy
+  run_name: topology_upro_ray4_heavy_v1
+  output_dir: scratch/crucible_runs
+
+logging:
+  level: INFO
+  structured_events: true
+  log_stage_transitions: true
+  log_job_lifecycle: true
+  log_gate_decisions: true
+  log_every_n_completed_jobs: 25
+  suppress_per_bar_logs: true
+  persist_logs_to_mlflow: true
+
+resume:
+  enabled: true
+  system_of_record: mlflow
+  local_cache_dir: scratch/crucible_runs
+  rerun_failed_jobs: true
+  reuse_completed_jobs: true
+
+state_store:
+  backend: mlflow
+  allow_backends:
+    - local
+    - mlflow
+
+mlflow:
+  tracking_uri: http://z440.lan:5000
+  parent_experiment_name: Algo Crucible Topology UPRO
+  artifact_location: mlflow-artifacts:/algo-crucible-topology-upro
+
+ray:
+  enabled: true
+  max_concurrent_trials: 4
+  log_worker_output: false
+
+walk_forward:
+  optimization_window_days: 120
+  validation_window_days: 30
+  embargo_days: 2
+  step_days: 30
+  min_windows: 20
+  max_candidates: 4
+
+hpo:
+  num_samples: 64
+  max_concurrent_trials: 4
+  log_trials_to_mlflow: false
+  objective:
+    metric: composite_v1
+    weights:
+      annualized_return: 1.0
+      max_drawdown_pct: -1.5
+      volatility: -0.25
+      sortino_ratio: 4.0
+      calmar_ratio: 2.0
+    gates:
+      min_trades: 25
+      max_drawdown_pct: 30
+    low_trade_penalty: 1000
+    drawdown_gate_penalty: 150
+
+gates:
+  generalist:
+    min_trades: 100
+    min_median_oos_return: 0.0
+    min_profitable_windows_pct: 0.55
+    max_drawdown: 0.30
+  specialist:
+    min_regime_bars: 20
+    min_regime_windows: 3
+    min_regime_median_oos_return: 0.0
+    min_regime_profitable_windows_pct: 0.60
+    max_regime_drawdown: 0.25
+
+plateau:
+  max_seeds: 4
+  min_seed_distance: 0.12
+  neighborhood_radius_pct: 0.08
+  max_neighbors_per_seed: 8
+  min_neighbor_trials: 5
+  min_neighbor_pass_rate: 0.60
+  max_peak_to_median_degradation: 1.00
+
+perturbations:
+  max_scenarios: 14
+  max_required_failures: 0
+  min_scenario_pass_rate: 0.75
+  date_time_enabled: true
+  date_time_required: true
+  date_time_scenarios: 8
+  max_date_time_range_pct: 0.08
+  date_time_scale_mix:
+    small: 0.50
+    weeks: 0.30
+    months: 0.20
+  scenarios:
+    - name: baseline
+      required: true
+      patch: {}
+    - name: cost_2x
+      required: true
+      portfolio_param_multipliers:
+        tx_cost: 2.0
+    - name: cost_4x
+      required: false
+      portfolio_param_multipliers:
+        tx_cost: 4.0
+    - name: tighter_trailing_stop
+      required: false
+      patch:
+        portfolio:
+          params:
+            bracket:
+              stop_pct: 2.0
+              trailing_stop_pct: 2.0
+              profit_pct: 5.0
+    - name: looser_trailing_stop
+      required: false
+      patch:
+        portfolio:
+          params:
+            bracket:
+              stop_pct: 5.0
+              trailing_stop_pct: 5.0
+              profit_pct: 10.0
+    - name: lower_signal_sizing
+      required: false
+      algorithm_param_multipliers:
+        position_sizing_pct: 0.50
+
+monte_carlo:
+  num_paths: 1000
+  max_path_points: 252
+  min_observations: 100
+  seed: 42
+  ruin_threshold_pct: -50.0
+  max_ruin_probability: 0.05
+  max_loss_probability: 0.40
+  min_p5_terminal_return_pct: -20.0
+  max_p95_drawdown_pct: 30.0
+
+confirmation:
+  start_date: "2025-09-01"
+  end_date: "2025-11-19"
+  min_return_pct: 0.0
+  max_drawdown_pct: 30.0
+  min_trades: 10
+
+promotion:
+  create_promoted_folder: false
+  output_dir: trading/promoted
+
+paper_replay:
+  observed_trace_path:
+  data_path: data/UPRO_5min.csv
+  candidate_id:
+  max_missing_timestamps: 0
+  max_regime_mismatches: 0
+  max_signal_mismatches: 0
+  max_order_mismatches: 0
+  max_fill_mismatches: 0
+  fill_price_tolerance_pct: 0.01

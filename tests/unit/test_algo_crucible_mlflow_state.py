@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import mlflow
@@ -28,8 +29,23 @@ def _mlflow_platform(path: Path, tracking_dir: Path, cache_dir: Path, run_name: 
 
 def test_mlflow_state_store_logs_parent_run_and_artifacts(tmp_path: Path):
     data_path = tmp_path / "data.csv"
+    algo_path = tmp_path / "components" / "algo.py"
+    portfolio_path = tmp_path / "components" / "portfolio.py"
+    run_record_path = tmp_path / "platform_run_record.json"
     _write_data(data_path)
+    algo_path.parent.mkdir()
+    algo_path.write_text("class UploadedAlgorithm: pass\n", encoding="utf-8")
+    portfolio_path.write_text("class UploadedPortfolio: pass\n", encoding="utf-8")
+    run_record_path.write_text('{"run":{"id":"run_1"}}\n', encoding="utf-8")
     _, workload_path = _configs(tmp_path, data_path, run_name="mlflow_tiny_v1")
+    workload = yaml.safe_load(workload_path.read_text(encoding="utf-8"))
+    workload["platform_runtime_assets"] = [
+        {"role": "dataset", "container_path": str(data_path)},
+        {"role": "algorithm", "container_path": str(algo_path)},
+        {"role": "portfolio", "container_path": str(portfolio_path)},
+        {"role": "platform_run_record", "container_path": str(run_record_path)},
+    ]
+    _write_yaml(workload_path, workload)
     platform_path = _mlflow_platform(tmp_path / "platform_mlflow.yaml", tmp_path / "mlruns", tmp_path / "runs")
 
     result = CrucibleOrchestrator(platform_path, workload_path).run_milestone1()
@@ -45,8 +61,27 @@ def test_mlflow_state_store_logs_parent_run_and_artifacts(tmp_path: Path):
     assert run.data.params["data_provider.class"] == "trading.data_providers.test_data_provider.TestDataProvider"
     assert "milestone1.total_return_pct" in run.data.metrics
     assert "configs/resolved_config.yaml" in artifacts
+    assert "provenance/provenance_manifest.json" in artifacts
+    assert "provenance/runtime_assets/dataset/data.csv" in artifacts
+    assert "provenance/runtime_assets/algorithm/algo.py" in artifacts
+    assert "provenance/runtime_assets/portfolio/portfolio.py" in artifacts
+    assert (
+        "provenance/runtime_assets/platform_run_record/platform_run_record.json"
+        in artifacts
+    )
     assert "stages/01_single_candidate/summaries/candidate_summary.csv" in artifacts
     assert "stages/01_single_candidate/summaries/regime_summary.csv" in artifacts
+    provenance = json.loads(
+        (Path(result["run_dir"]) / "provenance" / "provenance_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert provenance["dataset"]["exists"] is True
+    assert provenance["dataset"]["sha256"]
+    assert provenance["dataset"]["row_count"] > 0
+    copied_assets = {item["role"]: item for item in provenance["copied_runtime_assets"]}
+    assert copied_assets["dataset"]["file"]["sha256"]
+    assert copied_assets["platform_run_record"]["file"]["exists"] is True
 
 
 def _artifact_paths(client: MlflowClient, run_id: str, path: str | None = None) -> set[str]:

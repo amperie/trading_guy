@@ -44,10 +44,23 @@ CRUCIBLE_STAGES = (
 )
 CRUCIBLE_STAGE_NAMES = tuple(stage[0] for stage in CRUCIBLE_STAGES) + ("paper_replay",)
 MIN_CRUCIBLE_DATA_ROWS = 100
+_PROGRESS_LOG_PATH: Path | None = None
 
 
 def emit(progress_pct: float, message: str, **extra: Any) -> None:
-    print(json.dumps({"progressPct": progress_pct, "message": message, **extra}, default=str), flush=True)
+    event = {"progressPct": progress_pct, "message": message, **extra}
+    print(json.dumps(event, default=str), flush=True)
+    if _PROGRESS_LOG_PATH is not None:
+        _PROGRESS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _PROGRESS_LOG_PATH.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(_jsonable(event), default=str) + "\n")
+
+
+def _set_progress_log(output_dir: str | Path) -> None:
+    global _PROGRESS_LOG_PATH
+    _PROGRESS_LOG_PATH = Path(output_dir) / "progress_events.jsonl"
+    if _PROGRESS_LOG_PATH.exists():
+        _PROGRESS_LOG_PATH.unlink()
 
 
 def _jsonable(value: Any) -> Any:
@@ -169,10 +182,10 @@ def _platform_crucible_config(args: argparse.Namespace) -> dict[str, Any]:
     cfg = _platform_backtest_config(args)
     cfg["mode"] = "hpo"
     cfg["hpo"] = {
-        "validation_period_days": args.validation_period_days,
+        "validation_period_days": args.validation_period_days or 30,
         "objective_metric": "val_annualized_return",
-        "num_samples": args.hpo_samples,
-        "max_concurrent_trials": args.hpo_concurrency,
+        "num_samples": args.hpo_samples or 4,
+        "max_concurrent_trials": args.hpo_concurrency or 1,
         "log_trials_to_mlflow": False,
         "log_ray_worker_output": True,
         "search_space": {
@@ -233,9 +246,13 @@ def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     platform["tenant_id"] = str(args.tenant_id)
     workload.setdefault("workload", {})["run_name"] = run_name
     platform.setdefault("resume", {})["local_cache_dir"] = str(output_dir / "crucible_runs")
-    platform.setdefault("hpo", {})["num_samples"] = args.hpo_samples
-    platform.setdefault("hpo", {})["max_concurrent_trials"] = args.hpo_concurrency
-    platform.setdefault("hpo", {})["validation_period_days"] = args.validation_period_days
+    if args.hpo_samples is not None:
+        platform.setdefault("hpo", {})["num_samples"] = args.hpo_samples
+    if args.hpo_concurrency is not None:
+        platform.setdefault("hpo", {})["max_concurrent_trials"] = args.hpo_concurrency
+        platform.setdefault("ray", {})["max_concurrent_trials"] = args.hpo_concurrency
+    if args.validation_period_days is not None:
+        platform.setdefault("hpo", {})["validation_period_days"] = args.validation_period_days
     platform.setdefault("hpo", {})["ray_storage_path"] = str((output_dir / "ray_results").resolve())
     platform.setdefault("ray", {})["enabled"] = bool(args.use_ray)
     if args.no_mlflow:
@@ -459,6 +476,42 @@ def _write_crucible_evidence_artifact(
         encoding="utf-8",
     )
     return evidence
+
+
+def _write_crucible_chart_manifest(output_dir: Path, evidence: dict[str, Any]) -> dict[str, Any]:
+    charts = []
+    if evidence.get("walkForward"):
+        charts.append(
+            {
+                "id": "walk_forward_oos",
+                "title": "Walk-forward OOS",
+                "kind": "walk_forward_oos",
+                "artifact": "crucible_evidence.json",
+                "pointCount": len(evidence["walkForward"]),
+            }
+        )
+    if evidence.get("monteCarlo"):
+        charts.append(
+            {
+                "id": "monte_carlo",
+                "title": "Monte Carlo Bands",
+                "kind": "monte_carlo_bands",
+                "artifact": "crucible_evidence.json",
+                "pointCount": len(evidence["monteCarlo"]),
+            }
+        )
+    manifest = {"charts": charts}
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "chart_manifest.json").write_text(
+        json.dumps(_jsonable(manifest), indent=2),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _log_platform_artifacts_to_crucible_run(state_store: Any, run_id: str, output_dir: str | Path) -> None:
+    for name in ("stage_summary.json", "crucible_evidence.json", "chart_manifest.json", "progress_events.jsonl"):
+        state_store.log_existing_artifact(run_id, Path(output_dir) / name)
 
 
 def _read_json_file(path: Path) -> dict[str, Any] | None:
@@ -970,9 +1023,11 @@ def execute_crucible(args: argparse.Namespace) -> dict[str, Any]:
         "details": _jsonable(result),
     }
     evidence = _write_crucible_evidence_artifact(Path(args.output_dir), result, requested, metrics)
+    _write_crucible_chart_manifest(Path(args.output_dir), evidence)
     summary["evidence"] = {"artifact": "crucible_evidence.json", "milestones": len(evidence["milestones"])}
-    _record_simple_result(args, summary)
     _write_manifest(Path(args.output_dir), summary)
+    _log_platform_artifacts_to_crucible_run(orchestrator.state_store, result["crucible_run_id"], args.output_dir)
+    _record_simple_result(args, summary)
     return summary
 
 
@@ -1086,9 +1141,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agg-period", type=int)
     parser.add_argument("--no-mlflow", action="store_true")
     parser.add_argument("--smoke-rows", type=int, default=500)
-    parser.add_argument("--hpo-samples", type=int, default=4)
-    parser.add_argument("--hpo-concurrency", type=int, default=1)
-    parser.add_argument("--validation-period-days", type=int, default=30)
+    parser.add_argument("--hpo-samples", type=int)
+    parser.add_argument("--hpo-concurrency", type=int)
+    parser.add_argument("--validation-period-days", type=int)
     parser.add_argument("--crucible-milestone", action="append", choices=CRUCIBLE_STAGE_NAMES)
     parser.add_argument("--use-ray", action="store_true")
     parser.add_argument("--rerun-crucible", action="store_true")
@@ -1102,6 +1157,7 @@ def main() -> None:
     if args.config is None:
         args.config = DEFAULT_CONFIG_BY_STAGE[args.stage]
     os.environ.setdefault("TRADING_GUY_ARTIFACT_TMP", str(Path(args.output_dir) / "_tmp"))
+    _set_progress_log(args.output_dir)
     summary = execute(args)
     emit(100, summary.get("message", "Stage completed"), summary=summary)
 

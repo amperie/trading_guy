@@ -14,10 +14,12 @@ from trading.platform.runner import (
     _csv_data_diagnostics,
     _emit_crucible_runtime_diagnostics,
     _crucible_config_paths,
+    _log_platform_artifacts_to_crucible_run,
     _return_histogram,
     _trade_rows,
     _write_backtest_evidence_artifact,
     _write_chart_artifacts,
+    _write_crucible_chart_manifest,
     _write_crucible_evidence_artifact,
     _validate_crucible_data,
     tenant_mlflow_experiment_name,
@@ -361,3 +363,29 @@ def test_write_crucible_evidence_aggregates_stage_outputs():
     assert evidence["milestones"][5]["metrics"]["input_observations"] == 12.0
     assert evidence["monteCarlo"][0]["p50"] == 101.0
     assert (root / "platform_run" / "crucible_evidence.json").exists()
+
+
+def test_write_crucible_chart_manifest_indexes_evidence_charts(tmp_path):
+    manifest = _write_crucible_chart_manifest(
+        tmp_path,
+        {"walkForward": [{"window": "w1"}], "monteCarlo": [{"step": 1}]},
+    )
+
+    assert [chart["id"] for chart in manifest["charts"]] == ["walk_forward_oos", "monte_carlo"]
+    assert (tmp_path / "chart_manifest.json").exists()
+
+
+def test_log_platform_artifacts_to_crucible_run_forwards_existing_files(tmp_path):
+    for name in ("stage_summary.json", "crucible_evidence.json", "chart_manifest.json", "progress_events.jsonl"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    calls = []
+    store = SimpleNamespace(log_existing_artifact=lambda run_id, path: calls.append((run_id, Path(path).name)))
+
+    _log_platform_artifacts_to_crucible_run(store, "crucible-run-1", tmp_path)
+
+    assert calls == [
+        ("crucible-run-1", "stage_summary.json"),
+        ("crucible-run-1", "crucible_evidence.json"),
+        ("crucible-run-1", "chart_manifest.json"),
+        ("crucible-run-1", "progress_events.jsonl"),
+    ]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -29,6 +31,11 @@ class CrucibleStateStore:
 
     def write_artifact_text(self, run_id: str, relative_path: str, text: str) -> str:
         raise NotImplementedError
+
+    def log_existing_artifact(
+        self, run_id: str, local_path: str | Path, artifact_path: str | None = None
+    ) -> str | None:
+        return None
 
     def write_artifact_json(self, run_id: str, relative_path: str, payload: Any) -> str:
         return self.write_artifact_text(run_id, relative_path, json.dumps(payload, indent=2, sort_keys=True, default=str))
@@ -181,6 +188,7 @@ class MLflowCrucibleStateStore(CrucibleStateStore):
             run_id = active.info.run_id
             self.mlflow.log_params(_run_params(resolved_cfg))
             self.mlflow.log_artifact(str(run_dir / "resolved_config.yaml"), artifact_path="configs")
+            self._log_provenance_manifest(resolved_cfg, run_dir)
         manifest = {
             "run_name": resolved_cfg.run_name,
             "crucible_run_id": resolved_cfg.crucible_run_id,
@@ -220,6 +228,16 @@ class MLflowCrucibleStateStore(CrucibleStateStore):
         self.client.log_artifact(manifest["mlflow_run_id"], str(path), artifact_path=artifact_path)
         return str(path)
 
+    def log_existing_artifact(
+        self, run_id: str, local_path: str | Path, artifact_path: str | None = None
+    ) -> str | None:
+        manifest = self._find_by_crucible_run_id(run_id)
+        path = Path(local_path)
+        if manifest is None or not path.is_file():
+            return None
+        self.client.log_artifact(manifest["mlflow_run_id"], str(path), artifact_path=artifact_path)
+        return str(path)
+
     def read_artifact_json(self, run_id: str, relative_path: str) -> Any | None:
         manifest = self._find_by_crucible_run_id(run_id)
         if manifest is None:
@@ -245,6 +263,33 @@ class MLflowCrucibleStateStore(CrucibleStateStore):
         with (run_dir / "resolved_config.yaml").open("w", encoding="utf-8") as handle:
             yaml.safe_dump(resolved_cfg.resolved, handle, sort_keys=True)
         return run_dir
+
+    def _log_provenance_manifest(self, resolved_cfg, run_dir: Path) -> None:
+        workload = resolved_cfg.workload
+        data_path = Path(str(workload.get("data_provider", {}).get("path") or ""))
+        runtime_assets = workload.get("platform_runtime_assets") or []
+        payload = {
+            "data_provider": workload.get("data_provider", {}),
+            "dataset": _file_profile(data_path, include_csv=True),
+            "runtime_assets": runtime_assets,
+            "algorithm": _component_profile(workload.get("algorithm", {})),
+            "portfolio": _component_profile(workload.get("portfolio", {})),
+            "copied_runtime_assets": _copied_runtime_asset_profiles(runtime_assets),
+            "note": "MLflow logs the runtime files listed here when they exist in the runner container.",
+        }
+        provenance_dir = run_dir / "provenance"
+        provenance_dir.mkdir(parents=True, exist_ok=True)
+        path = provenance_dir / "provenance_manifest.json"
+        LocalCrucibleStateStore._write_json_atomic(path, payload)
+        self.mlflow.log_artifact(str(path), artifact_path="provenance")
+        _log_input_dataset(self.mlflow, data_path)
+        for asset in runtime_assets:
+            if not isinstance(asset, dict):
+                continue
+            source = Path(str(asset.get("container_path") or asset.get("host_path") or ""))
+            role = _safe_artifact_part(asset.get("role") or "asset")
+            if source.is_file():
+                self.mlflow.log_artifact(str(source), artifact_path=f"provenance/runtime_assets/{role}")
 
     def _find_by(self, *, run_name: str, config_hash: str | None = None) -> dict[str, Any] | None:
         runs = self.client.search_runs(
@@ -343,3 +388,97 @@ def _run_params(resolved_cfg) -> dict[str, Any]:
         "hpo.portfolio_param_keys": ",".join(map(str, hpo.get("portfolio_param_keys", []))),
     }
     return {key: str(value)[:500] for key, value in params.items() if value is not None}
+
+
+def _component_profile(section: dict[str, Any]) -> dict[str, Any]:
+    path = Path(str(section.get("source_path") or ""))
+    return {
+        "class": section.get("algorithm") or section.get("portfolio"),
+        "class_name": section.get("class_name"),
+        "source_path": str(path) if str(path) else None,
+        "source_file": _file_profile(path),
+    }
+
+
+def _file_profile(path: Path, *, include_csv: bool = False) -> dict[str, Any]:
+    if not str(path):
+        return {"exists": False}
+    profile: dict[str, Any] = {"path": str(path), "exists": path.is_file()}
+    if not path.is_file():
+        return profile
+    profile.update({"size_bytes": path.stat().st_size, "sha256": _sha256(path)})
+    if include_csv:
+        profile.update(_csv_profile(path))
+    return profile
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _csv_profile(path: Path) -> dict[str, Any]:
+    rows = 0
+    columns: list[str] = []
+    first_timestamp = last_timestamp = None
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            columns = list(reader.fieldnames or [])
+            for row in reader:
+                rows += 1
+                ts = row.get("timestamp")
+                if ts:
+                    first_timestamp = ts if first_timestamp is None else min(first_timestamp, ts)
+                    last_timestamp = ts if last_timestamp is None else max(last_timestamp, ts)
+    except UnicodeDecodeError:
+        return {"csv_readable": False}
+    return {
+        "csv_readable": True,
+        "row_count": rows,
+        "columns": columns,
+        "first_timestamp": first_timestamp,
+        "last_timestamp": last_timestamp,
+    }
+
+
+def _copied_runtime_asset_profiles(assets: list[Any]) -> list[dict[str, Any]]:
+    profiles = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        path = Path(str(asset.get("container_path") or asset.get("host_path") or ""))
+        profiles.append(
+            {
+                "role": asset.get("role"),
+                "uri": asset.get("uri"),
+                "artifact_key": asset.get("artifact_key"),
+                "mlflow_artifact_path": (
+                    f"provenance/runtime_assets/{_safe_artifact_part(asset.get('role') or 'asset')}"
+                ),
+                "file": _file_profile(path, include_csv=asset.get("role") == "dataset"),
+            }
+        )
+    return profiles
+
+
+def _safe_artifact_part(value: Any) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in str(value))
+    return safe.strip("-") or "asset"
+
+
+def _log_input_dataset(mlflow, path: Path) -> None:
+    if not path.is_file() or path.suffix.lower() != ".csv":
+        return
+    try:
+        import pandas as pd
+
+        dataset = mlflow.data.from_pandas(
+            pd.read_csv(path, nrows=1000), source=str(path), name=path.name
+        )
+        mlflow.log_input(dataset, context="crucible_dataset")
+    except Exception:
+        return

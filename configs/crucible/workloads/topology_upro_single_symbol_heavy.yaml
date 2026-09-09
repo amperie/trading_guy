@@ -1,0 +1,96 @@
+workload:
+  name: topology_upro_single_symbol_heavy
+  run_name: topology_upro_ray4_heavy_v1
+  description: Heavy Crucible workload for the promoted topology UPRO algorithm with SingleSymbolPortfolio.
+
+data_provider:
+  provider: trading.data_providers.test_data_provider.TestDataProvider
+  path: ../data/UPRO_5min.csv
+  start_date: "2022-01-03"
+  end_date: "2025-08-31"
+  symbols:
+    - UPRO
+
+order_manager:
+  order_manager: trading.core.om.backtesting_om.BacktestingOrderManager
+  params:
+    market_hours_only: false
+
+algorithm:
+  implementation: TopologyConsensusAlgorithm
+  source_path: trading/promoted/Topology-Based_UPRO_Predictor_Dual_Feature_B0_B1_Consensus_backtest_2a924236/TopologyConsensusAlgorithm.py
+  class_name: TopologyConsensusAlgorithm
+  evaluation_symbols:
+    - UPRO
+  params:
+    symbol: UPRO
+    symbols:
+      - UPRO
+    tradable_symbols:
+      - UPRO
+    macro_symbols: []
+    normalization_window: 60
+    history_length: 70
+    max_position_pct: 5.0
+    filtration_radius: 0.29550075554431576
+    consensus_weight_b1: 0.7858259738277457
+    consensus_weight_b0: 0.21417402617225434
+    b0_stability_threshold: 1.1702303871612272
+    stability_lookback: 4032
+    momentum_lookback: 772
+    b1_momentum_threshold: -0.4554253920995142
+    position_sizing_pct: 3.033083612530989
+    market_regime:
+      enabled: true
+      trend_lookback_hours: 24
+      baseline_ma_window_hours: 48
+      volatility_lookback_hours: 24
+      volatility_percentile_window_hours: 120
+      drawdown_lookback_hours: 120
+      trend_threshold: 0.001
+      market_hours_per_day: 6.5
+      require_full_windows: false
+
+portfolio:
+  portfolio: trading.core.pf.single_symbol_portfolio.SingleSymbolPortfolio
+  params:
+    symbol: UPRO
+    cash: 100000.0
+    keep_history: true
+    tx_cost: 0.0005
+    bracket:
+      stop_type: trailing
+      stop_pct: 3.0
+      trailing_stop_pct: 3.0
+      profit_pct: 6.0
+
+fixed_assumptions:
+  starting_cash: 100000.0
+  benchmark_symbol: UPRO
+  transaction_cost: 0.0005
+  slippage_bps: 0
+
+search_space:
+  space:
+    filtration_radius: {type: uniform, low: 0.10, high: 0.45}
+    consensus_weight_b1: {type: uniform, low: 0.35, high: 0.90}
+    b0_stability_threshold: {type: uniform, low: 0.80, high: 3.20}
+    stability_lookback: {type: randint, low: 2000, high: 5000}
+    momentum_lookback: {type: randint, low: 700, high: 4000}
+    b1_momentum_threshold: {type: uniform, low: -0.50, high: 0.40}
+    position_sizing_pct: {type: uniform, low: 0.50, high: 4.00}
+    bracket.stop_pct: {type: uniform, low: 1.5, high: 6.0}
+    bracket.trailing_stop_pct: {type: uniform, low: 1.5, high: 6.0}
+    bracket.profit_pct: {type: uniform, low: 3.0, high: 12.0}
+  algorithm_param_keys:
+    - filtration_radius
+    - consensus_weight_b1
+    - b0_stability_threshold
+    - stability_lookback
+    - momentum_lookback
+    - b1_momentum_threshold
+    - position_sizing_pct
+  portfolio_param_keys:
+    - bracket.stop_pct
+    - bracket.trailing_stop_pct
+    - bracket.profit_pct
