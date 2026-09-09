@@ -167,6 +167,34 @@ def test_confirmation_handles_no_accepted_perturbation_candidates(tmp_path: Path
     assert packet["decision"] == "reject"
 
 
+def test_confirmation_without_candidates_does_not_require_window(tmp_path: Path):
+    data_path = tmp_path / "daily.csv"
+    _write_daily_data(data_path)
+    platform_path, workload_path = _configs(tmp_path, data_path)
+    platform = {
+        "crucible": {"name": "test", "run_name": "confirmation_v1"},
+        "resume": {"local_cache_dir": str(tmp_path / "runs"), "rerun_failed_jobs": True},
+        "state_store": {"backend": "local"},
+        "ray": {"enabled": False},
+        "gates": {"generalist": {"min_trades": 0, "min_median_oos_return": 0.0, "max_drawdown": 0.25}},
+        "confirmation": {"min_return_pct": 0.0},
+        "promotion": {"create_promoted_folder": False},
+    }
+    _write_yaml(platform_path, platform)
+    orchestrator = CrucibleOrchestrator(platform_path, workload_path)
+    run = orchestrator.state_store.start_or_resume(orchestrator.resolved_cfg, rerun=True)
+    run_dir = Path(run["run_dir"])
+    (run_dir / "summaries").mkdir(exist_ok=True)
+    (run_dir / "summaries" / "hpo_trial_summary.csv").write_text("", encoding="utf-8")
+    (run_dir / "summaries" / "perturbation_summary.csv").write_text("", encoding="utf-8")
+
+    result = CrucibleOrchestrator(platform_path, workload_path).run_confirmation_stage(use_ray=False)
+    packet = json.loads((run_dir / "stages" / "08_confirmation" / "promotion" / "promotion_packet.json").read_text(encoding="utf-8"))
+
+    assert result["summary"]["confirmed_candidates"] == 0
+    assert packet["decision"] == "reject"
+
+
 def test_confirmation_prefers_monte_carlo_survivors_when_available(tmp_path: Path):
     data_path = tmp_path / "daily.csv"
     _write_daily_data(data_path)
@@ -181,6 +209,25 @@ def test_confirmation_prefers_monte_carlo_survivors_when_available(tmp_path: Pat
         "candidate_id": candidate.candidate_id,
         "accepted": False,
         "failure_reason": "ruin_probability_too_high",
+    }]), encoding="utf-8")
+
+    assert load_confirmation_candidates(run_dir, orchestrator.resolved_cfg) == []
+
+
+def test_confirmation_intersects_completed_robustness_survivors(tmp_path: Path):
+    data_path = tmp_path / "daily.csv"
+    _write_daily_data(data_path)
+    platform_path, workload_path = _configs(tmp_path, data_path)
+    orchestrator = CrucibleOrchestrator(platform_path, workload_path)
+    run = orchestrator.state_store.start_or_resume(orchestrator.resolved_cfg, rerun=True)
+    run_dir = Path(run["run_dir"])
+    candidate = _write_inputs(orchestrator, run_dir)
+    structural_dir = run_dir / "stages/08_structural_break_stability/summaries"
+    structural_dir.mkdir(parents=True, exist_ok=True)
+    (structural_dir / "structural_break_summary.csv").write_text(rows_to_csv([{
+        "candidate_id": candidate.candidate_id,
+        "accepted": False,
+        "failure_reason": "recent_ic_sign_flip",
     }]), encoding="utf-8")
 
     assert load_confirmation_candidates(run_dir, orchestrator.resolved_cfg) == []

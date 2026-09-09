@@ -19,6 +19,9 @@ from algo_crucible.models import Candidate
 def load_confirmation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict[str, Any]]:
     run_dir = Path(run_dir)
     perturbation_path = _existing_path(run_dir, "stages/07_perturbation/summaries/perturbation_summary.csv", "summaries/perturbation_summary.csv")
+    transfer_path = _existing_path(run_dir, "stages/07_cross_instrument_transfer/summaries/transfer_summary.csv", "summaries/transfer_summary.csv")
+    structural_path = _existing_path(run_dir, "stages/08_structural_break_stability/summaries/structural_break_summary.csv", "summaries/structural_break_summary.csv")
+    execution_path = _existing_path(run_dir, "stages/08_execution_realism_stress/summaries/execution_realism_summary.csv", "summaries/execution_realism_summary.csv")
     monte_carlo_path = _existing_path(run_dir, "stages/08_monte_carlo/summaries/monte_carlo_summary.csv", "summaries/monte_carlo_summary.csv")
     hpo_path = _existing_path(run_dir, "stages/04_hpo/summaries/hpo_trial_summary.csv", "summaries/hpo_trial_summary.csv")
     if not perturbation_path.exists():
@@ -26,13 +29,14 @@ def load_confirmation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict
     if not hpo_path.exists():
         raise FileNotFoundError("run_hpo_stage must produce hpo_trial_summary.csv before confirmation can run")
 
-    accepted_path = monte_carlo_path if monte_carlo_path.exists() else perturbation_path
     perturbation_meta = {str(row["candidate_id"]): row for row in _read_csv_rows(perturbation_path)}
-    accepted = {
+    accepted: dict[str, dict[str, Any]] = {
         str(row["candidate_id"]): row
-        for row in _read_csv_rows(accepted_path)
+        for row in _read_csv_rows(perturbation_path)
         if str(row.get("accepted")).lower() in {"true", "1"}
     }
+    for path in (transfer_path, structural_path, execution_path, monte_carlo_path):
+        accepted = _intersect_stage_survivors(accepted, path)
     candidates = []
     for row in _read_csv_rows(hpo_path):
         candidate_id = str(row.get("candidate_id"))
@@ -52,12 +56,52 @@ def load_confirmation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict
     return candidates
 
 
+def _intersect_stage_survivors(accepted: dict[str, dict[str, Any]], path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return accepted
+    rows = _read_csv_rows(path)
+    if not rows:
+        return accepted
+    survivors = {
+        str(row["candidate_id"]): row
+        for row in rows
+        if str(row.get("accepted")).lower() in {"true", "1"}
+    }
+    return {candidate_id: survivors[candidate_id] for candidate_id in accepted if candidate_id in survivors}
+
+
 def confirmation_window(platform: dict[str, Any]) -> dict[str, Any]:
     cfg = platform.get("confirmation", {})
     start = cfg.get("start_date")
     end = cfg.get("end_date")
     if not start or not end:
         raise ValueError("confirmation.start_date and confirmation.end_date are required")
+    return make_confirmation_window(start, end)
+
+
+def resolved_confirmation_window(resolved_cfg, *, allow_missing: bool = False) -> dict[str, Any]:
+    try:
+        return confirmation_window(resolved_cfg.platform)
+    except ValueError:
+        provider = resolved_cfg.workload.get("data_provider", {})
+        start = (
+            provider.get("confirmation_start_date")
+            or provider.get("test_start_date")
+            or provider.get("start_date")
+        )
+        end = (
+            provider.get("confirmation_end_date")
+            or provider.get("test_end_date")
+            or provider.get("end_date")
+        )
+        if start and end:
+            return make_confirmation_window(start, end)
+        if allow_missing:
+            return make_confirmation_window("", "")
+        raise
+
+
+def make_confirmation_window(start: Any, end: Any) -> dict[str, Any]:
     return {
         "window_id": "confirmation_000",
         "train_start": "",
@@ -155,7 +199,7 @@ def build_promotion_packet(
         },
         "confirmed_candidate_ids": [row["candidate_id"] for row in confirmed],
         "confirmation": {
-            "window": confirmation_window(resolved_cfg.platform),
+            "window": resolved_confirmation_window(resolved_cfg, allow_missing=not confirmed),
             "rows": confirmation_rows,
         },
         "frozen_candidates": frozen_candidates,

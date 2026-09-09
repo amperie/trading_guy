@@ -12,15 +12,20 @@ from algo_crucible.builders import build_candidate, build_candidate_from_params,
 from algo_crucible.confirmation import (
     build_promotion_packet,
     confirmation_metrics,
-    confirmation_window,
     confirmation_workload,
     freeze_candidate,
     load_confirmation_candidates,
     packet_markdown,
+    resolved_confirmation_window,
     summarize_confirmation,
     write_promoted_packet,
 )
 from algo_crucible.config import resolve_configs
+from algo_crucible.execution_realism import (
+    analyze_execution_realism,
+    execution_realism_metrics,
+    load_execution_realism_inputs,
+)
 from algo_crucible.gates import evaluate_regime_aware_gates, gate_summary_metrics
 from algo_crucible.hpo import run_hpo_search
 from algo_crucible.jobs import CrucibleJob, RayJobRunner
@@ -28,6 +33,7 @@ from algo_crucible.monte_carlo import (
     load_monte_carlo_inputs,
     monte_carlo_metrics,
     return_stream_rows,
+    signal_forward_return_rows,
     simulate_monte_carlo,
 )
 from algo_crucible.paper_replay import (
@@ -56,6 +62,19 @@ from algo_crucible.perturbations import (
 )
 from algo_crucible.scoring import distribution_stats, distribution_svg, overall_scorecard, prefixed_numeric_metrics, regime_scorecard, rows_to_csv
 from algo_crucible.state_store import create_state_store
+from algo_crucible.structural_break import (
+    analyze_structural_breaks,
+    load_structural_break_inputs,
+    structural_break_metrics,
+)
+from algo_crucible.transfer import (
+    apply_transfer_instrument,
+    build_transfer_instruments,
+    load_transfer_candidates,
+    summarize_transfer,
+    transfer_metrics,
+    transfer_return_stream_rows,
+)
 from algo_crucible.windows import data_range_from_frame, generate_walk_forward_windows, windows_to_rows
 from trading.analysis.analysis_engine import AnalysisEngine
 from trading.engines.backtest_engine import BacktestingEngine
@@ -69,6 +88,9 @@ STAGE_04 = "stages/04_hpo"
 STAGE_05 = "stages/05_regime_gate"
 STAGE_06 = "stages/06_plateau"
 STAGE_07 = "stages/07_perturbation"
+STAGE_XFER = "stages/07_cross_instrument_transfer"
+STAGE_ER = "stages/08_execution_realism_stress"
+STAGE_SB = "stages/08_structural_break_stability"
 STAGE_MC = "stages/08_monte_carlo"
 STAGE_08 = "stages/08_confirmation"
 STAGE_09 = "stages/09_paper_replay"
@@ -512,6 +534,7 @@ class CrucibleOrchestrator:
             if row.get("accepted") is True
         }
         stream_rows = return_stream_rows(batch.results, accepted_candidate_ids)
+        signal_rows = signal_forward_return_rows(batch.results, accepted_candidate_ids)
         summary = {
             "crucible_run_id": cfg.crucible_run_id,
             "run_name": cfg.run_name,
@@ -525,6 +548,7 @@ class CrucibleOrchestrator:
             "perturbation_scenario_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_scenario_summary.csv", rows_to_csv(scored["scenario_rows"])),
             "perturbation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_summary.csv", rows_to_csv(scored["summary_rows"])),
             "perturbation_return_stream": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_return_stream.csv", rows_to_csv(stream_rows)),
+            "perturbation_signal_forward_returns": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_signal_forward_returns.csv", rows_to_csv(signal_rows)),
             "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_07}/summaries/stage_summary.json", summary),
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {
@@ -540,6 +564,203 @@ class CrucibleOrchestrator:
                 f"pass_rate={row.get('scenario_pass_rate')} reason={row.get('failure_reason')}"
             )
         logger.info(f"Completed perturbation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_cross_instrument_transfer_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_XFER}/summaries/stage_summary.json") and not rerun:
+            return run
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting cross-instrument transfer stage for {cfg.crucible_run_id}")
+        candidates = load_transfer_candidates(run_dir, cfg)
+        instruments = build_transfer_instruments(cfg.platform)
+        jobs = []
+        instrument_rows = []
+        wf_cfg = cfg.platform.get("walk_forward", {})
+        for instrument in instruments:
+            workload, sample_candidate = apply_transfer_instrument(cfg, build_candidate(cfg), instrument)
+            dp, _, _, _ = build_components(workload, sample_candidate)
+            dp.load_data()
+            data_start, data_end = data_range_from_frame(dp.data)
+            windows = windows_to_rows(generate_walk_forward_windows(
+                data_start=data_start,
+                data_end=data_end,
+                optimization_window_days=int(wf_cfg.get("optimization_window_days", 30)),
+                validation_window_days=int(wf_cfg.get("validation_window_days", 10)),
+                embargo_days=int(wf_cfg.get("embargo_days", 0)),
+                step_days=wf_cfg.get("step_days"),
+                min_windows=int(cfg.platform.get("cross_instrument_transfer", {}).get("min_windows", 1)),
+            ))
+            for candidate in candidates:
+                candidate_workload, transferred = apply_transfer_instrument(cfg, candidate["candidate"], instrument)
+                instrument_rows.append({
+                    "candidate_id": candidate["candidate"].candidate_id,
+                    "instrument_id": instrument["instrument_id"],
+                    "instrument_name": instrument["name"],
+                    "symbol": instrument["symbol"],
+                    "required": instrument["required"],
+                    "transferred_candidate_id": transferred.candidate_id,
+                    "window_count": len(windows),
+                })
+                for window in windows:
+                    jobs.append(CrucibleJob("07_cross_instrument_transfer", "transfer_validation_backtest", {
+                        "crucible_run_id": cfg.crucible_run_id,
+                        "instrument_id": instrument["instrument_id"],
+                        "source_candidate_id": candidate["candidate"].candidate_id,
+                        "candidate": transferred.to_dict(),
+                        "window": window,
+                        "workload": candidate_workload,
+                    }))
+
+        ray_cfg = cfg.platform.get("ray", {})
+        batch = RayJobRunner(
+            use_ray=bool(ray_cfg.get("enabled", True) if use_ray is None else use_ray),
+            max_concurrent_jobs=ray_cfg.get("max_concurrent_trials"),
+        ).run_jobs(
+            run_id=cfg.crucible_run_id,
+            jobs=jobs,
+            worker=run_validation_backtest,
+            state_store=self.state_store,
+            rerun_failed_jobs=bool(cfg.platform.get("resume", {}).get("rerun_failed_jobs", True)),
+        )
+        scored = summarize_transfer(candidates, instruments, batch.results, cfg.platform)
+        metrics = transfer_metrics(scored["summary_rows"], batch.jobs_total, batch.jobs_complete, batch.jobs_failed)
+        accepted_candidate_ids = {str(row.get("candidate_id")) for row in scored["summary_rows"] if row.get("accepted") is True}
+        return_rows = transfer_return_stream_rows(batch.results, accepted_candidate_ids)
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_count": len(candidates),
+            "instrument_count": len(instruments),
+            "accepted_candidates": int(metrics["transfer.accepted_candidates"]),
+            "rejected_candidates": int(metrics["transfer.rejected_candidates"]),
+            "jobs_total": batch.jobs_total,
+            "jobs_complete": batch.jobs_complete,
+            "jobs_failed": batch.jobs_failed,
+        }
+        artifacts = {
+            "transfer_instruments": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_XFER}/summaries/transfer_instruments.csv", rows_to_csv(instrument_rows)),
+            "transfer_instrument_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_XFER}/summaries/transfer_instrument_summary.csv", rows_to_csv(scored["instrument_rows"])),
+            "transfer_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_XFER}/summaries/transfer_summary.csv", rows_to_csv(scored["summary_rows"])),
+            "transfer_return_stream": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_XFER}/summaries/transfer_return_stream.csv", rows_to_csv(return_rows)),
+            "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_XFER}/summaries/stage_summary.json", summary),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "running",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        for row in scored["summary_rows"]:
+            logger.info(
+                f"Transfer decision run_id={cfg.crucible_run_id} "
+                f"candidate_id={row.get('candidate_id')} accepted={row.get('accepted')} "
+                f"pass_rate={row.get('instrument_pass_rate')} reason={row.get('failure_reason')}"
+            )
+        logger.info(f"Completed cross-instrument transfer stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_structural_break_stability_stage(self, rerun: bool = False) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_SB}/summaries/stage_summary.json") and not rerun:
+            return run
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting structural-break stability stage for {cfg.crucible_run_id}")
+        input_rows = load_structural_break_inputs(run_dir)
+        analyzed = analyze_structural_breaks(input_rows, cfg.platform)
+        summary_rows = analyzed["summary_rows"]
+        metrics = structural_break_metrics(summary_rows)
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_count": len(summary_rows),
+            "accepted_candidates": int(metrics["structural_break.accepted_candidates"]),
+            "rejected_candidates": int(metrics["structural_break.rejected_candidates"]),
+            "input_return_observations": len(input_rows),
+        }
+        artifacts = {
+            "structural_break_windows": self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                f"{STAGE_SB}/summaries/structural_break_windows.csv",
+                rows_to_csv(analyzed["window_rows"]),
+            ),
+            "structural_break_summary": self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                f"{STAGE_SB}/summaries/structural_break_summary.csv",
+                rows_to_csv(summary_rows),
+            ),
+            "stage_summary": self.state_store.write_artifact_json(
+                cfg.crucible_run_id,
+                f"{STAGE_SB}/summaries/stage_summary.json",
+                summary,
+            ),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "running",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        for row in summary_rows:
+            logger.info(
+                f"Structural-break decision run_id={cfg.crucible_run_id} "
+                f"candidate_id={row.get('candidate_id')} accepted={row.get('accepted')} "
+                f"concentration={row.get('max_segment_return_concentration')} reason={row.get('failure_reason')}"
+            )
+        logger.info(f"Completed structural-break stability stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
+        return manifest
+
+    def run_execution_realism_stress_stage(self, rerun: bool = False) -> dict[str, Any]:
+        cfg = self.resolved_cfg
+        run = self.state_store.start_or_resume(cfg, rerun=rerun)
+        if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_ER}/summaries/stage_summary.json") and not rerun:
+            return run
+        run_dir = Path(run["run_dir"])
+        logger.info(f"Starting execution-realism stress stage for {cfg.crucible_run_id}")
+        input_rows = load_execution_realism_inputs(run_dir)
+        analyzed = analyze_execution_realism(input_rows, cfg.platform)
+        summary_rows = analyzed["summary_rows"]
+        metrics = execution_realism_metrics(summary_rows)
+        summary = {
+            "crucible_run_id": cfg.crucible_run_id,
+            "run_name": cfg.run_name,
+            "candidate_count": len(summary_rows),
+            "accepted_candidates": int(metrics["execution_realism.accepted_candidates"]),
+            "rejected_candidates": int(metrics["execution_realism.rejected_candidates"]),
+            "input_return_observations": len(input_rows),
+        }
+        artifacts = {
+            "execution_realism_scenarios": self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                f"{STAGE_ER}/summaries/execution_realism_scenarios.csv",
+                rows_to_csv(analyzed["scenario_rows"]),
+            ),
+            "execution_realism_summary": self.state_store.write_artifact_text(
+                cfg.crucible_run_id,
+                f"{STAGE_ER}/summaries/execution_realism_summary.csv",
+                rows_to_csv(summary_rows),
+            ),
+            "stage_summary": self.state_store.write_artifact_json(
+                cfg.crucible_run_id,
+                f"{STAGE_ER}/summaries/stage_summary.json",
+                summary,
+            ),
+        }
+        manifest = self.state_store.update_run(cfg.crucible_run_id, {
+            "status": "running",
+            "summary": summary,
+            "metrics": metrics,
+            "artifacts": artifacts,
+        })
+        for row in summary_rows:
+            logger.info(
+                f"Execution-realism decision run_id={cfg.crucible_run_id} "
+                f"candidate_id={row.get('candidate_id')} accepted={row.get('accepted')} "
+                f"pass_rate={row.get('scenario_pass_rate')} reason={row.get('failure_reason')}"
+            )
+        logger.info(f"Completed execution-realism stress stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
     def run_monte_carlo_stage(self, rerun: bool = False) -> dict[str, Any]:
@@ -602,7 +823,7 @@ class CrucibleOrchestrator:
         run_dir = Path(run["run_dir"])
         logger.info(f"Starting confirmation stage for {cfg.crucible_run_id}")
         candidates = load_confirmation_candidates(run_dir, cfg)
-        window = confirmation_window(cfg.platform)
+        window = resolved_confirmation_window(cfg, allow_missing=not candidates)
         workload = confirmation_workload(cfg, window)
         logger.info(
             f"Prepared confirmation stage run_id={cfg.crucible_run_id} "

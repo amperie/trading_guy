@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 from algo_crucible.config import resolve_config_dicts
-from algo_crucible.jobs import CrucibleJob, RayJobRunner
+from algo_crucible.jobs import CrucibleJob, RayJobRunner, _run_one
 from algo_crucible.state_store import LocalCrucibleStateStore
 
 
@@ -97,21 +97,42 @@ def test_failed_jobs_are_reused_when_rerun_disabled(tmp_path: Path):
 
 
 def test_ray_path_uses_remote_worker(monkeypatch, tmp_path: Path):
-    calls = {"init": 0, "remote": 0}
+    calls = {"init": 0, "remote": 0, "wait": 0}
+    ref_args = {}
+    in_flight = set()
+    max_in_flight = 0
 
     class FakeRemote:
         def __init__(self, fn):
             self.fn = fn
 
         def remote(self, *args):
+            nonlocal max_in_flight
             calls["remote"] += 1
-            return self.fn(*args)
+            ref = f"ref_{calls['remote']}"
+            ref_args[ref] = args
+            in_flight.add(ref)
+            max_in_flight = max(max_in_flight, len(in_flight))
+            return ref
+
+    def fake_get(refs):
+        results = []
+        for ref in refs:
+            in_flight.remove(ref)
+            results.append(_run_ref(ref))
+        return results
+
+    def _run_ref(ref):
+        return _run_one(*ref_args[ref])
 
     fake_ray = SimpleNamespace(
         is_initialized=lambda: False,
         init=lambda **_: calls.__setitem__("init", calls["init"] + 1),
         remote=lambda fn: FakeRemote(fn),
-        get=lambda refs: refs,
+        wait=lambda refs, num_returns=1: (
+            calls.__setitem__("wait", calls["wait"] + 1) or (refs[:num_returns], refs[num_returns:])
+        ),
+        get=fake_get,
     )
     monkeypatch.setitem(sys.modules, "ray", fake_ray)
     store = LocalCrucibleStateStore(tmp_path / "runs")
@@ -124,5 +145,6 @@ def test_ray_path_uses_remote_worker(monkeypatch, tmp_path: Path):
         state_store=store,
     )
 
-    assert calls == {"init": 1, "remote": 3}
+    assert calls == {"init": 1, "remote": 3, "wait": 3}
+    assert max_in_flight == 2
     assert result.jobs_complete == 3

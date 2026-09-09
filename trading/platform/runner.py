@@ -38,7 +38,10 @@ CRUCIBLE_STAGES = (
     ("walk_forward_oos", "Running walk-forward OOS validation"),
     ("regime_gate", "Evaluating regime-aware gates"),
     ("plateau", "Testing parameter plateau stability"),
+    ("cross_instrument_transfer", "Testing cross-instrument transfer"),
     ("perturbation", "Running perturbation scenarios"),
+    ("structural_break_stability", "Checking structural-break stability"),
+    ("execution_realism_stress", "Running execution realism stress"),
     ("monte_carlo", "Running Monte Carlo path simulation"),
     ("confirmation", "Running final confirmation"),
 )
@@ -231,6 +234,29 @@ def _materialize_local_platform_paths(platform: dict[str, Any]) -> None:
         paper_replay["data_path"] = _source_tree_data_path(paper_replay["data_path"])
 
 
+def _hydrate_confirmation_window(platform: dict[str, Any], workload: dict[str, Any]) -> None:
+    confirmation = platform.setdefault("confirmation", {})
+    if confirmation.get("start_date") and confirmation.get("end_date"):
+        return
+    provider = workload.get("data_provider") or {}
+    start = (
+        provider.get("confirmation_start_date")
+        or provider.get("test_start_date")
+        or provider.get("start_date")
+    )
+    end = (
+        provider.get("confirmation_end_date")
+        or provider.get("test_end_date")
+        or provider.get("end_date")
+    )
+    if not (start and end):
+        return
+    if not confirmation.get("start_date"):
+        confirmation["start_date"] = start
+    if not confirmation.get("end_date"):
+        confirmation["end_date"] = end
+
+
 def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     output_dir = Path(args.output_dir)
     platform_config = (
@@ -260,6 +286,7 @@ def _crucible_config_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     platform.setdefault("mlflow", {})["parent_experiment_name"] = tenant_mlflow_experiment_name(args.tenant_id)
     _materialize_local_platform_paths(platform)
     _materialize_local_workload_paths(workload, args)
+    _hydrate_confirmation_window(platform, workload)
 
     effective_platform = output_dir / "crucible_platform.yaml"
     effective_workload = output_dir / "crucible_workload.yaml"
@@ -433,11 +460,16 @@ CRUCIBLE_EVIDENCE_STAGES = {
     "walk_forward_oos": ("Walk-forward OOS", "stages/03_walk_forward_oos/summaries/stage_summary.json"),
     "regime_gate": ("Regime gates", "stages/05_regime_gate/summaries/stage_summary.json"),
     "plateau": ("Plateau", "stages/06_plateau/summaries/stage_summary.json"),
+    "cross_instrument_transfer": ("Cross-instrument transfer", "stages/07_cross_instrument_transfer/summaries/stage_summary.json"),
     "perturbation": ("Perturbation", "stages/07_perturbation/summaries/stage_summary.json"),
+    "structural_break_stability": ("Structural break stability", "stages/08_structural_break_stability/summaries/stage_summary.json"),
+    "execution_realism_stress": ("Execution realism stress", "stages/08_execution_realism_stress/summaries/stage_summary.json"),
     "monte_carlo": ("Monte Carlo", "stages/08_monte_carlo/summaries/stage_summary.json"),
     "confirmation": ("Confirmation", "stages/08_confirmation/summaries/stage_summary.json"),
     "paper_replay": ("Paper replay", "stages/09_paper_replay/summaries/stage_summary.json"),
 }
+
+MAX_CRUCIBLE_EVIDENCE_ARTIFACTS = 250
 
 
 def _write_crucible_evidence_artifact(
@@ -448,6 +480,8 @@ def _write_crucible_evidence_artifact(
 ) -> dict[str, Any]:
     run_dir = Path(str(result.get("run_dir") or ""))
     summaries = {key: _read_json_file(run_dir / rel) for key, (_, rel) in CRUCIBLE_EVIDENCE_STAGES.items()}
+    failure_codes = _confirmation_failure_codes(summaries, metrics)
+    coaching = _confirmation_autopsy(summaries, metrics, failure_codes)
     evidence = {
         "stage": "crucible",
         "status": "succeeded" if result.get("status") == "complete" else str(result.get("status", "succeeded")),
@@ -462,12 +496,20 @@ def _write_crucible_evidence_artifact(
         ],
         "promotionCriteria": _promotion_criteria(summaries, metrics),
         "risks": _crucible_risks(summaries, metrics),
+        "failureCodes": failure_codes,
+        "coaching": coaching,
         "hpo": _read_csv_rows(run_dir / "stages/04_hpo/summaries/hpo_trial_summary.csv", limit=250),
         "regimes": _read_csv_rows(run_dir / "stages/03_walk_forward_oos/summaries/validation_regime_summary.csv", limit=500),
         "regimeGateDecisions": _read_csv_rows(run_dir / "stages/05_regime_gate/summaries/regime_gate_summary.csv", limit=250),
         "plateau": _read_csv_rows(run_dir / "stages/06_plateau/summaries/plateau_summary.csv", limit=250),
         "plateauNeighbors": _read_csv_rows(run_dir / "stages/06_plateau/summaries/plateau_neighbor_summary.csv", limit=500),
+        "transfer": _read_csv_rows(run_dir / "stages/07_cross_instrument_transfer/summaries/transfer_summary.csv", limit=250),
+        "transferInstruments": _read_csv_rows(run_dir / "stages/07_cross_instrument_transfer/summaries/transfer_instrument_summary.csv", limit=500),
         "perturbations": _read_csv_rows(run_dir / "stages/07_perturbation/summaries/perturbation_scenario_summary.csv", limit=500),
+        "structuralBreaks": _read_csv_rows(run_dir / "stages/08_structural_break_stability/summaries/structural_break_summary.csv", limit=250),
+        "structuralBreakWindows": _read_csv_rows(run_dir / "stages/08_structural_break_stability/summaries/structural_break_windows.csv", limit=500),
+        "executionRealism": _read_csv_rows(run_dir / "stages/08_execution_realism_stress/summaries/execution_realism_summary.csv", limit=250),
+        "executionRealismScenarios": _read_csv_rows(run_dir / "stages/08_execution_realism_stress/summaries/execution_realism_scenarios.csv", limit=500),
         "walkForward": _walk_forward_rows(run_dir),
         "monteCarloSummary": _read_csv_rows(run_dir / "stages/08_monte_carlo/summaries/monte_carlo_summary.csv", limit=250),
         "monteCarlo": _monte_carlo_rows(run_dir),
@@ -476,11 +518,249 @@ def _write_crucible_evidence_artifact(
         "artifacts": _crucible_artifact_index(result),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
+    _write_confirmation_autopsy(output_dir, run_dir if result.get("run_dir") else None, coaching)
     (output_dir / "crucible_evidence.json").write_text(
         json.dumps(_jsonable(evidence), indent=2),
         encoding="utf-8",
     )
     return evidence
+
+
+FAILURE_META = {
+    "confirmation.missing_artifact": ("confirmation", "inconclusive", "Missing confirmation evidence", "Required confirmation evidence is absent."),
+    "hpo.high_pbo": ("hpo", "fatal", "High PBO", "Backtest overfitting probability is too high."),
+    "hpo.deflated_sharpe_fail": ("hpo", "fatal", "Deflated Sharpe failed", "Sharpe does not survive multiple-testing adjustment."),
+    "hpo.too_many_trials": ("hpo", "soft", "Large HPO search", "HPO trial count is high relative to available evidence."),
+    "walk_forward.too_few_profitable_windows": ("walk_forward_oos", "fatal", "Too few profitable OOS windows", "Edge is not repeated enough across walk-forward windows."),
+    "walk_forward.oos_degradation": ("walk_forward_oos", "fatal", "OOS degradation", "Out-of-sample performance materially decays from the optimized result."),
+    "walk_forward.high_fold_variance": ("walk_forward_oos", "soft", "High fold variance", "Performance depends heavily on specific walk-forward folds."),
+    "regime.concentration": ("regime_gate", "soft", "Regime concentration", "Strategy behavior is concentrated in a narrow regime."),
+    "regime.required_gate_fail": ("regime_gate", "fatal", "Regime gate failed", "Required regime gate did not retain a candidate."),
+    "plateau.peak_too_narrow": ("plateau", "fatal", "Narrow parameter peak", "Best parameters look like an isolated spike."),
+    "plateau.low_neighbor_pass_rate": ("plateau", "fatal", "Weak plateau neighbors", "Nearby parameters do not preserve the edge."),
+    "transfer.sibling_fail": ("cross_instrument_transfer", "fatal", "Sibling transfer failed", "Frozen logic did not transfer to configured sibling instruments."),
+    "perturbation.cost_fragile": ("perturbation", "fatal", "Cost fragile", "Required cost or data perturbations erased the edge."),
+    "execution.delay_kills_edge": ("execution_realism_stress", "fatal", "Execution fragile", "Returns did not survive delayed-fill or adverse-execution stress."),
+    "execution.capacity_dies_early": ("execution_realism_stress", "soft", "Capacity constrained", "Turnover or liquidity limits capacity."),
+    "break.structural_decay": ("structural_break_stability", "fatal", "Structural decay", "Edge degraded around detected structural breaks."),
+    "monte_carlo.ruin_probability_high": ("monte_carlo", "fatal", "Monte Carlo failure", "Bootstrapped paths show unacceptable ruin or loss probability."),
+    "confirmation.no_candidate": ("confirmation", "fatal", "No promotion candidate", "No candidate survived all required gates."),
+}
+FAILURE_PRIORITY = tuple(FAILURE_META)
+
+
+def _confirmation_failure_codes(
+    summaries: dict[str, dict[str, Any] | None],
+    metrics: dict[str, float],
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+
+    def add(code: str, metric: str, observed: Any = None, threshold: Any = None) -> None:
+        stage, severity, label, detail = FAILURE_META[code]
+        failures.append(
+            {
+                "code": code,
+                "stage": stage,
+                "severity": severity,
+                "label": label,
+                "detail": detail,
+                "evidence": [_evidence_pointer(code, stage, metric, observed, threshold, detail)],
+            }
+        )
+
+    if not summaries.get("confirmation"):
+        add("confirmation.missing_artifact", "stage_summary.json", False, True)
+    if (pbo := _metric_any(metrics, summaries.get("hpo"), "pbo", "probability_of_backtest_overfitting")) is not None and pbo > 0.2:
+        add("hpo.high_pbo", "pbo", pbo, 0.2)
+    if (dsr := _metric_any(metrics, summaries.get("hpo"), "deflated_sharpe", "deflated_sharpe_ratio")) is not None and dsr <= 0:
+        add("hpo.deflated_sharpe_fail", "deflated_sharpe", dsr, 0)
+    if (trials := _metric_any(metrics, summaries.get("hpo"), "hpo.trials_complete", "trials_run", "num_samples")) is not None and trials > 100:
+        add("hpo.too_many_trials", "trials_run", trials, 100)
+    if (profitable := _metric_any(metrics, summaries.get("walk_forward_oos"), "walk_forward_oos.profitable_windows_pct", "profitable_windows_pct")) is not None and profitable < 50:
+        add("walk_forward.too_few_profitable_windows", "profitable_windows_pct", profitable, 50)
+    if (degradation := _metric_any(metrics, summaries.get("walk_forward_oos"), "oos_degradation_pct", "median_degradation_pct")) is not None and degradation > 50:
+        add("walk_forward.oos_degradation", "oos_degradation_pct", degradation, 50)
+    if (fold_var := _metric_any(metrics, summaries.get("walk_forward_oos"), "fold_variance", "return_std_pct", "sharpe_std")) is not None and fold_var > 1:
+        add("walk_forward.high_fold_variance", "fold_variance", fold_var, 1)
+    if (_num(summaries.get("regime_gate"), "reject_count") or 0) > 0:
+        add("regime.concentration", "reject_count", _num(summaries.get("regime_gate"), "reject_count"), 0)
+    if summaries.get("regime_gate") and (_num(summaries.get("regime_gate"), "passed_candidate_count") or 0) <= 0:
+        add("regime.required_gate_fail", "passed_candidate_count", 0, 1)
+    if (_num(summaries.get("plateau"), "rejected_peaks") or 0) > 0:
+        add("plateau.peak_too_narrow", "rejected_peaks", _num(summaries.get("plateau"), "rejected_peaks"), 0)
+    if summaries.get("plateau") and (_num(summaries.get("plateau"), "accepted_plateaus") or 0) <= 0:
+        add("plateau.low_neighbor_pass_rate", "accepted_plateaus", 0, 1)
+    if (_num(summaries.get("cross_instrument_transfer"), "rejected_candidates") or 0) > 0:
+        add("transfer.sibling_fail", "rejected_candidates", _num(summaries.get("cross_instrument_transfer"), "rejected_candidates"), 0)
+    if (_num(summaries.get("perturbation"), "rejected_candidates") or 0) > 0:
+        add("perturbation.cost_fragile", "rejected_candidates", _num(summaries.get("perturbation"), "rejected_candidates"), 0)
+    if (_num(summaries.get("structural_break_stability"), "rejected_candidates") or 0) > 0:
+        add("break.structural_decay", "rejected_candidates", _num(summaries.get("structural_break_stability"), "rejected_candidates"), 0)
+    if (_num(summaries.get("execution_realism_stress"), "rejected_candidates") or 0) > 0:
+        add("execution.delay_kills_edge", "rejected_candidates", _num(summaries.get("execution_realism_stress"), "rejected_candidates"), 0)
+    if (_metric_any(metrics, summaries.get("execution_realism_stress"), "capacity_usd", "max_capacity_usd") or math.inf) < 100000:
+        add("execution.capacity_dies_early", "capacity_usd", _metric_any(metrics, summaries.get("execution_realism_stress"), "capacity_usd", "max_capacity_usd"), 100000)
+    if (_num(summaries.get("monte_carlo"), "rejected_candidates") or 0) > 0:
+        add("monte_carlo.ruin_probability_high", "rejected_candidates", _num(summaries.get("monte_carlo"), "rejected_candidates"), 0)
+    promoted = metrics.get("confirmation.promoted_candidates") or _num(summaries.get("confirmation"), "confirmed_candidates") or 0
+    if summaries.get("confirmation") and promoted <= 0:
+        add("confirmation.no_candidate", "confirmed_candidates", promoted, 1)
+    return sorted(failures, key=lambda item: FAILURE_PRIORITY.index(item["code"]))
+
+
+def _confirmation_autopsy(
+    summaries: dict[str, dict[str, Any] | None],
+    metrics: dict[str, float],
+    failure_codes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    promoted = (metrics.get("confirmation.promoted_candidates") or _num(summaries.get("confirmation"), "confirmed_candidates") or 0) > 0
+    primary = failure_codes[0] if failure_codes else None
+    verdict = "promote" if promoted and not failure_codes else "inconclusive" if primary and primary["severity"] == "inconclusive" else "reject" if primary and primary["severity"] == "fatal" else "revise"
+    code = primary["code"] if primary else None
+    return {
+        "verdict": verdict,
+        "stage": primary["stage"] if primary else "confirmation",
+        "primaryFailure": code,
+        "secondaryFailures": [item["code"] for item in failure_codes[1:3]],
+        "severity": primary["severity"] if primary else "info",
+        "summary": _autopsy_summary(verdict, primary),
+        "evidence": primary["evidence"] if primary else [],
+        "suggestedActions": _suggested_actions(code),
+        "reentryStage": _reentry_stage(code),
+        "overfitRisk": _overfit_risk(summaries, metrics),
+    }
+
+
+def _evidence_pointer(code: str, stage: str, metric: str, observed: Any, threshold: Any, explanation: str) -> dict[str, Any]:
+    return {
+        "id": f"{code}:{metric}",
+        "stage": stage,
+        "artifact": CRUCIBLE_EVIDENCE_STAGES.get(stage, ("", "crucible_evidence.json"))[1],
+        "metric": metric,
+        "observed": observed,
+        "threshold": threshold,
+        "explanation": explanation,
+    }
+
+
+def _metric_any(metrics: dict[str, float], summary: dict[str, Any] | None, *keys: str) -> float | None:
+    for key in keys:
+        value = metrics.get(key) if key in metrics else (summary or {}).get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            return float(value)
+    return None
+
+
+def _autopsy_summary(verdict: str, primary: dict[str, Any] | None) -> str:
+    if verdict == "promote":
+        return "Confirmation found a promotion candidate and no blocking coaching failure."
+    if primary is None:
+        return "Confirmation did not find enough evidence to produce a diagnosis."
+    return f"{primary['label']}: {primary['detail']}"
+
+
+def _suggested_actions(code: str | None) -> list[dict[str, Any]]:
+    titles = {
+        "walk_forward.too_few_profitable_windows": ["Reduce free parameters and rerun walk-forward.", "Coarsen the HPO search space.", "Increase in-sample window length if data supports it."],
+        "walk_forward.high_fold_variance": ["Reduce free parameters and rerun walk-forward.", "Coarsen the HPO search space.", "Add regime-conditional logic only if the hypothesis predicts it."],
+        "plateau.peak_too_narrow": ["Switch HPO objective to neighborhood-averaged Sharpe.", "Freeze the parameter with the narrowest accepted range.", "Shrink the search space to economically defensible ranges."],
+        "plateau.low_neighbor_pass_rate": ["Switch HPO objective to neighborhood-averaged Sharpe.", "Reduce parameter count.", "Rerun plateau before confirmation."],
+        "hpo.high_pbo": ["Cut the number of HPO trials.", "Pre-register a narrower search space.", "Reduce model or parameter complexity."],
+        "hpo.deflated_sharpe_fail": ["Cut the number of HPO trials.", "Pre-register a narrower search space.", "Move holdout earlier and reserve it for one final run."],
+        "hpo.too_many_trials": ["Cut the number of HPO trials.", "Reduce free parameters.", "Use a stricter validation profile before confirmation."],
+        "regime.concentration": ["Declare whether this is a specialist strategy.", "Add a regime filter only if the hypothesis supports it.", "Cap allocation if used as a satellite."],
+        "regime.required_gate_fail": ["Rework the hypothesis around the failed regime behavior.", "Test a simpler baseline.", "Rerun regime gates before downstream stages."],
+        "transfer.sibling_fail": ["Re-derive the signal from an economic hypothesis.", "Test siblings before deep HPO.", "Stop research if no plausible sibling exposure exists."],
+        "perturbation.cost_fragile": ["Lower rebalance or signal frequency.", "Add a turnover cap.", "Restrict the universe to more liquid instruments."],
+        "execution.delay_kills_edge": ["Use next-bar execution rules.", "Remove same-bar or stop-touch assumptions.", "Slow signal frequency."],
+        "execution.capacity_dies_early": ["Lower participation limits.", "Reduce turnover.", "Cap promotion sizing instead of changing the signal."],
+        "break.structural_decay": ["Treat the detected break as a research blocker.", "Retest the economic rationale by period.", "Reject if the edge exists only before the break."],
+        "monte_carlo.ruin_probability_high": ["Reduce sizing or leverage.", "Add portfolio-level drawdown brakes.", "Require more independent trades before confirmation."],
+        "confirmation.no_candidate": ["Fix the highest-priority upstream blocker.", "Re-enter at the earliest changed stage.", "Do not rerun confirmation until upstream evidence changes."],
+        "confirmation.missing_artifact": ["Repair or rerun missing confirmation evidence.", "Check artifact persistence for the run.", "Do not interpret this as a strategy failure."],
+    }
+    return [
+        {
+            "id": f"{code}:action_{index}",
+            "failureCode": code,
+            "rank": index,
+            "title": title,
+            "rationale": "Pre-specified remediation selected from the confirmation coaching playbook.",
+            "actionType": _action_type(code),
+            "reentryStage": _reentry_stage(code),
+            "requiresUserJudgment": True,
+        }
+        for index, title in enumerate(titles.get(code or "", []), start=1)
+    ]
+
+
+def _action_type(code: str | None) -> str:
+    if code in {"confirmation.missing_artifact"}:
+        return "collect_evidence"
+    if code in {"confirmation.no_candidate", "transfer.sibling_fail", "break.structural_decay"}:
+        return "stop_research"
+    if code and code.startswith("hpo") or code and code.startswith("plateau"):
+        return "change_search_space"
+    if code and code.startswith("execution") or code and code.startswith("perturbation"):
+        return "change_execution"
+    return "change_strategy_structure"
+
+
+def _reentry_stage(code: str | None) -> str:
+    if not code:
+        return "confirmation"
+    if code.startswith("hpo") or code.startswith("plateau"):
+        return "hpo"
+    if code.startswith("walk_forward"):
+        return "walk_forward_oos"
+    if code.startswith("regime"):
+        return "regime_gate"
+    if code.startswith("transfer"):
+        return "idea"
+    if code.startswith("perturbation"):
+        return "research"
+    if code.startswith("execution"):
+        return "execution_realism_stress"
+    if code.startswith("break"):
+        return "research"
+    if code.startswith("monte_carlo"):
+        return "monte_carlo"
+    if code == "confirmation.missing_artifact":
+        return "confirmation"
+    return "hpo"
+
+
+def _overfit_risk(summaries: dict[str, dict[str, Any] | None], metrics: dict[str, float]) -> dict[str, Any]:
+    hpo_trials = _metric_any(metrics, summaries.get("hpo"), "hpo.trials_complete", "trials_run", "num_samples")
+    pbo = _metric_any(metrics, summaries.get("hpo"), "pbo", "probability_of_backtest_overfitting")
+    dsr = _metric_any(metrics, summaries.get("hpo"), "deflated_sharpe", "deflated_sharpe_ratio")
+    oos_windows = _metric_any(metrics, summaries.get("walk_forward_oos"), "jobs_total", "window_count")
+    level = "high" if (hpo_trials or 0) > 100 or (pbo or 0) > 0.2 or (dsr is not None and dsr <= 0) else "medium" if (hpo_trials or 0) > 50 else "low"
+    return {
+        "level": level,
+        "freeParamCount": None,
+        "hpoTrialCount": hpo_trials,
+        "turnover": metrics.get("turnover"),
+        "pbo": pbo,
+        "deflatedSharpe": dsr,
+        "siblingCount": _metric_any(metrics, summaries.get("cross_instrument_transfer"), "instrument_count", "sibling_count"),
+        "oosWindowCount": oos_windows,
+        "notes": ["More search is not a default repair." if level == "high" else "Overfit risk uses available Crucible summary metrics."],
+    }
+
+
+def _write_confirmation_autopsy(output_dir: Path, run_dir: Path | None, coaching: dict[str, Any]) -> None:
+    rel = Path("stages/08_confirmation/summaries")
+    for root in (output_dir, run_dir):
+        if root is None:
+            continue
+        target = root / rel
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "confirmation_autopsy.json").write_text(json.dumps(_jsonable(coaching), indent=2), encoding="utf-8")
+        with (target / "confirmation_playbook.csv").open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["id", "failureCode", "rank", "title", "reentryStage", "actionType", "requiresUserJudgment"])
+            writer.writeheader()
+            writer.writerows({key: action.get(key) for key in writer.fieldnames} for action in coaching.get("suggestedActions", []))
 
 
 def _write_crucible_chart_manifest(output_dir: Path, evidence: dict[str, Any]) -> dict[str, Any]:
@@ -595,11 +875,29 @@ def _stage_ui_metrics(name: str, summary: dict[str, Any]) -> dict[str, float]:
             "plateau_score": "accepted_plateaus",
             "warning_count": "rejected_peaks",
         },
+        "cross_instrument_transfer": {
+            "candidates_tested": "candidate_count",
+            "candidates_accepted": "accepted_candidates",
+            "candidates_rejected": "rejected_candidates",
+            "instruments_tested": "instrument_count",
+        },
         "perturbation": {
             "scenarios_run": "scenario_count",
             "scenarios_passed": "accepted_candidates",
             "scenarios_rejected": "rejected_candidates",
             "blocking_failures": "rejected_candidates",
+        },
+        "structural_break_stability": {
+            "candidates_tested": "candidate_count",
+            "candidates_accepted": "accepted_candidates",
+            "candidates_rejected": "rejected_candidates",
+            "input_observations": "input_return_observations",
+        },
+        "execution_realism_stress": {
+            "candidates_tested": "candidate_count",
+            "candidates_accepted": "accepted_candidates",
+            "candidates_rejected": "rejected_candidates",
+            "input_observations": "input_return_observations",
         },
         "monte_carlo": {
             "input_observations": "input_return_observations",
@@ -624,8 +922,14 @@ def _milestone_message(name: str, summary: dict[str, Any] | None) -> str:
         return f"{summary.get('passed_candidate_count', 0)} candidates passed regime gates"
     if name == "plateau":
         return f"{summary.get('accepted_plateaus', 0)} plateaus accepted"
+    if name == "cross_instrument_transfer":
+        return f"{summary.get('accepted_candidates', 0)} candidates passed transfer"
     if name == "perturbation":
         return f"{summary.get('accepted_candidates', 0)} candidates survived perturbations"
+    if name == "structural_break_stability":
+        return f"{summary.get('accepted_candidates', 0)} candidates passed structural-break checks"
+    if name == "execution_realism_stress":
+        return f"{summary.get('accepted_candidates', 0)} candidates survived execution stress"
     if name == "monte_carlo":
         return f"{summary.get('accepted_candidates', 0)} candidates passed Monte Carlo simulation"
     if name == "confirmation":
@@ -661,11 +965,32 @@ def _promotion_criteria(
             summaries.get("plateau") is not None,
         ),
         _criterion(
+            "cross_instrument_transfer",
+            "Transfer survivors",
+            _num(summaries.get("cross_instrument_transfer"), "accepted_candidates"),
+            "Same frozen logic should remain above noise on configured sibling instruments.",
+            summaries.get("cross_instrument_transfer") is not None,
+        ),
+        _criterion(
             "perturbation",
             "Perturbation survivors",
             _num(summaries.get("perturbation"), "accepted_candidates"),
             "Candidates should survive required cost and data shocks.",
             summaries.get("perturbation") is not None,
+        ),
+        _criterion(
+            "structural_break_stability",
+            "Structural-break survivors",
+            _num(summaries.get("structural_break_stability"), "accepted_candidates"),
+            "Candidate edge should not be concentrated in one unstable period.",
+            summaries.get("structural_break_stability") is not None,
+        ),
+        _criterion(
+            "execution_realism_stress",
+            "Execution-stress survivors",
+            _num(summaries.get("execution_realism_stress"), "accepted_candidates"),
+            "Candidate returns should survive delayed fills, missed signals, and adverse execution.",
+            summaries.get("execution_realism_stress") is not None,
         ),
         _criterion(
             "monte_carlo",
@@ -708,8 +1033,14 @@ def _crucible_risks(
         risks.append({"severity": "warning", "label": "Regime fragility", "detail": "Some candidates failed regime-aware gates."})
     if (_num(summaries.get("plateau"), "rejected_peaks") or 0) > 0:
         risks.append({"severity": "warning", "label": "Parameter instability", "detail": "Some peaks did not hold up in plateau testing."})
+    if (_num(summaries.get("cross_instrument_transfer"), "rejected_candidates") or 0) > 0:
+        risks.append({"severity": "blocking", "label": "Transfer failure", "detail": "One or more candidates failed configured sibling-instrument transfer."})
     if (_num(summaries.get("perturbation"), "rejected_candidates") or 0) > 0:
         risks.append({"severity": "blocking", "label": "Perturbation failure", "detail": "One or more candidates failed required perturbation scenarios."})
+    if (_num(summaries.get("structural_break_stability"), "rejected_candidates") or 0) > 0:
+        risks.append({"severity": "blocking", "label": "Structural break failure", "detail": "One or more candidates showed concentrated or degraded edge after a detected break."})
+    if (_num(summaries.get("execution_realism_stress"), "rejected_candidates") or 0) > 0:
+        risks.append({"severity": "blocking", "label": "Execution realism failure", "detail": "One or more candidates failed delayed-fill, missed-signal, or adverse-execution stress."})
     if (_num(summaries.get("monte_carlo"), "rejected_candidates") or 0) > 0:
         risks.append({"severity": "blocking", "label": "Monte Carlo failure", "detail": "One or more candidates failed bootstrapped path simulation thresholds."})
     if summaries.get("confirmation") and (metrics.get("confirmation.promoted_candidates") or 0) <= 0:
@@ -766,7 +1097,27 @@ def _crucible_artifact_index(result: dict[str, Any]) -> list[dict[str, str]]:
     artifacts = result.get("artifacts") or {}
     if not isinstance(artifacts, dict):
         return []
-    return [{"name": str(key), "path": str(value)} for key, value in artifacts.items()]
+    rows = [{"name": str(key), "path": str(value)} for key, value in artifacts.items()]
+
+    def useful(row: dict[str, str]) -> bool:
+        name = row["name"].lower()
+        if "/manifests/job_" in name:
+            return False
+        return (
+            "/summaries/" in name
+            or "/charts/" in name
+            or name.endswith((".log", "crucible_evidence.json", "chart_manifest.json", "stage_summary.json"))
+            or name in {"crucible_platform.yaml", "crucible_platform_config.json"}
+        )
+
+    selected = [row for row in rows if useful(row)]
+    if len(selected) < MAX_CRUCIBLE_EVIDENCE_ARTIFACTS:
+        selected.extend(
+            row
+            for row in rows
+            if row not in selected and "/manifests/job_" not in row["name"].lower()
+        )
+    return selected[:MAX_CRUCIBLE_EVIDENCE_ARTIFACTS]
 
 
 def _equity_chart_points(portfolio: Any, max_points: int = 1200) -> list[dict[str, float | str]]:
@@ -999,8 +1350,14 @@ def execute_crucible(args: argparse.Namespace) -> dict[str, Any]:
             result = orchestrator.run_regime_gate_stage(rerun=args.rerun_crucible)
         elif name == "plateau":
             result = orchestrator.run_plateau_stage(rerun=args.rerun_crucible, use_ray=args.use_ray)
+        elif name == "cross_instrument_transfer":
+            result = orchestrator.run_cross_instrument_transfer_stage(rerun=args.rerun_crucible, use_ray=args.use_ray)
         elif name == "perturbation":
             result = orchestrator.run_perturbation_stage(rerun=args.rerun_crucible, use_ray=args.use_ray)
+        elif name == "structural_break_stability":
+            result = orchestrator.run_structural_break_stability_stage(rerun=args.rerun_crucible)
+        elif name == "execution_realism_stress":
+            result = orchestrator.run_execution_realism_stress_stage(rerun=args.rerun_crucible)
         elif name == "monte_carlo":
             result = orchestrator.run_monte_carlo_stage(rerun=args.rerun_crucible)
         elif name == "confirmation":

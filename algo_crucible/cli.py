@@ -11,7 +11,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--platform-config", required=True)
     parser.add_argument("--workload-config", required=True)
     parser.add_argument("--rerun", action="store_true")
-    parser.add_argument("--milestone", default="1", choices=["1", "3", "4", "5", "6", "7", "8", "9"])
+    parser.add_argument("--milestone", default="1", choices=["1", "3", "4", "5", "6", "7", "8", "9", "transfer", "structural", "execution", "mc"])
     parser.add_argument("--local", action="store_true", help="Disable Ray for stages that support parallel jobs")
     parser.add_argument("--create-promoted-folder", action="store_true", help="Write promotion packet into trading/promoted")
     return parser
@@ -32,6 +32,14 @@ def main(argv: list[str] | None = None) -> int:
         result = orchestrator.run_plateau_stage(rerun=args.rerun, use_ray=not args.local)
     elif args.milestone == "7":
         result = orchestrator.run_perturbation_stage(rerun=args.rerun, use_ray=not args.local)
+    elif args.milestone == "transfer":
+        result = orchestrator.run_cross_instrument_transfer_stage(rerun=args.rerun, use_ray=not args.local)
+    elif args.milestone == "structural":
+        result = orchestrator.run_structural_break_stability_stage(rerun=args.rerun)
+    elif args.milestone == "execution":
+        result = orchestrator.run_execution_realism_stress_stage(rerun=args.rerun)
+    elif args.milestone == "mc":
+        result = orchestrator.run_monte_carlo_stage(rerun=args.rerun)
     elif args.milestone == "8":
         result = orchestrator.run_confirmation_stage(
             rerun=args.rerun,

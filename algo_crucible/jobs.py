@@ -107,11 +107,26 @@ class RayJobRunner:
         if not ray.is_initialized():
             ray.init(ignore_reinit_error=True, include_dashboard=False, log_to_driver=False)
         remote_worker = ray.remote(_run_one)
+        limit = max(1, int(self.max_concurrent_jobs or len(jobs) or 1))
         results = []
-        limit = self.max_concurrent_jobs or len(jobs) or 1
-        for offset in range(0, len(jobs), limit):
-            refs = [remote_worker.remote(job, worker) for job in jobs[offset : offset + limit]]
-            results.extend(ray.get(refs))
+        pending = {}
+        job_iter = iter(jobs)
+
+        def submit_until_full() -> None:
+            while len(pending) < limit:
+                try:
+                    job = next(job_iter)
+                except StopIteration:
+                    return
+                pending[remote_worker.remote(job, worker)] = job
+
+        submit_until_full()
+        while pending:
+            ready_refs, _ = ray.wait(list(pending), num_returns=1)
+            for ref, result in zip(ready_refs, ray.get(ready_refs), strict=True):
+                pending.pop(ref, None)
+                results.append(result)
+            submit_until_full()
         return results
 
 

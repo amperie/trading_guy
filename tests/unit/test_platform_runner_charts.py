@@ -7,6 +7,7 @@ import pytest
 import trading.platform.runner as platform_runner
 from trading.platform.runner import (
     _apply_tenant_mlflow_grouping,
+    _crucible_artifact_index,
     _equity_chart_points,
     _monthly_returns,
     _namespace,
@@ -47,6 +48,10 @@ def _args(**overrides):
         "agg_period": None,
         "experiment_name": "Ignored Platform Default",
         "workload_config": None,
+        "hpo_samples": None,
+        "hpo_concurrency": None,
+        "validation_period_days": None,
+        "use_ray": False,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -80,6 +85,32 @@ def test_tenant_mlflow_grouping_overrides_loaded_config_and_tags():
         "tenant_id": "tenant-abc",
         "platform.tenant_id": "tenant-abc",
     }
+
+
+def test_crucible_config_paths_hydrates_confirmation_window(tmp_path):
+    platform_path = tmp_path / "platform.yaml"
+    workload_path = tmp_path / "workload.yaml"
+    platform_path.write_text(
+        "crucible: {name: test}\nconfirmation: {start_date: null, end_date: null}\n",
+        encoding="utf-8",
+    )
+    workload_path.write_text(
+        "workload: {name: test}\ndata_provider: {path: data.csv, start_date: '2024-01-01', end_date: '2024-02-01'}\n",
+        encoding="utf-8",
+    )
+
+    effective_platform, _ = _crucible_config_paths(
+        _args(
+            stage="crucible",
+            config=str(platform_path),
+            workload_config=str(workload_path),
+            output_dir=str(tmp_path / "out"),
+        )
+    )
+
+    cfg = platform_runner._load_yaml(effective_platform)
+    assert cfg["confirmation"]["start_date"] == "2024-01-01"
+    assert cfg["confirmation"]["end_date"] == "2024-02-01"
 
 
 def test_platform_namespace_passes_tenant_experiment_override():
@@ -359,10 +390,74 @@ def test_write_crucible_evidence_aggregates_stage_outputs():
     assert evidence["milestones"][1]["status"] == "complete"
     assert [item["id"] for item in evidence["milestones"]].index("monte_carlo") > [item["id"] for item in evidence["milestones"]].index("perturbation")
     assert evidence["promotionCriteria"][-1]["status"] == "pass"
+    assert evidence["coaching"]["verdict"] == "promote"
+    assert evidence["failureCodes"] == []
     assert evidence["walkForward"][0]["window"] == "w1"
-    assert evidence["milestones"][5]["metrics"]["input_observations"] == 12.0
+    monte_carlo = next(item for item in evidence["milestones"] if item["id"] == "monte_carlo")
+    assert monte_carlo["metrics"]["input_observations"] == 12.0
     assert evidence["monteCarlo"][0]["p50"] == 101.0
     assert (root / "platform_run" / "crucible_evidence.json").exists()
+    assert (
+        root
+        / "platform_run"
+        / "stages/08_confirmation/summaries/confirmation_autopsy.json"
+    ).exists()
+
+
+def test_crucible_artifact_index_skips_per_job_manifests():
+    result = {
+        "artifacts": {
+            **{
+                f"stages/03_walk_forward_oos/manifests/job_{index:03d}.json": f"s3://bucket/job_{index:03d}.json"
+                for index in range(400)
+            },
+            "stages/03_walk_forward_oos/summaries/oos_summary.csv": "s3://bucket/oos_summary.csv",
+            "stages/03_walk_forward_oos/charts/walk_forward_oos_distributions.svg": "s3://bucket/chart.svg",
+            "crucible_evidence.json": "s3://bucket/crucible_evidence.json",
+        }
+    }
+
+    rows = _crucible_artifact_index(result)
+
+    assert len(rows) == 3
+    assert all("/manifests/job_" not in row["name"] for row in rows)
+
+
+def test_write_crucible_evidence_emits_confirmation_coaching_for_failures():
+    root = Path(".pytest_tmp") / f"unit_crucible_autopsy_{uuid4().hex}"
+    run_dir = root / "crucible_runs" / "run-1"
+    (run_dir / "stages/03_walk_forward_oos/summaries").mkdir(parents=True, exist_ok=True)
+    (run_dir / "stages/06_plateau/summaries").mkdir(parents=True, exist_ok=True)
+    (run_dir / "stages/08_confirmation/summaries").mkdir(parents=True, exist_ok=True)
+    (run_dir / "stages/03_walk_forward_oos/summaries/stage_summary.json").write_text(
+        '{"jobs_total": 4, "jobs_complete": 4, "profitable_windows_pct": 25}',
+        encoding="utf-8",
+    )
+    (run_dir / "stages/06_plateau/summaries/stage_summary.json").write_text(
+        '{"accepted_plateaus": 0, "rejected_peaks": 2}',
+        encoding="utf-8",
+    )
+    (run_dir / "stages/08_confirmation/summaries/stage_summary.json").write_text(
+        '{"confirmed_candidates": 0, "rejected_candidates": 1}',
+        encoding="utf-8",
+    )
+
+    evidence = _write_crucible_evidence_artifact(
+        root / "platform_run",
+        {"status": "complete", "run_dir": str(run_dir), "crucible_run_id": "run-1"},
+        [("walk_forward_oos", "Running walk-forward OOS validation")],
+        {"confirmation.promoted_candidates": 0.0},
+    )
+
+    assert evidence["failureCodes"][0]["code"] == "walk_forward.too_few_profitable_windows"
+    assert evidence["coaching"]["verdict"] == "reject"
+    assert evidence["coaching"]["primaryFailure"] == "walk_forward.too_few_profitable_windows"
+    assert evidence["coaching"]["suggestedActions"][0]["reentryStage"] == "walk_forward_oos"
+    assert (
+        root
+        / "platform_run"
+        / "stages/08_confirmation/summaries/confirmation_playbook.csv"
+    ).exists()
 
 
 def test_write_crucible_chart_manifest_indexes_evidence_charts(tmp_path):

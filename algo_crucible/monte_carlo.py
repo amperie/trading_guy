@@ -32,6 +32,34 @@ def return_stream_rows(job_results: list[dict[str, Any]], accepted_candidate_ids
     return rows
 
 
+def signal_forward_return_rows(job_results: list[dict[str, Any]], accepted_candidate_ids: set[str]) -> list[dict[str, Any]]:
+    rows = []
+    for result in job_results:
+        if result.get("status") != "complete":
+            continue
+        payload = result.get("result") or {}
+        candidate_id = str(payload.get("source_candidate_id") or payload.get("candidate_id") or "")
+        if candidate_id not in accepted_candidate_ids:
+            continue
+        for item in payload.get("signal_forward_return_stream") or []:
+            rows.append({
+                "candidate_id": candidate_id,
+                "scenario_id": payload.get("scenario_id", ""),
+                "window_id": payload.get("window_id", ""),
+                "step": item.get("step"),
+                "timestamp": item.get("timestamp"),
+                "symbol": item.get("symbol", ""),
+                "signal": item.get("signal"),
+                "signal_type": item.get("signal_type", ""),
+                "signal_strength": item.get("signal_strength"),
+                "forward_timestamp": item.get("forward_timestamp"),
+                "forward_return_pct": item.get("forward_return_pct"),
+                "raw_forward_return_pct": item.get("raw_forward_return_pct"),
+                "horizon_bars": item.get("horizon_bars"),
+            })
+    return rows
+
+
 def load_monte_carlo_inputs(run_dir: str | Path) -> list[dict[str, Any]]:
     path = Path(run_dir) / "stages/07_perturbation/summaries/perturbation_return_stream.csv"
     return _read_csv_rows(path)

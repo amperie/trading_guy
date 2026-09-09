@@ -65,6 +65,17 @@ plateau:
   min_neighbor_pass_rate: 0.60
   max_peak_to_median_degradation: 0.50
 
+cross_instrument_transfer:
+  max_instruments: 4
+  max_required_failures: 0
+  min_instrument_pass_rate: 0.50
+  min_windows: 1
+  min_trades: 0
+  min_median_oos_return: 0.0
+  min_profitable_windows_pct: 0.50
+  max_drawdown: 1.00
+  instruments: []
+
 perturbations:
   max_scenarios: 20
   max_required_failures: 0
@@ -86,6 +97,56 @@ perturbations:
         tx_cost: 2.0
         transaction_cost: 2.0
         slippage_bps: 2.0
+
+structural_break_stability:
+  min_observations: 20
+  rolling_window: 10
+  signal_column: signal
+  forward_return_column: forward_return_pct
+  ic_windows: [63, 126]
+  min_ic_observations: 3
+  min_ic_mean: 0.0
+  min_ic_ir: 0.0
+  min_positive_ic_window_pct: 0.60
+  recent_window_count: 3
+  recent_min_ic_mean: 0.0
+  min_post_break_ic_mean: 0.0
+  max_post_break_ic_degradation: 0.50
+  max_segment_return_concentration: 0.65
+  max_post_break_mean_degradation_pct: 50.0
+  min_post_break_mean_return_pct: -100.0
+
+execution_realism_stress:
+  max_scenarios: 5
+  max_required_failures: 0
+  min_scenario_pass_rate: 0.80
+  min_total_return_pct: -100.0
+  max_total_return_degradation_pct: 50.0
+  scenarios:
+    - name: baseline
+      stress_type: baseline
+      severity: baseline
+      required: true
+    - name: one_bar_delay
+      stress_type: latency_delay
+      severity: 1bar
+      required: true
+      delay_bars: 1
+    - name: miss_10pct_positive_returns
+      stress_type: missed_signals
+      severity: 10pct
+      required: true
+      miss_signal_pct: 10.0
+    - name: adverse_stops_5bps
+      stress_type: adverse_stops
+      severity: 5bps
+      required: true
+      adverse_stop_bps: 5.0
+    - name: stress_spread_2bps
+      stress_type: spread_regime
+      severity: 2bps
+      required: false
+      spread_bps: 2.0
 
 monte_carlo:
   num_paths: 1000

@@ -33,12 +33,14 @@ def run_validation_backtest(payload: dict[str, Any]) -> dict[str, Any]:
         "seed_id": payload.get("seed_id"),
         "neighbor_id": payload.get("neighbor_id"),
         "scenario_id": payload.get("scenario_id"),
+        "instrument_id": payload.get("instrument_id"),
         "source_candidate_id": payload.get("source_candidate_id", candidate.candidate_id),
         "window_id": window["window_id"],
         "window": window,
         "overall_scorecard": metrics,
         "regime_scorecard": regimes,
         "return_stream": _return_stream(pf),
+        "signal_forward_return_stream": _signal_forward_return_stream(pf),
     }
 
 
@@ -65,3 +67,47 @@ def _return_stream(portfolio, max_points: int = 1000) -> list[dict[str, Any]]:
         for idx, (ts, ret) in enumerate(returns.items())
         if math.isfinite(float(ret))
     ]
+
+
+def _signal_forward_return_stream(portfolio, horizon: int = 1, max_points: int = 2000) -> list[dict[str, Any]]:
+    signals_history = getattr(portfolio, "signals_history", None) or {}
+    tick_history = getattr(portfolio, "tick_history", None) or {}
+    if not signals_history or not tick_history:
+        return []
+
+    prices: dict[str, list[tuple[pd.Timestamp, float]]] = {}
+    for timestamp, tick in sorted(tick_history.items()):
+        for item in tick:
+            if item.close is not None:
+                prices.setdefault(item.symbol, []).append((pd.Timestamp(timestamp), float(item.close)))
+
+    rows = []
+    for timestamp, signals in sorted(signals_history.items()):
+        ts = pd.Timestamp(timestamp)
+        for signal in signals:
+            series = prices.get(signal.symbol, [])
+            match = next((idx for idx, (price_ts, _) in enumerate(series) if price_ts == ts), None)
+            if match is None or match + horizon >= len(series):
+                continue
+            current = series[match][1]
+            future_ts, future = series[match + horizon]
+            if current <= 0:
+                continue
+            direction = 1.0 if getattr(signal.type, "name", "") == "BUY" else -1.0
+            strength = float(getattr(signal, "strength", 100.0) or 0.0) / 100.0
+            rows.append({
+                "step": len(rows) + 1,
+                "timestamp": ts.isoformat(),
+                "symbol": signal.symbol,
+                "signal": direction * strength,
+                "signal_type": getattr(signal.type, "name", ""),
+                "signal_strength": getattr(signal, "strength", None),
+                "forward_timestamp": future_ts.isoformat(),
+                "forward_return_pct": direction * ((future / current) - 1.0) * 100.0,
+                "raw_forward_return_pct": ((future / current) - 1.0) * 100.0,
+                "horizon_bars": horizon,
+            })
+    if len(rows) > max_points:
+        step = max(1, math.ceil(len(rows) / max_points))
+        rows = rows[::step]
+    return rows
