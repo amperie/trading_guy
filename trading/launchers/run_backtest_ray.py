@@ -582,7 +582,9 @@ def backtest_objective_fn(
 
     metrics = result["metrics"]
     score, details = objective_score(metrics, backtest_cfg.get("objective"))
-    return {"_metric": score, "_trial_failed": 0.0, **_performance_metric_snapshot(metrics), **details}
+    snapshot = _performance_metric_snapshot(metrics)
+    trial_details = {f"_trial_{key}": value for key, value in snapshot.items()}
+    return {"_metric": score, "_trial_failed": 0.0, **snapshot, **trial_details, **details}
 
 
 def objective_score(metrics, objective: dict | str | None = None) -> tuple[float, dict[str, float]]:

@@ -126,7 +126,7 @@ def _trial_metrics(trial: dict[str, Any]) -> dict[str, float]:
         details = {}
     row = {}
     for key in METRIC_KEYS:
-        value = trial.get(key, details.get(key, details.get(f"_objective_{key}")))
+        value = trial.get(key, details.get(key, details.get(f"_trial_{key}", details.get(f"_objective_{key}"))))
         if value is None:
             continue
         try:

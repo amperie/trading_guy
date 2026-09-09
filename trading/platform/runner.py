@@ -824,6 +824,9 @@ def _coerce_csv_row(row: dict[str, str]) -> dict[str, Any]:
             payload[key] = None
             continue
         clean = value.strip()
+        if key.endswith("_json") or key in {"objective_details", "config", "algorithm_params", "portfolio_params"}:
+            payload[key] = _coerce_json_value(clean)
+            continue
         if clean.lower() in {"true", "false"}:
             payload[key] = clean.lower() == "true"
             continue
@@ -833,6 +836,13 @@ def _coerce_csv_row(row: dict[str, str]) -> dict[str, Any]:
         except ValueError:
             payload[key] = clean
     return payload
+
+
+def _coerce_json_value(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def _crucible_milestone_payload(
