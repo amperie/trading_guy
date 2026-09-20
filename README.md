@@ -4,6 +4,25 @@ A modular, event-driven trading framework. Swap any component via config — wri
 
 ---
 
+## Quant Crucible integration
+
+QC invokes this engine through durable worker jobs for backtests, HPO, walk-forward
+and Crucible stages. It owns authentication, immutable strategy/dataset snapshots,
+attempts, cancellation, published artifacts, metering and evidence-bound decisions.
+Execution requires a reviewed engine configuration for the exact strategy content hash
+and a pinned source release; saved/generated Python is not automatically runnable.
+
+Managed QC deployment installs this runtime and executes it on demand. There is no
+separate always-running Trading Guy API. QC authoring pages now have live integration,
+but its execution workspace still uses fixture runs. Local/container checks do not
+establish live AWS deployment, real observed-paper replay or complete browser acceptance.
+Research promotion does not activate a broker or live trading.
+
+See the sibling [QC status](../qc/specs/current-state.md),
+[execution contract](../qc/specs/execution-workflows.md) and
+[deployment guide](../qc/specs/stack-deployment.md) for current platform behavior.
+These references require the companion QC checkout.
+
 ## Architecture
 
 ```
@@ -184,7 +203,7 @@ service after MongoDB and networking are available. See the
 [detailed `run.py` guide](docs/RUN_PY_GUIDE.md#paper-session-autostart) for an
 example.
 
-The root [config.yaml](/E:/Programming/trading_guy/config.yaml) now includes a dedicated `pipeline` section:
+The root [config.yaml](config.yaml) now includes a dedicated `pipeline` section:
 
 ```yaml
 pipeline:
@@ -276,7 +295,7 @@ Common flags (all modes):
 
 ## Debug REPL And Runtime Logging
 
-Set the global root config flag in [config.yaml](/E:/Programming/trading_guy/config.yaml) to enable the Ctrl-C debug REPL:
+Set the global root config flag in [config.yaml](config.yaml) to enable the Ctrl-C debug REPL:
 
 ```yaml
 debug_on_sigint: true
