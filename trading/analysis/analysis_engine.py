@@ -3,6 +3,7 @@ Comprehensive analysis engine for backtesting results
 Provides trade extraction, performance metrics, visualizations, and reports
 """
 from contextlib import nullcontext
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import os
 import tempfile
@@ -140,6 +141,7 @@ class AnalysisEngine:
             key=lambda o: o.executed_datetime if o.executed_datetime else o.placed_datetime
         )
 
+        remaining_buys = {id(order): order.quantity for order in filled_orders}
         for order in filled_orders:
             symbol = order.symbol
 
@@ -153,7 +155,7 @@ class AnalysisEngine:
 
                 while remaining_qty > 0 and open_positions[symbol]:
                     buy_order = open_positions[symbol][0]
-                    match_qty = min(remaining_qty, buy_order.quantity)
+                    match_qty = min(remaining_qty, remaining_buys[id(buy_order)])
 
                     # Calculate P&L for this trade
                     entry_price = buy_order.price
@@ -201,9 +203,9 @@ class AnalysisEngine:
 
                     # Update quantities
                     remaining_qty -= match_qty
-                    buy_order.quantity -= match_qty
+                    remaining_buys[id(buy_order)] -= match_qty
 
-                    if buy_order.quantity == 0:
+                    if remaining_buys[id(buy_order)] == 0:
                         open_positions[symbol].pop(0)
 
         self._trades = trades
@@ -317,7 +319,7 @@ class AnalysisEngine:
             tick_times = sorted(self.portfolio.tick_history.keys())
             bars_per_trade = []
             for trade in self._trades:
-                bars_in_trade = sum(1 for t in tick_times if trade.entry_time <= t <= trade.exit_time)
+                bars_in_trade = max(0, bisect_right(tick_times, trade.exit_time) - bisect_left(tick_times, trade.entry_time))
                 bars_per_trade.append(bars_in_trade)
             avg_bars_in_trade = np.mean(bars_per_trade) if bars_per_trade else 0
 

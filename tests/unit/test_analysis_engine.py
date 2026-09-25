@@ -98,6 +98,50 @@ class TestAnalysisEngine:
         assert metrics.sharpe_ratio is not None
         assert metrics.max_drawdown <= 0
 
+    @pytest.fixture
+    def completed_order_history(self):
+        from trading.core.classes import Order, OrderStatus
+        times = [datetime(2024, 1, day) for day in range(1, 5)]
+        orders = [Order(placed_datetime=t, executed_datetime=t, action=action, type=OrderType.MARKET,
+                        status=OrderStatus.FILLED, symbol='AAPL', price=price, quantity=quantity, cash=0)
+                  for t, action, price, quantity in zip(times,
+                    [OrderAction.BUY, OrderAction.SELL, OrderAction.SELL, OrderAction.BUY],
+                    [100, 110, 105, 100], [10, 4, 6, 2])]
+        return (SimpleNamespace(keep_history=True, tick_history=dict.fromkeys(times, []),
+                    value_history=dict(zip(times, [10000, 10100, 10090, 10090]))),
+                SimpleNamespace(filled_orders_by_id={o.order_id: o for o in orders}, pending_orders_by_id={}))
+
+    def test_repeated_analysis_preserves_orders(self, completed_order_history):
+        pf, om = completed_order_history
+        original = {key: order.quantity for key, order in om.filled_orders_by_id.items()}
+        engine = AnalysisEngine(pf, om)
+        first = engine.extract_trades()
+        assert [t.quantity for t in first] == [4, 6]
+        for analysis in (engine, AnalysisEngine(pf, om)):
+            again = analysis.extract_trades()
+            assert [(t.quantity, t.pnl) for t in again] == [(t.quantity, t.pnl) for t in first]
+            assert analysis.calculate_metrics().total_trades == len(first)
+        assert {key: order.quantity for key, order in om.filled_orders_by_id.items()} == original
+
+    def test_large_history_holding_duration_uses_binary_search(self, completed_order_history, monkeypatch):
+        from datetime import timedelta
+        from unittest.mock import Mock
+        import trading.analysis.analysis_engine as module
+        pf, om = completed_order_history
+        engine = AnalysisEngine(pf, om)
+        engine._trades = engine.extract_trades() * 500
+        timestamps = [datetime(2024, 1, 1) + timedelta(minutes=i) for i in range(350000)]
+        pf.tick_history = dict.fromkeys(timestamps, [])
+        pf.value_history = {stamp: 10000 + i / 100 for i, stamp in enumerate(timestamps)}
+        left, right = Mock(wraps=module.bisect_left), Mock(wraps=module.bisect_right)
+        monkeypatch.setattr(module, 'bisect_left', left)
+        monkeypatch.setattr(module, 'bisect_right', right)
+        result = engine.calculate_metrics()
+        expected = sum(sum(t.entry_time <= stamp <= t.exit_time for stamp in timestamps)
+                       for t in engine._trades[:2]) / 2
+        assert result.avg_bars_in_trade == expected
+        assert left.call_count == right.call_count == len(engine._trades)
+
     def test_get_tick_returns(self, setup_portfolio_with_trades):
         """Test tick-level returns calculation"""
         pf, om = setup_portfolio_with_trades
