@@ -272,10 +272,5 @@ def classify_ticks(
     cfg: dict | None = None,
     progress=None,
 ) -> list[dict[str, MarketRegimeSnapshot]]:
-    detector = MarketRegimeDetector(cfg)
-    results = []
-    for index, tick in enumerate(ticks):
-        results.append(detector.update(tick))
-        if progress and ((index + 1) % 100 == 0 or index + 1 == len(ticks)):
-            progress(index + 1, len(ticks))
-    return results
+    from .regime_batch import classify
+    return classify(ticks, cfg, progress)

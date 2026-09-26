@@ -97,7 +97,8 @@ STAGE_09 = "stages/09_paper_replay"
 
 
 from algo_crucible.progress import stage, emit
-from algo_crucible.regime_inputs import capture, score
+from algo_crucible.regime_inputs import capture
+from algo_crucible.regime_jobs import run_windows
 
 
 class CrucibleOrchestrator:
@@ -306,7 +307,7 @@ class CrucibleOrchestrator:
         return manifest
 
     @stage
-    def run_regime_gate_stage(self, rerun: bool = False) -> dict[str, Any]:
+    def run_regime_gate_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
         if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_05}/summaries/stage_summary.json") and not rerun:
@@ -319,13 +320,13 @@ class CrucibleOrchestrator:
             raise FileNotFoundError("Walk-forward OOS and regime inputs are required before regime evaluation")
         overall_rows = pd.read_csv(oos_path).to_dict(orient="records")
         regime_rows = []
+        sources = []
         if deferred is not None:
-            for index, result_path in enumerate(deferred):
-                item = self.state_store.read_artifact_json(cfg.crucible_run_id, result_path)['result']
-                emit('regime_windows', 'Scoring validation regimes', index, len(deferred))
-                regime_rows.extend({"candidate_id": item['candidate_id'], "window_id": item['window_id'], **row}
-                                   for row in score(item['regime_inputs']))
-            emit('regime_windows', 'Validation regime scoring completed', len(deferred), len(deferred))
+            for result_path in deferred:
+                path = (run_dir / result_path).resolve()
+                if not path.is_relative_to(run_dir.resolve()):
+                    raise ValueError('Regime input path must stay within the run checkpoint')
+                sources.append(dict(path=path, baseline=False))
         else:
             regime_rows = pd.read_csv(regime_path).to_dict(orient="records")
         # QC restores the separate baseline namespace alongside the main run.
@@ -333,10 +334,18 @@ class CrucibleOrchestrator:
             inputs = json.loads(path.read_text(encoding='utf-8'))
             if inputs.get('run_name') not in (cfg.run_name, cfg.run_name + '-baseline'):
                 continue
-            emit('baseline_regimes', 'Scoring deferred baseline regimes')
-            baseline_rows = score(inputs)
-            self.state_store.write_artifact_text(cfg.crucible_run_id,
-                f'{STAGE_05}/summaries/baseline_regime_summary.csv', rows_to_csv(baseline_rows))
+            sources.append(dict(path=path, baseline=True))
+        options = cfg.platform.get('regime_gate', {})
+        batches = run_windows(sources, self.state_store, cfg.crucible_run_id,
+            use_ray=options.get('use_ray', True) if use_ray is None else use_ray,
+            max_concurrent_jobs=options.get('max_concurrent_jobs', 2))
+        for item in batches:
+            if item['baseline']:
+                self.state_store.write_artifact_text(cfg.crucible_run_id,
+                    f'{STAGE_05}/summaries/baseline_regime_summary.csv', rows_to_csv(item['rows']))
+            else:
+                regime_rows.extend(dict(candidate_id=item['candidate_id'], window_id=item['window_id'], **row)
+                                   for row in item['rows'])
         self.state_store.write_artifact_text(cfg.crucible_run_id,
             f'{STAGE_05}/summaries/validation_regime_summary.csv', rows_to_csv(regime_rows))
         emit('regime_gates', 'Evaluating regime gates')

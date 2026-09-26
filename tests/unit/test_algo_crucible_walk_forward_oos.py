@@ -89,7 +89,7 @@ def test_walk_forward_oos_runs_validation_windows_and_reuses_results(tmp_path: P
     windows = pd.read_csv(stage_dir / "summaries" / "window_summary.csv")
     oos = pd.read_csv(stage_dir / "summaries" / "oos_summary.csv")
     assert not (stage_dir / 'summaries' / 'validation_regime_summary.csv').exists()
-    orchestrator.run_regime_gate_stage()
+    orchestrator.run_regime_gate_stage(use_ray=False)
     regimes = pd.read_csv(run_dir / 'stages/05_regime_gate/summaries/validation_regime_summary.csv')
 
     assert first["summary"]["window_count"] == 4

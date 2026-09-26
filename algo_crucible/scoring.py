@@ -65,8 +65,8 @@ def regime_scorecard(portfolio, ticks: list[list[Any]], regime_cfg: dict[str, An
 
     frame = pd.DataFrame({
         "timestamp": timestamps,
-        "return": [float(returns.loc[ts]) for ts in timestamps],
-        "equity": [float(values.loc[ts]) for ts in timestamps],
+        "return": returns.to_numpy(dtype=float),
+        "equity": values.to_numpy(dtype=float),
         "regime": [label_by_ts.get(pd.Timestamp(ts), "UNKNOWN_UNKNOWN") for ts in timestamps],
     })
     trade_counts = _regime_trade_counts(trades or [], label_by_ts)

@@ -13,6 +13,10 @@ logging:
   suppress_per_bar_logs: true
   persist_logs_to_mlflow: true
 
+regime_gate:
+  use_ray: true
+  max_concurrent_jobs: 2
+
 resume:
   enabled: true
   system_of_record: local
