@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from trading.analysis.market_regime import classify_ticks
+from algo_crucible.progress import emit
 
 
 METRIC_KEYS = [
@@ -47,7 +48,10 @@ def overall_scorecard(metrics: Any) -> dict[str, Any]:
 
 
 def regime_scorecard(portfolio, ticks: list[list[Any]], regime_cfg: dict[str, Any] | None, trades: list[Any] | None = None) -> list[dict[str, Any]]:
-    labels = classify_ticks(ticks, regime_cfg or {})
+    emit('regime_classification', 'Classifying market regimes', 0, len(ticks))
+    labels = classify_ticks(ticks, regime_cfg or {},
+        progress=lambda done, total: emit('regime_classification', 'Classifying market regimes', done, total))
+    emit('regime_summary', 'Aggregating regime scores')
     values = pd.Series(portfolio.value_history)
     values.index = pd.to_datetime(list(portfolio.value_history.keys()))
     returns = values.pct_change().fillna(0.0)

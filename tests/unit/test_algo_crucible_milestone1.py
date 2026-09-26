@@ -142,7 +142,8 @@ def test_milestone1_single_candidate_outputs(tmp_path: Path):
     stage_dir = run_dir / "stages" / "01_single_candidate"
     assert (stage_dir / "summaries" / "stage_summary.json").exists()
     assert (stage_dir / "summaries" / "candidate_summary.csv").read_text(encoding="utf-8").count("\n") == 2
-    assert "regime" in (stage_dir / "summaries" / "regime_summary.csv").read_text(encoding="utf-8")
+    assert (stage_dir / 'regime_inputs.json').exists()
+    assert not (stage_dir / 'summaries' / 'regime_summary.csv').exists()
     assert result["metrics"]["milestone1.total_trades"] >= 0
 
 

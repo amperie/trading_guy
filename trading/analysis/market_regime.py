@@ -270,6 +270,12 @@ class MarketRegimeDetector:
 def classify_ticks(
     ticks: list[list[PriceData]],
     cfg: dict | None = None,
+    progress=None,
 ) -> list[dict[str, MarketRegimeSnapshot]]:
     detector = MarketRegimeDetector(cfg)
-    return [detector.update(tick) for tick in ticks]
+    results = []
+    for index, tick in enumerate(ticks):
+        results.append(detector.update(tick))
+        if progress and ((index + 1) % 100 == 0 or index + 1 == len(ticks)):
+            progress(index + 1, len(ticks))
+    return results

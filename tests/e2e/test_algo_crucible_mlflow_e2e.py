@@ -82,7 +82,7 @@ def test_crucible_populates_representative_mlflow_parent_run(monkeypatch, tmp_pa
     assert "configs/resolved_config.yaml" in artifacts
     assert "stages/04_hpo/summaries/hpo_trial_summary.csv" in artifacts
     assert "stages/03_walk_forward_oos/summaries/oos_summary.csv" in artifacts
-    assert "stages/03_walk_forward_oos/summaries/validation_regime_summary.csv" in artifacts
+    assert "stages/05_regime_gate/summaries/validation_regime_summary.csv" in artifacts
     assert "stages/05_regime_gate/summaries/regime_gate_summary.csv" in artifacts
     assert "stages/06_plateau/summaries/plateau_summary.csv" in artifacts
     assert "stages/07_perturbation/summaries/perturbation_summary.csv" in artifacts

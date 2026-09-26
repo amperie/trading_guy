@@ -7,6 +7,8 @@ from typing import Any
 import pandas as pd
 
 from algo_crucible.builders import build_components
+from algo_crucible.regime_inputs import capture
+from algo_crucible.progress import emit
 from algo_crucible.models import Candidate
 from algo_crucible.scoring import overall_scorecard, regime_scorecard
 from trading.analysis.analysis_engine import AnalysisEngine
@@ -28,7 +30,11 @@ def run_validation_backtest(payload: dict[str, Any]) -> dict[str, Any]:
 
     analysis = AnalysisEngine(pf, om)
     metrics = overall_scorecard(analysis.calculate_metrics())
-    regimes = regime_scorecard(pf, ticks, candidate.algorithm_params.get("market_regime", {}), analysis.extract_trades())
+    emit('validation_evidence', 'Preparing validation evidence')
+    trades = analysis.extract_trades()
+    config = candidate.algorithm_params.get('market_regime', {})
+    deferred = payload.get('defer_regimes', False)
+    regimes = None if deferred else regime_scorecard(pf, ticks, config, trades)
     return {
         "candidate_id": candidate.candidate_id,
         "seed_id": payload.get("seed_id"),
@@ -40,6 +46,7 @@ def run_validation_backtest(payload: dict[str, Any]) -> dict[str, Any]:
         "window": window,
         "overall_scorecard": metrics,
         "regime_scorecard": regimes,
+        **({'regime_inputs': capture(pf, ticks, config, trades)} if deferred else {}),
         "return_stream": _return_stream(pf),
         "signal_forward_return_stream": _signal_forward_return_stream(pf),
     }

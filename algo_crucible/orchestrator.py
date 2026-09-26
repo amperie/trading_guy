@@ -60,7 +60,7 @@ from algo_crucible.perturbations import (
     perturb_windows,
     summarize_perturbations,
 )
-from algo_crucible.scoring import distribution_stats, distribution_svg, overall_scorecard, prefixed_numeric_metrics, regime_scorecard, rows_to_csv
+from algo_crucible.scoring import distribution_stats, distribution_svg, overall_scorecard, prefixed_numeric_metrics, rows_to_csv
 from algo_crucible.state_store import create_state_store
 from algo_crucible.structural_break import (
     analyze_structural_breaks,
@@ -96,11 +96,16 @@ STAGE_08 = "stages/08_confirmation"
 STAGE_09 = "stages/09_paper_replay"
 
 
+from algo_crucible.progress import stage, emit
+from algo_crucible.regime_inputs import capture, score
+
+
 class CrucibleOrchestrator:
     def __init__(self, platform_config: str | Path, workload_config: str | Path, state_store=None):
         self.resolved_cfg = resolve_configs(platform_config, workload_config)
         self.state_store = state_store or create_state_store(self.resolved_cfg.platform)
 
+    @stage
     def run_milestone1(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -119,7 +124,9 @@ class CrucibleOrchestrator:
         trades = analysis.extract_trades()
         overall = overall_scorecard(metrics)
         regime_cfg = candidate.algorithm_params.get("market_regime", {})
-        regimes = regime_scorecard(pf, ticks, regime_cfg, trades)
+        emit('regime_inputs', 'Saving baseline inputs for the regime stage')
+        regime_inputs = capture(pf, ticks, regime_cfg, trades)
+        regime_inputs['run_name'] = cfg.run_name
 
         candidate_row = {
             "candidate_id": candidate.candidate_id,
@@ -135,12 +142,12 @@ class CrucibleOrchestrator:
             "backtest_count": 1,
             "candidate_id": candidate.candidate_id,
             "overall_scorecard": overall,
-            "regime_count": len(regimes),
+            "regime_evaluation": "deferred",
         }
         artifacts = {
             "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_01}/summaries/stage_summary.json", summary),
             "candidate_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_01}/summaries/candidate_summary.csv", rows_to_csv([candidate_row])),
-            "regime_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_01}/summaries/regime_summary.csv", rows_to_csv(regimes)),
+            "regime_inputs": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_01}/regime_inputs.json", regime_inputs),
             "candidate": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_01}/candidates/{candidate.candidate_id}.json", {
                 "candidate_id": candidate.candidate_id,
                 "algorithm_class": candidate.algorithm_class,
@@ -158,6 +165,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed crucible run {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_walk_forward_oos(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -184,6 +192,7 @@ class CrucibleOrchestrator:
                 "candidate": candidate.to_dict(),
                 "window": row,
                 "workload": cfg.workload,
+                "defer_regimes": True,
             })
             for candidate in candidates
             for row in window_rows
@@ -202,11 +211,8 @@ class CrucibleOrchestrator:
         )
         completed = [row["result"] for row in batch.results if row.get("status") == "complete"]
         oos_rows = [_window_metric_row(result) for result in completed]
-        regime_rows = [
-            {"window_id": result["window_id"], "candidate_id": result["candidate_id"], **regime}
-            for result in completed
-            for regime in result["regime_scorecard"]
-        ]
+        regime_inputs = [f"stages/{row['stage']}/results/{row['job_id']}.json"
+                         for row in batch.results if row.get('status') == 'complete']
         distributions = distribution_stats(oos_rows)
         summary = {
             "crucible_run_id": cfg.crucible_run_id,
@@ -226,10 +232,10 @@ class CrucibleOrchestrator:
         artifacts = {
             "window_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_03}/summaries/window_summary.csv", rows_to_csv(window_rows)),
             "oos_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_03}/summaries/oos_summary.csv", rows_to_csv(oos_rows)),
-            "validation_regime_summary": self.state_store.write_artifact_text(
+            "validation_regime_inputs": self.state_store.write_artifact_json(
                 cfg.crucible_run_id,
-                f"{STAGE_03}/summaries/validation_regime_summary.csv",
-                rows_to_csv(regime_rows),
+                f"{STAGE_03}/regime_inputs.json",
+                regime_inputs,
             ),
             "oos_distribution_chart": self.state_store.write_artifact_text(
                 cfg.crucible_run_id,
@@ -258,6 +264,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed walk-forward OOS stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_hpo_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -298,6 +305,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed HPO stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_regime_gate_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -306,11 +314,32 @@ class CrucibleOrchestrator:
         run_dir = Path(run["run_dir"])
         oos_path = _existing_path(run_dir, f"{STAGE_03}/summaries/oos_summary.csv", "summaries/oos_summary.csv")
         regime_path = _existing_path(run_dir, f"{STAGE_03}/summaries/validation_regime_summary.csv", "summaries/validation_regime_summary.csv")
-        if not oos_path.exists() or not regime_path.exists():
-            raise FileNotFoundError("run_walk_forward_oos must produce OOS and regime summaries before regime gates can run")
-
+        deferred = self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_03}/regime_inputs.json")
+        if not oos_path.exists() or (deferred is None and not regime_path.exists()):
+            raise FileNotFoundError("Walk-forward OOS and regime inputs are required before regime evaluation")
         overall_rows = pd.read_csv(oos_path).to_dict(orient="records")
-        regime_rows = pd.read_csv(regime_path).to_dict(orient="records")
+        regime_rows = []
+        if deferred is not None:
+            for index, result_path in enumerate(deferred):
+                item = self.state_store.read_artifact_json(cfg.crucible_run_id, result_path)['result']
+                emit('regime_windows', 'Scoring validation regimes', index, len(deferred))
+                regime_rows.extend({"candidate_id": item['candidate_id'], "window_id": item['window_id'], **row}
+                                   for row in score(item['regime_inputs']))
+            emit('regime_windows', 'Validation regime scoring completed', len(deferred), len(deferred))
+        else:
+            regime_rows = pd.read_csv(regime_path).to_dict(orient="records")
+        # QC restores the separate baseline namespace alongside the main run.
+        for path in run_dir.parent.glob(f'*/{STAGE_01}/regime_inputs.json'):
+            inputs = json.loads(path.read_text(encoding='utf-8'))
+            if inputs.get('run_name') not in (cfg.run_name, cfg.run_name + '-baseline'):
+                continue
+            emit('baseline_regimes', 'Scoring deferred baseline regimes')
+            baseline_rows = score(inputs)
+            self.state_store.write_artifact_text(cfg.crucible_run_id,
+                f'{STAGE_05}/summaries/baseline_regime_summary.csv', rows_to_csv(baseline_rows))
+        self.state_store.write_artifact_text(cfg.crucible_run_id,
+            f'{STAGE_05}/summaries/validation_regime_summary.csv', rows_to_csv(regime_rows))
+        emit('regime_gates', 'Evaluating regime gates')
         decisions = evaluate_regime_aware_gates(overall_rows, regime_rows, cfg.platform)
         decision_rows = [decision.to_row() for decision in decisions]
         metrics = gate_summary_metrics(decisions)
@@ -344,6 +373,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed regime gate stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_plateau_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -454,6 +484,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed plateau stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_perturbation_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -567,6 +598,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed perturbation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_cross_instrument_transfer_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -662,6 +694,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed cross-instrument transfer stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_structural_break_stability_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -713,6 +746,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed structural-break stability stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_execution_realism_stress_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -764,6 +798,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed execution-realism stress stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_monte_carlo_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
@@ -807,6 +842,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed Monte Carlo stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_confirmation_stage(
         self,
         rerun: bool = False,
@@ -914,6 +950,7 @@ class CrucibleOrchestrator:
         logger.info(f"Completed confirmation stage for {cfg.crucible_run_id}: {json.dumps(summary, sort_keys=True)}")
         return manifest
 
+    @stage
     def run_paper_replay_stage(self, rerun: bool = False) -> dict[str, Any]:
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=True)

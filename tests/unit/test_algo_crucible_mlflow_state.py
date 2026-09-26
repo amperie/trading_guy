@@ -70,7 +70,7 @@ def test_mlflow_state_store_logs_parent_run_and_artifacts(tmp_path: Path):
         in artifacts
     )
     assert "stages/01_single_candidate/summaries/candidate_summary.csv" in artifacts
-    assert "stages/01_single_candidate/summaries/regime_summary.csv" in artifacts
+    assert "stages/01_single_candidate/regime_inputs.json" in artifacts
     provenance = json.loads(
         (Path(result["run_dir"]) / "provenance" / "provenance_manifest.json").read_text(
             encoding="utf-8"

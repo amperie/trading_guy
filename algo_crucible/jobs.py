@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import traceback
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -132,8 +133,11 @@ class RayJobRunner:
 
 def _run_one(job: CrucibleJob, worker) -> dict[str, Any]:
     started = time.time()
+    log = logging.getLogger('algo_crucible.execution')
+    log.info('Job starting stage=%s job=%s kind=%s', job.stage, job.job_id, job.kind)
     try:
         payload = worker(job.payload)
+        log.info('Job completed stage=%s job=%s elapsed_seconds=%.3f', job.stage, job.job_id, time.time()-started)
         return {
             "job_id": job.job_id,
             "stage": job.stage,
@@ -143,6 +147,7 @@ def _run_one(job: CrucibleJob, worker) -> dict[str, Any]:
             "result": payload,
         }
     except Exception as exc:
+        log.exception('Job failed stage=%s job=%s elapsed_seconds=%.3f', job.stage, job.job_id, time.time()-started)
         return {
             "job_id": job.job_id,
             "stage": job.stage,
