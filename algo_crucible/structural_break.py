@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import math
+from itertools import accumulate
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from pandas.errors import EmptyDataError
+from algo_crucible.progress import emit
 
 
 def load_structural_break_inputs(run_dir: str | Path) -> list[dict[str, Any]]:
@@ -143,6 +145,8 @@ def _analyze_rolling_ic(rows: list[dict[str, Any]], cfg: dict[str, Any]) -> dict
 
 def _rolling_ic_rows(candidate_id: str, group: list[dict[str, Any]], window: int) -> list[dict[str, Any]]:
     rows = []
+    total = max(0, len(group) - window + 1)
+    emit('rolling_ic', f'Calculating rolling IC candidate={candidate_id} window={window}', 0, total)
     for end in range(window, len(group) + 1):
         chunk = group[end - window : end]
         rows.append({
@@ -156,6 +160,8 @@ def _rolling_ic_rows(candidate_id: str, group: list[dict[str, Any]], window: int
             "observation_count": len(chunk),
             "ic": _corr([row["signal"] for row in chunk], [row["forward_return_pct"] for row in chunk]),
         })
+        if len(rows) % 10000 == 0 or len(rows) == total:
+            emit('rolling_ic', f'Calculating rolling IC candidate={candidate_id} window={window}', len(rows), total)
     return rows
 
 
@@ -163,12 +169,19 @@ def _worst_ic_break(values: list[float]) -> dict[str, Any]:
     if len(values) < 2:
         return {"break_after_ic_window": None, "post_break_ic_mean": values[0] if values else None, "ic_degradation": 0.0}
     worst: dict[str, Any] = {"ic_degradation": -float("inf")}
+    # Compute suffixes once; slicing and summing both sides per split was O(n²).
+    suffix = list(accumulate(reversed(values)))
+    prefix = 0.0
+    emit('ic_break', 'Scanning structural break points', 0, len(values) - 1)
     for idx in range(1, len(values)):
-        pre_mean = sum(values[:idx]) / idx
-        post_mean = sum(values[idx:]) / len(values[idx:])
+        prefix += values[idx - 1]
+        pre_mean = prefix / idx
+        post_mean = suffix[len(values) - idx - 1] / (len(values) - idx)
         degradation = max(0.0, pre_mean - post_mean)
         if degradation > worst["ic_degradation"]:
             worst = {"break_after_ic_window": idx, "post_break_ic_mean": post_mean, "ic_degradation": degradation}
+        if idx % 10000 == 0 or idx == len(values) - 1:
+            emit('ic_break', 'Scanning structural break points', idx, len(values) - 1)
     return worst
 
 
@@ -195,11 +208,17 @@ def _worst_break(segments: list[dict[str, Any]]) -> dict[str, Any]:
     if len(segments) < 2:
         return {"break_after_segment": None, "post_mean_return_pct": segments[0]["mean_return_pct"] if segments else None, "mean_degradation_pct": 0.0}
     worst: dict[str, Any] = {"mean_degradation_pct": -float("inf")}
+    counts = list(accumulate(int(row['observation_count']) for row in reversed(segments)))
+    weighted = list(accumulate(float(row['mean_return_pct']) * int(row['observation_count']) for row in reversed(segments)))
+    pre_count, pre_sum = 0, 0.0
+    emit('return_break', 'Scanning return concentration break points', 0, len(segments) - 1)
     for idx in range(1, len(segments)):
-        pre = segments[:idx]
-        post = segments[idx:]
-        pre_mean = _weighted_mean(pre)
-        post_mean = _weighted_mean(post)
+        row = segments[idx - 1]
+        pre_count += int(row['observation_count'])
+        pre_sum += float(row['mean_return_pct']) * int(row['observation_count'])
+        remaining = len(segments) - idx - 1
+        pre_mean = pre_sum / pre_count if pre_count else 0.0
+        post_mean = weighted[remaining] / counts[remaining] if counts[remaining] else 0.0
         degradation = max(0.0, pre_mean - post_mean)
         if degradation > worst["mean_degradation_pct"]:
             worst = {
@@ -207,6 +226,8 @@ def _worst_break(segments: list[dict[str, Any]]) -> dict[str, Any]:
                 "post_mean_return_pct": post_mean,
                 "mean_degradation_pct": degradation,
             }
+        if idx % 10000 == 0 or idx == len(segments) - 1:
+            emit('return_break', 'Scanning return concentration break points', idx, len(segments) - 1)
     return worst
 
 

@@ -1,12 +1,53 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
+import random
 
 from algo_crucible.orchestrator import CrucibleOrchestrator
 from algo_crucible.scoring import rows_to_csv
 from algo_crucible.structural_break import analyze_structural_breaks, structural_break_metrics
 from tests.unit.test_algo_crucible_milestone1 import _write_yaml
 from tests.unit.test_algo_crucible_walk_forward_oos import _write_daily_data
+
+
+@pytest.mark.parametrize('values', [[], [0.1], [0.0] * 50, [0.5] * 20 + [-0.5] * 20,
+    [random.Random(seed).uniform(-1, 1) for seed in range(1000)]])
+def test_linear_break_scan_matches_reference(values):
+    from algo_crucible.structural_break import _worst_ic_break
+    if len(values) < 2:
+        expected = dict(break_after_ic_window=None, post_break_ic_mean=values[0] if values else None, ic_degradation=0.0)
+    else:
+        rows = [dict(break_after_ic_window=i, post_break_ic_mean=sum(values[i:]) / (len(values)-i),
+            ic_degradation=max(0.0, sum(values[:i])/i-sum(values[i:])/(len(values)-i)))
+            for i in range(1, len(values))]
+        expected = max(rows, key=lambda row: row['ic_degradation'])
+    actual = _worst_ic_break(values)
+    assert actual['break_after_ic_window'] == expected['break_after_ic_window']
+    assert actual['post_break_ic_mean'] == pytest.approx(expected['post_break_ic_mean'])
+    assert actual['ic_degradation'] == pytest.approx(expected['ic_degradation'])
+
+
+def test_break_scan_does_not_slice_history():
+    from algo_crucible.structural_break import _worst_ic_break
+    class NoSlices(list):
+        def __getitem__(self, index):
+            assert not isinstance(index, slice), 'Repeated history slices make this scan quadratic'
+            return super().__getitem__(index)
+    result = _worst_ic_break(NoSlices([0.5] * 50000 + [-0.5] * 50000))
+    assert result['break_after_ic_window'] == 50000
+    assert result['ic_degradation'] == 1.0
+
+
+def test_weighted_break_scan_matches_reference_with_partial_segment():
+    from algo_crucible.structural_break import _worst_break, _weighted_mean
+    segments = [dict(segment=i+1, observation_count=3 if i == 99 else 10,
+        mean_return_pct=random.Random(i).uniform(-1, 1)) for i in range(100)]
+    expected = max([dict(break_after_segment=segments[i-1]['segment'],
+        post_mean_return_pct=_weighted_mean(segments[i:]),
+        mean_degradation_pct=max(0, _weighted_mean(segments[:i]) - _weighted_mean(segments[i:])))
+        for i in range(1, len(segments))], key=lambda row: row['mean_degradation_pct'])
+    assert _worst_break(segments) == pytest.approx(expected)
 
 
 def test_structural_break_rejects_concentrated_edge():
