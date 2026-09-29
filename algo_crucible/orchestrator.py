@@ -495,6 +495,7 @@ class CrucibleOrchestrator:
 
     @stage
     def run_perturbation_stage(self, rerun: bool = False, use_ray: bool | None = None) -> dict[str, Any]:
+        from algo_crucible.perturbation_batch import bounded_plan, write_streams
         cfg = self.resolved_cfg
         run = self.state_store.start_or_resume(cfg, rerun=rerun)
         if self.state_store.read_artifact_json(cfg.crucible_run_id, f"{STAGE_07}/summaries/stage_summary.json") and not rerun:
@@ -545,6 +546,11 @@ class CrucibleOrchestrator:
                         "window": window,
                         "workload": workload,
                     }))
+        options = cfg.platform.get('perturbations', {})
+        jobs, plan = bounded_plan(jobs, min(2500, int(options.get('max_jobs', 2500))),
+            max(int(options.get('min_windows', 1)), int(options.get('min_regime_windows', 1))))
+        self.state_store.write_artifact_json(cfg.crucible_run_id, f'{STAGE_07}/summaries/evaluation_plan.json', plan)
+        emit('perturbation_plan', f"Selected {len(jobs)} of {plan['planned_jobs']} perturbation evaluations", 0, len(jobs))
         logger.info(
             f"Perturbation validation windows run_id={cfg.crucible_run_id} "
             f"windows={len(windows)} jobs={len(jobs)}"
@@ -560,6 +566,7 @@ class CrucibleOrchestrator:
             jobs=jobs,
             worker=run_validation_backtest,
             state_store=self.state_store,
+            compact_results=True,
             rerun_failed_jobs=bool(cfg.platform.get("resume", {}).get("rerun_failed_jobs", True)),
         )
         scored = summarize_perturbations(
@@ -569,13 +576,13 @@ class CrucibleOrchestrator:
             platform=cfg.platform,
         )
         metrics = perturbation_metrics(scored["summary_rows"], batch.jobs_total, batch.jobs_complete, batch.jobs_failed)
+        metrics.update({'perturbation.planned_jobs': plan['planned_jobs'], 'perturbation.omitted_jobs': plan['omitted_jobs']})
         accepted_candidate_ids = {
             str(row.get("candidate_id"))
             for row in scored["summary_rows"]
             if row.get("accepted") is True
         }
-        stream_rows = return_stream_rows(batch.results, accepted_candidate_ids)
-        signal_rows = signal_forward_return_rows(batch.results, accepted_candidate_ids)
+        stream_artifacts = write_streams(self.state_store, cfg.crucible_run_id, run_dir, batch.results, accepted_candidate_ids)
         summary = {
             "crucible_run_id": cfg.crucible_run_id,
             "run_name": cfg.run_name,
@@ -588,8 +595,7 @@ class CrucibleOrchestrator:
             "perturbation_scenarios": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_scenarios.csv", rows_to_csv(scenario_rows)),
             "perturbation_scenario_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_scenario_summary.csv", rows_to_csv(scored["scenario_rows"])),
             "perturbation_summary": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_summary.csv", rows_to_csv(scored["summary_rows"])),
-            "perturbation_return_stream": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_return_stream.csv", rows_to_csv(stream_rows)),
-            "perturbation_signal_forward_returns": self.state_store.write_artifact_text(cfg.crucible_run_id, f"{STAGE_07}/summaries/perturbation_signal_forward_returns.csv", rows_to_csv(signal_rows)),
+            **stream_artifacts,
             "stage_summary": self.state_store.write_artifact_json(cfg.crucible_run_id, f"{STAGE_07}/summaries/stage_summary.json", summary),
         }
         manifest = self.state_store.update_run(cfg.crucible_run_id, {

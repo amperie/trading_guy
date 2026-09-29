@@ -81,6 +81,7 @@ cross_instrument_transfer:
   instruments: []
 
 perturbations:
+  max_jobs: 2500
   max_scenarios: 20
   max_required_failures: 0
   min_scenario_pass_rate: 0.80

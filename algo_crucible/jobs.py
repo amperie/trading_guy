@@ -60,14 +60,23 @@ class RayJobRunner:
         worker: Callable[[dict[str, Any]], dict[str, Any]],
         state_store,
         rerun_failed_jobs: bool = True,
+        compact_results: bool = False,
     ) -> JobBatchResult:
         resolved = [job.resolved() for job in jobs]
         pending: list[CrucibleJob] = []
         reused: list[dict[str, Any]] = []
+        def compact(row):
+            if not compact_results or row.get('status') != 'complete':
+                return row
+            return dict(row, result={k: v for k, v in row['result'].items()
+                if k not in {'return_stream', 'signal_forward_return_stream', 'regime_inputs'}})
+        def persist(row):
+            state_store.write_artifact_json(run_id, _result_path_from_dict(row), row)
+            return compact(row)
         for job in resolved:
             existing = state_store.read_artifact_json(run_id, _result_path(job))
             if existing and (existing.get("status") == "complete" or not rerun_failed_jobs):
-                reused.append(existing)
+                reused.append(compact(existing))
                 continue
             state_store.write_artifact_json(run_id, _manifest_path(job), job.manifest())
             pending.append(job)
@@ -76,9 +85,16 @@ class RayJobRunner:
             f"Running crucible jobs stage={resolved[0].stage if resolved else 'n/a'} "
             f"total={len(resolved)} reused={len(reused)} pending={len(pending)}"
         )
-        fresh = self._run_ray(pending, worker) if self.use_ray and pending else self._run_local(pending, worker)
-        for result in fresh:
-            state_store.write_artifact_json(run_id, _result_path_from_dict(result), result)
+        if compact_results:
+            self._result_sink = persist
+        try:
+            fresh = self._run_ray(pending, worker) if self.use_ray and pending else self._run_local(pending, worker)
+        finally:
+            if compact_results:
+                del self._result_sink
+        if not compact_results:
+            for result in fresh:
+                state_store.write_artifact_json(run_id, _result_path_from_dict(result), result)
         results = sorted([*reused, *fresh], key=lambda row: row["job_id"])
         failed = [row for row in results if row.get("status") == "failed"]
         logger.info(
@@ -100,7 +116,8 @@ class RayJobRunner:
         )
 
     def _run_local(self, jobs: list[CrucibleJob], worker) -> list[dict[str, Any]]:
-        return [_run_one(job, worker) for job in jobs]
+        sink = getattr(self, '_result_sink', lambda row: row)
+        return [sink(_run_one(job, worker)) for job in jobs]
 
     def _run_ray(self, jobs: list[CrucibleJob], worker) -> list[dict[str, Any]]:
         import ray
@@ -126,7 +143,7 @@ class RayJobRunner:
             ready_refs, _ = ray.wait(list(pending), num_returns=1)
             for ref, result in zip(ready_refs, ray.get(ready_refs), strict=True):
                 pending.pop(ref, None)
-                results.append(result)
+                results.append(getattr(self, '_result_sink', lambda row: row)(result))
             submit_until_full()
         return results
 
