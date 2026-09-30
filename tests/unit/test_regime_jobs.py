@@ -35,6 +35,8 @@ def test_ray_matches_serial_and_reuses_completed_windows(tmp_path, monkeypatch):
             raise AssertionError('Cached window was recomputed')
         monkeypatch.setattr('algo_crucible.regime_jobs.score_window', forbidden)
         assert run_windows(sources, store, 'parallel', use_ray=False) == serial
+        monkeypatch.setattr('algo_crucible.regime_jobs.admission_factory', forbidden)
+        assert run_windows(sources, store, 'parallel', use_ray=True) == serial
         monkeypatch.undo()
         invalid = tmp_path/'invalid.json'
         invalid.write_text(json.dumps(dict(result=dict(regime_inputs={}, candidate_id='candidate', window_id='broken'))))

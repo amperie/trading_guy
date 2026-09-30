@@ -17,6 +17,11 @@ separate always-running Trading Guy API. QC's execution workspace has live submi
 progress, result collections and screening presets alongside explicit fixture mode.
 Structural analysis partitions evidence by candidate; providers support reusable source
 loading; progress/result callbacks expose incremental evidence to the QC bridge.
+QC can install a driver admission policy for regime windows and candidate batches, using worker
+memory peaks and explicit Ray memory reservations. HPO accepts `trial_memory_bytes` for a fixed
+per-trial reservation. Standalone engine defaults remain unchanged; deploy both repositories for
+the managed memory policy and live scheduling telemetry. Ray reservations are scheduling hints,
+not hard per-task memory limits.
 Local/container checks do not
 establish live AWS deployment, real observed-paper replay or complete browser acceptance.
 Research promotion does not activate a broker or live trading.

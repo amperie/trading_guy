@@ -822,6 +822,7 @@ def tune_backtest_hyperparameters(
     warmup_data_provider_config: dict | None = None,
     ray_storage_path: str | None = None,
     seed: int | None = None,
+    trial_memory_bytes: int | None = None,
 ) -> dict | tuple[dict, list[dict]]:
     """
     Generic hyperparameter optimization using Ray Tune with Optuna.
@@ -908,7 +909,8 @@ def tune_backtest_hyperparameters(
         optuna_search = OptunaSearch(**optuna_search_kwargs)
 
         tuner = tune.Tuner(
-            trainable_with_params,
+            tune.with_resources(trainable_with_params, {"cpu": 1, "memory": trial_memory_bytes})
+            if trial_memory_bytes is not None else trainable_with_params,
             param_space=search_space,
             run_config=air.RunConfig(
                 name="hpo",

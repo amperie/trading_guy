@@ -8,6 +8,7 @@ from . import progress
 from .regime_inputs import score
 
 log = logging.getLogger(__name__)
+admission_factory = None  # Optional host policy; standalone engine behavior stays unchanged.
 
 
 class WindowProgress:
@@ -51,9 +52,25 @@ def run_windows(sources, store, run_id, *, use_ray=True, max_concurrent_jobs=2):
         raise ValueError('regime_gate.max_concurrent_jobs must be positive')
     limit = max_concurrent_jobs
     pending, results, states = {}, {}, {}
-    queue = iter(enumerate(sources))
+    fresh = []
+    for index, source in enumerate(sources):
+        digest = hashlib.sha256()
+        with source['path'].open('rb') as stream:
+            for block in iter(lambda: stream.read(1024**2), b''):
+                digest.update(block)
+        digest.update(str(source['baseline']).encode())
+        destination = f'stages/05_regime_gate/results/{digest.hexdigest()}.json'
+        cached = store.read_artifact_json(run_id, destination)
+        if cached is not None:
+            results[index] = cached
+            progress.result('regime_windows', dict(cached, reused=True))
+        else:
+            fresh.append((index, source, destination))
+        progress.emit('regime_preparing', 'Checking completed regime windows', index+1, len(sources))
+    queue = iter(fresh)
     ray = sink = remote = None
-    if use_ray and sources:
+    admission = admission_factory() if use_ray and fresh and admission_factory else None
+    if use_ray and fresh:
         import ray
         if not ray.is_initialized():
             ray.init(include_dashboard=False, log_to_driver=False)
@@ -65,29 +82,24 @@ def run_windows(sources, store, run_id, *, use_ray=True, max_concurrent_jobs=2):
         details = '; '.join(f'{key}: {value["completed"]}/{value["total"]} observations'
             for key, value in states.items() if value.get('total') is not None)
         message = f'Regime windows: {len(results)}/{len(sources)} completed, {len(pending)} in flight, {len(states)} active workers, {failed} failed'
+        if admission:
+            message += '; ' + admission.message
         progress.emit('regime_windows', message + (f'; {details}' if details else ''), len(results), len(sources))
 
     try:
         exhausted = False
         emit()
-        while not exhausted or pending:
+        while len(results) < len(sources):
+            if admission and not exhausted:
+                limit = admission.limit(max_concurrent_jobs, len(pending))
             while not exhausted and len(pending) < limit:
                 try:
-                    index, source = next(queue)
+                    index, source, destination = next(queue)
                 except StopIteration:
                     exhausted = True
                     break
-                raw = source['path'].read_bytes()
-                key = hashlib.sha256(raw + str(source['baseline']).encode()).hexdigest()
-                destination = f'stages/05_regime_gate/results/{key}.json'
-                cached = store.read_artifact_json(run_id, destination)
-                if cached is not None:
-                    results[index] = cached
-                    progress.result('regime_windows', dict(cached, reused=True))
-                    emit()
-                    continue
-                value = json.loads(raw)
-                del raw
+                with source['path'].open(encoding='utf-8') as stream:
+                    value = json.load(stream)
                 item = dict(inputs=value, baseline=True) if source['baseline'] else dict(
                     inputs=value['result']['regime_inputs'], baseline=False,
                     candidate_id=value['result']['candidate_id'], window_id=value['result']['window_id'])
@@ -98,8 +110,9 @@ def run_windows(sources, store, run_id, *, use_ray=True, max_concurrent_jobs=2):
                     results[index] = result
                     progress.result('regime_windows', result)
                 else:
-                    ref = remote.remote(item, label, sink)
+                    ref = admission.submit(ray, score_window, item, label, sink) if admission else remote.remote(item, label, sink)
                     pending[ref] = (index, destination, label)
+                    del item, value
                 emit()
             if not pending:
                 continue
@@ -109,6 +122,8 @@ def run_windows(sources, store, run_id, *, use_ray=True, max_concurrent_jobs=2):
                 index, destination, label = pending[ref]
                 try:
                     result = ray.get(ref)
+                    if admission:
+                        result = admission.finish(result)
                 except Exception as exc:
                     emit(failed=1)
                     raise RuntimeError(f'Regime window {label} failed') from exc
