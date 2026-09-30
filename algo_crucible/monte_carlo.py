@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 from pandas.errors import EmptyDataError
+from algo_crucible.progress import SummaryRows
 
 
 def return_stream_rows(job_results: list[dict[str, Any]], accepted_candidate_ids: set[str]) -> list[dict[str, Any]]:
@@ -77,7 +78,7 @@ def simulate_monte_carlo(rows: list[dict[str, Any]], platform: dict[str, Any]) -
     min_p5_terminal_return_pct = float(cfg.get("min_p5_terminal_return_pct", -25.0))
     max_p95_drawdown_pct = abs(float(cfg.get("max_p95_drawdown_pct", 35.0)))
 
-    summary_rows = []
+    summary_rows = SummaryRows()
     band_rows = []
     terminal_rows = []
     grouped = _group_returns(rows)

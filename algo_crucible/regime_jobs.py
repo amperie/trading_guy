@@ -83,6 +83,7 @@ def run_windows(sources, store, run_id, *, use_ray=True, max_concurrent_jobs=2):
                 cached = store.read_artifact_json(run_id, destination)
                 if cached is not None:
                     results[index] = cached
+                    progress.result('regime_windows', dict(cached, reused=True))
                     emit()
                     continue
                 value = json.loads(raw)
@@ -95,6 +96,7 @@ def run_windows(sources, store, run_id, *, use_ray=True, max_concurrent_jobs=2):
                     result = score_window(item, label)
                     store.write_artifact_json(run_id, destination, result)
                     results[index] = result
+                    progress.result('regime_windows', result)
                 else:
                     ref = remote.remote(item, label, sink)
                     pending[ref] = (index, destination, label)
@@ -112,6 +114,7 @@ def run_windows(sources, store, run_id, *, use_ray=True, max_concurrent_jobs=2):
                     raise RuntimeError(f'Regime window {label} failed') from exc
                 store.write_artifact_json(run_id, destination, result)
                 results[index] = result
+                progress.result('regime_windows', result)
                 pending.pop(ref)
             active = {item[2] for item in pending.values()}
             states = {key: value for key, value in states.items() if key in active}

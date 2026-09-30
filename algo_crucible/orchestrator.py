@@ -185,6 +185,7 @@ class CrucibleOrchestrator:
             embargo_days=int(wf_cfg.get("embargo_days", 0)),
             step_days=wf_cfg.get("step_days"),
             min_windows=int(wf_cfg.get("min_windows", 1)),
+            max_windows=wf_cfg.get("max_windows"),
         )
         window_rows = windows_to_rows(windows)
         jobs = [
@@ -410,6 +411,7 @@ class CrucibleOrchestrator:
             embargo_days=int(wf_cfg.get("embargo_days", 0)),
             step_days=wf_cfg.get("step_days"),
             min_windows=int(wf_cfg.get("min_windows", 1)),
+            max_windows=wf_cfg.get("max_windows"),
         )
         window_rows = windows_to_rows(windows)
         logger.info(
@@ -521,6 +523,7 @@ class CrucibleOrchestrator:
             embargo_days=int(wf_cfg.get("embargo_days", 0)),
             step_days=wf_cfg.get("step_days"),
             min_windows=int(wf_cfg.get("min_windows", 1)),
+            max_windows=wf_cfg.get("max_windows"),
         ))
         jobs = []
         scenario_rows = []
@@ -717,8 +720,9 @@ class CrucibleOrchestrator:
             return run
         run_dir = Path(run["run_dir"])
         logger.info(f"Starting structural-break stability stage for {cfg.crucible_run_id}")
-        input_rows = load_structural_break_inputs(run_dir)
-        analyzed = analyze_structural_breaks(input_rows, cfg.platform)
+        from algo_crucible.structural_stream import analyze_file
+        from algo_crucible.progress import result as partial_result
+        analyzed = analyze_file(run_dir, cfg.platform, lambda row: partial_result('candidate_summary', row))
         summary_rows = analyzed["summary_rows"]
         metrics = structural_break_metrics(summary_rows)
         summary = {
@@ -727,14 +731,10 @@ class CrucibleOrchestrator:
             "candidate_count": len(summary_rows),
             "accepted_candidates": int(metrics["structural_break.accepted_candidates"]),
             "rejected_candidates": int(metrics["structural_break.rejected_candidates"]),
-            "input_return_observations": len(input_rows),
+            "input_return_observations": analyzed['observation_count'],
         }
         artifacts = {
-            "structural_break_windows": self.state_store.write_artifact_text(
-                cfg.crucible_run_id,
-                f"{STAGE_SB}/summaries/structural_break_windows.csv",
-                rows_to_csv(analyzed["window_rows"]),
-            ),
+            "structural_break_windows": analyzed["windows_path"],
             "structural_break_summary": self.state_store.write_artifact_text(
                 cfg.crucible_run_id,
                 f"{STAGE_SB}/summaries/structural_break_summary.csv",

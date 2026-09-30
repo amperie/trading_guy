@@ -5,6 +5,18 @@ from functools import wraps
 
 log = logging.getLogger(__name__)
 reporter = None
+result_reporter = None
+
+
+def result(collection, row):
+    if result_reporter:
+        result_reporter(collection, row)
+
+
+class SummaryRows(list):
+    def append(self, row):
+        super().append(row)
+        result('candidate_summary', row)
 
 
 def emit(phase, message, completed=None, total=None):

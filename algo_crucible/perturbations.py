@@ -42,7 +42,8 @@ def load_perturbation_candidates(run_dir: str | Path, resolved_cfg) -> list[dict
             "candidate_type": accepted[candidate_id].get("candidate_type", "generalist"),
             "specialist_regimes": accepted[candidate_id].get("specialist_regimes", ""),
         })
-    return candidates
+    cap = resolved_cfg.platform.get('perturbations', {}).get('max_candidates')
+    return candidates if cap is None else sorted(candidates, key=lambda row: row['candidate'].candidate_id)[:max(1, int(cap))]
 
 
 def build_perturbation_scenarios(platform: dict[str, Any], *, data_start: Any = None, data_end: Any = None) -> list[dict[str, Any]]:

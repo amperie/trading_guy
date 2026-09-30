@@ -13,13 +13,17 @@ Execution requires a reviewed engine configuration for the exact strategy conten
 and a pinned source release; saved/generated Python is not automatically runnable.
 
 Managed QC deployment installs this runtime and executes it on demand. There is no
-separate always-running Trading Guy API. QC authoring pages now have live integration,
-but its execution workspace still uses fixture runs. Local/container checks do not
+separate always-running Trading Guy API. QC's execution workspace has live submission,
+progress, result collections and screening presets alongside explicit fixture mode.
+Structural analysis partitions evidence by candidate; providers support reusable source
+loading; progress/result callbacks expose incremental evidence to the QC bridge.
+Local/container checks do not
 establish live AWS deployment, real observed-paper replay or complete browser acceptance.
 Research promotion does not activate a broker or live trading.
 
 See the sibling [QC status](../qc/specs/current-state.md),
 [execution contract](../qc/specs/execution-workflows.md) and
+[small-run/live-evidence policy](../qc/specs/small-runs-and-live-results.md), plus the
 [deployment guide](../qc/specs/stack-deployment.md) for current platform behavior.
 These references require the companion QC checkout.
 

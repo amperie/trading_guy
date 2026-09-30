@@ -1,4 +1,5 @@
 from __future__ import annotations
+from algo_crucible.progress import SummaryRows
 
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,7 @@ def analyze_execution_realism(rows: list[dict[str, Any]], platform: dict[str, An
     max_degradation = float(cfg.get("max_total_return_degradation_pct", 50.0))
     scenarios = build_execution_realism_scenarios(platform)
     scenario_rows = []
-    summary_rows = []
+    summary_rows = SummaryRows()
     grouped = _group_returns(rows)
     for candidate_id, returns in grouped.items():
         baseline_stats = _stats(returns)

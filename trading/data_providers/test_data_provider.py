@@ -11,6 +11,9 @@ logger = Logger().get_logger(__name__)
 
 class TestDataProvider(DataProvider):
 
+    def _read_source(self, path, truncate):
+        return pd.read_csv(path, nrows=truncate if truncate > 0 else None)
+
     def __init__(self, cfg: dict=None):
         super().__init__(cfg)
         self.load_data()
@@ -28,10 +31,7 @@ class TestDataProvider(DataProvider):
             project_root = Path(__file__).parent.parent
             fp_path = project_root / fp
 
-        if tr>0:
-            df = pd.read_csv(fp_path, nrows=tr)
-        else:
-            df = pd.read_csv(fp_path)
+        df = self._read_source(fp_path, tr)
 
         # Robust timezone handling: detect and convert to EST
         normalized_timestamps, valid_mask = self._normalize_timestamps_to_est(df['timestamp'])

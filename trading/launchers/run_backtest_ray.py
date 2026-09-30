@@ -821,6 +821,7 @@ def tune_backtest_hyperparameters(
     return_trial_summaries: bool = False,
     warmup_data_provider_config: dict | None = None,
     ray_storage_path: str | None = None,
+    seed: int | None = None,
 ) -> dict | tuple[dict, list[dict]]:
     """
     Generic hyperparameter optimization using Ray Tune with Optuna.
@@ -899,6 +900,8 @@ def tune_backtest_hyperparameters(
             "metric": "_metric",
             "mode": "max",
         }
+        if seed is not None:
+            optuna_search_kwargs['seed'] = seed
         if seeded_trial_config:
             logger.info("Seeding first HPO trial with current config values: %s", seeded_trial_config)
             optuna_search_kwargs["points_to_evaluate"] = [seeded_trial_config]

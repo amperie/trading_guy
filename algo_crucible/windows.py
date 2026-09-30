@@ -31,6 +31,7 @@ def generate_walk_forward_windows(
     embargo_days: int,
     step_days: int | None = None,
     min_windows: int = 1,
+    max_windows: int | None = None,
 ) -> list[CrucibleWindow]:
     data_start = _to_dt(data_start)
     data_end = _to_dt(data_end)
@@ -71,6 +72,12 @@ def generate_walk_forward_windows(
     if len(windows) < min_windows:
         raise ValueError(f"Only {len(windows)} walk-forward windows generated; min_windows={min_windows}")
     validate_no_leakage(windows, embargo_days=embargo_days)
+    if max_windows is not None:
+        if max_windows < max(1, min_windows):
+            raise ValueError('Window cap cannot be smaller than required minimum coverage')
+        if len(windows) > max_windows:
+            indices = [(len(windows)-1)//2] if max_windows == 1 else [i*(len(windows)-1)//(max_windows-1) for i in range(max_windows)]
+            windows = [windows[i] for i in indices]
     return windows
 
 
